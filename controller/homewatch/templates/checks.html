@@ -1,9 +1,11 @@
 {% extends "base.html" %}
+{% from "_note.html" import note with context %}
 {% block title %}Checks{% endblock %}
 {% block content %}
 <h1>Checks and thresholds</h1>
-<form method="post" action="/checks">
-<input type="hidden" name="csrf" value="{{ csrf }}">
+<form method="post" action="/checks" id="thresholds">
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="thresholds">
+{{ note("thresholds") }}
 {% for m, th in groups %}
 <h2>{{ m.name }}</h2>
 <input type="hidden" name="{{ m.id }}.present" value="1">
@@ -32,15 +34,16 @@
 <p><button>Save</button></p>
 </form>
 <h2>Snooze</h2>
-<div class="card">
+<div class="card" id="snooze">
+  {{ note("snooze") }}
   {% if snoozes %}<table>
     <tr><th>Check</th><th>Until</th><th>Reason</th><th>By</th><th></th></tr>
     {% for k, s in snoozes.items() %}<tr><td>{{ k }}</td><td>{{ s.until | ts }}</td><td>{{ s.reason }}</td><td>{{ s.created_by }}</td>
-      <td><form class="inline" method="post" action="/checks/unsnooze"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <td><form class="inline" method="post" action="/checks/unsnooze"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="snooze">
         <input type="hidden" name="check" value="{{ k }}"><button class="secondary">End</button></form></td></tr>{% endfor %}
   </table>{% else %}<p class="quiet">Nothing is snoozed.</p>{% endif %}
   <form method="post" action="/checks/snooze" class="row" style="margin-top:12px">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="snooze">
     <div><label for="sc">Check</label><select id="sc" name="check">{% for m, th in groups %}<optgroup label="{{ m.name }}">{% for d in m.checks %}<option value="{{ m.id }}.{{ d.id }}">{{ d.name }}</option>{% endfor %}</optgroup>{% endfor %}</select></div>
     <div><label for="sf">For</label><select id="sf" name="for"><option value="1h">1 hour</option><option value="4h">4 hours</option>
       <option value="24h">24 hours</option><option value="until">until…</option></select></div>

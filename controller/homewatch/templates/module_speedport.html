@@ -1,43 +1,68 @@
 {% extends "base.html" %}
-{% block title %}Speedport{% endblock %}
+{% from "_note.html" import note with context %}
+{% block title %}ISP modem{% endblock %}
 {% block content %}
 <h1><a href="/modules" class="quiet" style="text-decoration:none">Modules</a> › {{ module.name }}</h1>
 <p class="quiet">Reads the DSL line from your provider's modem: sync rate, attainable rate, SNR margin, attenuation,
 line uptime and resyncs. Values are only read, never changed.</p>
-<div class="card">
-  <b>{{ models[s.model].name }}</b>
-  <p class="quiet small" style="margin:4px 0 0">{{ models[s.model].about }}</p>
-</div>
-<div class="flash err" style="border-color:var(--warn);color:inherit">
-  <b>Before you switch it on:</b>
-  <ul style="margin:6px 0 0 18px;padding:0">
-    <li>The Speedport has only its admin login, so homewatch needs that password. It is stored encrypted and never shown again.</li>
-    <li>Each reading logs in, which ends any open browser session on the modem's web page. Keep the interval at 15 minutes or more.</li>
-    <li>After a rejected login the modem slows down further attempts, so homewatch waits 6 hours (or until you save new credentials).</li>
-    <li>The host running homewatch must be able to reach the modem's address. Behind a separate router or firewall this may need a rule there.</li>
-  </ul>
-</div>
-{% if not s.enabled %}<div class="flash err">The module is off: no scheduled readings and no checks. Tick "Module on" and save to start.</div>{% endif %}
-<form method="post" action="/modules/speedport" class="card">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if s.enabled }}> Module on</label>
+
+{% macro fields(s) %}
   <div class="row">
-    <div><label for="mm">Modem model</label><select id="mm" name="model">
-      {% for k, m in models.items() %}<option value="{{ k }}" {{ 'selected' if k == s.model }}>{{ m.name }}</option>{% endfor %}
-      <option disabled>More models coming</option></select></div>
     <div><label for="h">Modem address</label><input id="h" type="text" name="host" value="{{ s.host }}"></div>
     <div><label for="u">User name</label><input id="u" type="text" name="username" value="{{ s.username }}" autocomplete="off"></div>
     <div><label for="p">Password · {{ 'set' if has_password else 'not set' }}</label>
       <input id="p" type="password" name="password" placeholder="{{ 'leave empty to keep' if has_password else '' }}" autocomplete="new-password"></div>
     <div><label for="i">Read every (minutes)</label><input class="num" id="i" type="number" min="5" max="240" name="interval_min" value="{{ s.interval_min }}"></div>
   </div>
+{% endmacro %}
+
+{% if not configured %}
+<form method="post" action="/modules/speedport" class="card" id="settings">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="settings">
+  <input type="hidden" name="enabled" value="on">
+  <h2 style="margin-top:0">Add modem</h2>
+  {{ note("settings") }}
+  <label for="mm">Modem</label>
+  <select id="mm" name="model" data-model-select>
+    <option value="">Choose your modem…</option>
+    {% for k, m in models.items() %}<option value="{{ k }}">{{ m.name }}</option>{% endfor %}
+    <option disabled>More models coming</option>
+  </select>
+  {% for k, m in models.items() %}
+  <div data-model="{{ k }}" hidden>
+    <p class="quiet small">{{ m.about }}</p>
+    <div class="callout">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 3 2 21h20L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v5M12 18v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <div><b>Before you switch it on</b>
+        <ul>
+          <li>The modem has only its admin login, so homewatch needs that password. It is stored encrypted and never shown again.</li>
+          <li>Each reading logs in, which ends any open browser session on the modem's web page. Keep the interval at 15 minutes or more.</li>
+          <li>After a rejected login the modem slows down further attempts, so homewatch waits 6 hours (or until you save new credentials).</li>
+          <li>This host must be able to reach the modem's address. Behind a separate router or firewall that may need a rule there.</li>
+        </ul></div>
+    </div>
+    {{ fields(s) }}
+    <p><button>Add modem</button></p>
+  </div>
+  {% endfor %}
+</form>
+{% else %}
+<form method="post" action="/modules/speedport" class="card {{ 'off' if not s.enabled }}" id="settings">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="settings">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">{{ models[s.model].name }}</h2>
+    <label class="check"><input type="checkbox" name="enabled" data-enable-toggle {{ 'checked' if s.enabled }}> Enabled</label>
+  </div>
+  {{ note("settings") }}
+  <fieldset data-enable-target class="plain" {{ 'disabled' if not s.enabled }}>
+    <p class="quiet small">{{ models[s.model].about }}</p>
+    <div class="row"><div><label for="mm">Modem model</label><select id="mm" name="model">
+      {% for k, m in models.items() %}<option value="{{ k }}" {{ 'selected' if k == s.model }}>{{ m.name }}</option>{% endfor %}
+      <option disabled>More models coming</option></select></div></div>
+    {{ fields(s) }}
+  </fieldset>
   <p><button>Save</button></p>
 </form>
-<h2>Last reading</h2>
-<p class="row" style="align-items:center">
-  <button class="secondary" hx-post="/modules/speedport/read" hx-vals='{"csrf": "{{ csrf }}"}' hx-target="#reading"
-          hx-swap="outerHTML" hx-indicator="#read-spin" hx-disabled-elt="this" {{ 'disabled' if not has_password }}>Read the modem now</button>
-  <span id="read-spin" class="htmx-indicator quiet small"><span class="spin" aria-hidden="true"></span> Reading the modem…</span>
-</p>
-{% include "_speedport_reading.html" %}
+{% if s.enabled %}{% include "_speedport_reading.html" %}{% endif %}
+{% endif %}
 {% endblock %}

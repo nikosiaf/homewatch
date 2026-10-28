@@ -103,11 +103,12 @@ def test_thresholds_saved_and_audited(client):
 
 def test_speedport_module_settings(client):
     tok = setup_admin(client)
-    r = client.post("/modules/speedport", data={"csrf": tok, "enabled": "on", "host": "192.168.1.1",
-                                                "username": "admin", "interval_min": "15"})
+    r = client.post("/modules/speedport", data={"csrf": tok, "enabled": "on", "model": "speedport-plus-2",
+                                                "host": "192.168.1.1", "username": "admin", "interval_min": "15"})
     assert "Enter the modem password" in r.text
-    r = client.post("/modules/speedport", data={"csrf": tok, "enabled": "on", "host": "192.168.1.1",
-                                                "username": "admin", "password": "s3cret", "interval_min": "15"})
+    r = client.post("/modules/speedport", data={"csrf": tok, "enabled": "on", "model": "speedport-plus-2",
+                                                "host": "192.168.1.1", "username": "admin", "password": "s3cret",
+                                                "interval_min": "15"})
     assert "Saved" in r.text
     assert client.rt.secrets.get("module.speedport.password") == "s3cret"
     assert "s3cret" not in client.get("/modules/speedport").text
@@ -123,10 +124,12 @@ def test_pages_render(client):
         assert client.get(path).status_code == 200, path
 
 
-def test_menu_lists_modules_with_coming_soon(client):
+def test_modules_link_and_page(client):
     setup_admin(client)
     r = client.get("/")
-    assert 'href="/modules/internet"' in r.text and "Proxmox VE<small>coming soon</small>" in r.text
+    assert '<a href="/modules"' in r.text and "<details" not in r.text
+    r = client.get("/modules")
+    assert 'href="/modules/internet"' in r.text and "ISP modem" in r.text and "Coming soon" in r.text
 
 
 def test_check_now_reports_read_failure(client):
@@ -217,3 +220,46 @@ def test_modem_read_returns_partial(client):
     r = client.post("/modules/speedport/read", data={"csrf": tok}, headers={"HX-Request": "true"})
     assert 'id="reading"' in r.text and "No password set" in r.text
     assert "<html" not in r.text
+
+
+def test_message_lands_in_its_box(client):
+    tok = setup_admin(client)
+    r = client.post("/system/home", data={"csrf": tok, "_box": "home", "name": "H", "tz": "UTC"},
+                    follow_redirects=False)
+    assert r.headers["location"].endswith("&box=home#home") or "box=home" in r.headers["location"]
+    page = client.get(r.headers["location"].split("#")[0]).text
+    home_card = page[page.index('id="home"'):page.index('id="users"')]
+    assert "Saved" in home_card
+
+
+def test_weekly_report_ignores_disabled_channel(client):
+    tok = setup_admin(client)
+    client.post("/notifications/add", data={"csrf": tok, "kind": "ntfy", "ntfy.url": "https://ntfy.sh/t1"})
+    cid = client.rt.db.one("SELECT id FROM channels")["id"]
+    client.post("/notifications/report", data={"csrf": tok, "report_weekday": "0", "report_time": "08:00",
+                                               f"report.{cid}": "on"})
+    client.post(f"/notifications/{cid}", data={"csrf": tok, "name": "n", "url": "https://ntfy.sh/t1"})  # disable
+    page = client.get("/notifications").text
+    assert "(disabled)" in page
+    r = client.post("/notifications/report", data={"csrf": tok, "report_weekday": "0", "report_time": "08:00",
+                                                   "send_now": "1"})
+    assert "No enabled channel is ticked" in r.text
+
+
+def test_add_modem_flow(client):
+    tok = setup_admin(client)
+    page = client.get("/modules/speedport").text
+    assert "Add modem" in page and "Before you switch it on" in page and "Last reading" not in page
+    r = client.post("/modules/speedport", data={"csrf": tok, "enabled": "on", "model": "",
+                                                "host": "192.168.1.1", "username": "admin"})
+    assert "Choose your modem first" in r.text
+    client.post("/modules/speedport", data={"csrf": tok, "enabled": "on", "model": "speedport-plus-2",
+                                            "host": "192.168.1.1", "username": "admin", "password": "pw",
+                                            "interval_min": "15"})
+    page = client.get("/modules/speedport").text
+    assert "Add modem" not in page and "Last reading" in page and "data-enable-toggle" in page
+    # switched off with greyed (unsent) fields: settings are kept, reading hidden
+    client.post("/modules/speedport", data={"csrf": tok})
+    s = client.rt.db.get("module.speedport")
+    assert s["enabled"] is False and s["host"] == "192.168.1.1" and s["interval_min"] == 15
+    assert "Last reading" not in client.get("/modules/speedport").text

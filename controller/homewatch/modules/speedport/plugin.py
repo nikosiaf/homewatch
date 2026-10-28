@@ -107,9 +107,15 @@ class SpeedportModule(Module):
         return ""
 
     def page_ctx(self, rt) -> dict:
-        return {"st": self.state(rt), "has_password": rt.secrets.has(SECRET), "models": MODELS}
+        return {"st": self.state(rt), "has_password": rt.secrets.has(SECRET), "models": MODELS,
+                "configured": rt.db.get(KEY) is not None}
 
     def save(self, rt, form: dict, user) -> str:
+        old = self.load(rt)
+        # greyed-out fields (module off, no JavaScript) are not sent: keep what was there
+        form = {**{k: str(old[k]) for k in ("model", "host", "username", "interval_min")}, **form}
+        if not form.get("model"):
+            return "Choose your modem first"
         host = form.get("host", "").strip()
         if not valid_host(host):
             return "Modem address: an IP address or host name"

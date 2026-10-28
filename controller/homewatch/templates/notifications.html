@@ -1,14 +1,24 @@
 {% extends "base.html" %}
+{% from "_note.html" import note with context %}
 {% block title %}Notifications{% endblock %}
 {% block content %}
 <h1>Notifications</h1>
+
+<form method="post" action="/notifications/add" class="card" id="add">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="add">
+  <h2 style="margin-top:0">Add a provider</h2>
+  {{ note("add") }}
+  {% include "_channel_add_form.html" %}
+</form>
+
 {% for c in chans %}{% set mod = providers[c.kind] %}
-<form method="post" action="/notifications/{{ c.id }}" class="card">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
+<form method="post" action="/notifications/{{ c.id }}" class="card {{ 'off' if not c.enabled }}" id="ch-{{ c.id }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="ch-{{ c.id }}">
   <div class="row" style="justify-content:space-between">
-    <h2 style="margin:0">{{ c.name }} <span class="quiet small">{{ mod.TITLE }}</span></h2>
+    <h2 style="margin:0">{{ c.name }} <span class="quiet small">{{ mod.TITLE }}{{ ' · disabled' if not c.enabled }}</span></h2>
     <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if c.enabled }}> Enabled</label>
   </div>
+  {{ note("ch-" ~ c.id) }}
   {% if queued.get(c.id) %}<p class="flash err">{{ queued[c.id].n }} message(s) waiting{% if queued[c.id].e %}: {{ queued[c.id].e }}{% endif %}</p>{% endif %}
   {% if c.kind == 'healthchecks' %}<p class="quiet small">{{ mod.DESCRIPTION }} <a href="{{ mod.LINK }}" target="_blank" rel="noopener">healthchecks.io</a>
     · Last ping: {{ c.last_ping | ts('%d %b %H:%M') if c.last_ping else 'none yet' }}</p>{% endif %}
@@ -32,28 +42,26 @@
   {% endif %}
   <p class="row">
     <button>Save</button>
-    <button class="secondary" formaction="/notifications/{{ c.id }}/test">{{ 'Send a test ping' if c.kind == 'healthchecks' else 'Send a test' }}</button>
+    <button class="secondary" formaction="/notifications/{{ c.id }}/test" {{ 'disabled' if not c.enabled }}>{{ 'Send a test ping' if c.kind == 'healthchecks' else 'Send a test' }}</button>
     <button class="danger" formaction="/notifications/{{ c.id }}/delete" data-confirm="Remove {{ c.name }}?">Remove</button>
   </p>
 </form>
-{% else %}<p class="quiet">Nothing set up yet. Add a provider below.</p>{% endfor %}
+{% endfor %}
 
-<h2>Add a provider</h2>
-<form method="post" action="/notifications/add" class="card">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  {% include "_channel_add_form.html" %}
-</form>
-
-<h2>Weekly report</h2>
-<form method="post" action="/notifications/report" class="card">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
+<form method="post" action="/notifications/report" class="card" id="report">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="report">
+  <h2 style="margin-top:0">Weekly report</h2>
+  {{ note("report") }}
   <p class="quiet small">A summary of the past 7 days: internet uptime and outages, latency, loss and jitter, speed against your contract, and the longest issues.</p>
   <div class="row">
     <div><label for="rw">Day</label><select id="rw" name="report_weekday">
       {% for d in ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] %}<option value="{{ loop.index0 }}" {{ 'selected' if loop.index0 == schedule.weekday }}>{{ d }}</option>{% endfor %}</select></div>
     <div><label for="rt">Time</label><input id="rt" type="time" name="report_time" value="{{ schedule.time }}"></div>
     <div><label>Send it to</label>
-      {% for c in chans if c.kind != 'healthchecks' %}<label class="check"><input type="checkbox" name="report.{{ c.id }}" {{ 'checked' if c.weekly_report }}> {{ c.name }}</label>
+      {% set msg_chans = chans | rejectattr('kind', 'equalto', 'healthchecks') | list %}
+      {% for c in msg_chans %}
+        {% if c.enabled %}<label class="check"><input type="checkbox" name="report.{{ c.id }}" {{ 'checked' if c.weekly_report }}> {{ c.name }}</label>
+        {% else %}<label class="check quiet" title="Enable the channel first"><input type="checkbox" disabled> {{ c.name }} (disabled)</label>{% endif %}
       {% else %}<span class="quiet">add a Telegram or ntfy channel first</span>{% endfor %}</div>
   </div>
   <p class="row"><button>Save</button>

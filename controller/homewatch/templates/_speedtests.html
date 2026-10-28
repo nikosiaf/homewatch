@@ -7,7 +7,7 @@
     <button {{ 'disabled' if running }}>Run a speed test now</button>
     <span class="quiet small">{% if running %}Running, about 20 seconds…{% else %}Takes about 20 seconds.{% endif %}</span>
   </form>
-  {% if note %}<p class="{{ 'flash err' if note_err else 'flash ok' }}" style="margin:12px 0 0">{{ note }}</p>{% endif %}
+  {% if note %}<p class="flash {{ 'err' if note_err else 'ok' }}" {{ '' if note_err else 'data-autohide' }} style="margin:12px 0 0">{{ note }}</p>{% endif %}
   <div class="scroll"><table style="margin-top:12px">
     <tr><th>When</th><th>Engine</th><th>Down</th><th>Up</th><th>Latency</th><th>Result</th></tr>
     {% if running %}<tr class="running"><td>{{ started | ts }}</td><td>{{ s.speed.engine }}</td>

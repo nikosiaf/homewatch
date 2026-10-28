@@ -1,5 +1,13 @@
 <div id="reading" class="card scroll">
-  {% if note %}<p class="{{ 'flash err' if note_err else 'flash ok' }}">{{ note }}</p>{% endif %}
+  <div class="row" style="justify-content:space-between;align-items:center">
+    <h2 style="margin:0">Last reading</h2>
+    <div class="row" style="align-items:center;gap:8px">
+      <span id="read-spin" class="htmx-indicator quiet small"><span class="spin" aria-hidden="true"></span> Reading the modem…</span>
+      <button class="secondary" hx-post="/modules/speedport/read" hx-vals='{"csrf": "{{ csrf }}"}' hx-target="#reading"
+              hx-swap="outerHTML" hx-indicator="#read-spin" hx-disabled-elt="this" {{ 'disabled' if not has_password }}>Read the modem now</button>
+    </div>
+  </div>
+  {% if note %}<p class="flash {{ 'err' if note_err else 'ok' }}" {{ '' if note_err else 'data-autohide' }} style="margin-top:12px">{{ note }}</p>{% endif %}
   {% if st.last_ok %}
   <p class="quiet small">Read {{ st.last_ok | ts('%d %b %H:%M:%S') }}{% if st.info %} ·
     {% for k, v in st.info.items() %}{{ k }} {{ v }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</p>

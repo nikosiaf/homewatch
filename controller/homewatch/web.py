@@ -8,6 +8,8 @@ import os
 import secrets as pysecrets
 import time
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from urllib.parse import urlencode
 from datetime import datetime
 from zoneinfo import ZoneInfo, available_timezones
 
@@ -109,20 +111,26 @@ def page(request: Request, name: str, user: User | None, **ctx) -> HTMLResponse:
     templates.env.globals["zone"] = tz(rt.db)
     ctx.update(request=request, user=user, home=rt.db.get("home.name") or "Home",
                update=rt.update_available(), flash=request.query_params.get("msg", ""),
+               box_id=request.query_params.get("box", ""),
                error=ctx.get("error") or request.query_params.get("err", ""))
     return templates.TemplateResponse(request, name, ctx)
 
 
-def back(url: str, msg: str = "", err: str = "") -> RedirectResponse:
-    from urllib.parse import urlencode
+# the card a form belongs to ("_box" field): its message is shown inside that card after the redirect
+_box: ContextVar[str] = ContextVar("box", default="")
 
-    q = urlencode({k: v for k, v in (("msg", msg), ("err", err)) if v})
-    return RedirectResponse(url + ("?" + q if q else ""), status_code=303)
+
+def back(url: str, msg: str = "", err: str = "") -> RedirectResponse:
+    box = _box.get()
+    q = urlencode({k: v for k, v in (("msg", msg), ("err", err), ("box", box)) if v})
+    return RedirectResponse(url + ("?" + q if q else "") + (f"#{box}" if box else ""), status_code=303)
 
 
 async def form_of(request: Request, user: User | None) -> dict | None:
     """Parse a POST form and check its CSRF token. Returns None when the token is wrong."""
     form = dict(await request.form())
+    box = str(form.get("_box", ""))
+    _box.set(box if box.replace("-", "").isalnum() else "")
     token = form.get("csrf") or request.headers.get("x-csrf-token", "")
     expected = user.csrf if user else request.cookies.get(PRE, "")
     if not expected or not pysecrets.compare_digest(str(token), expected):
@@ -367,7 +375,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             note, bad = (f"Reading the modem failed: {err}", True) if err else ("Modem read successfully", False)
         if request.headers.get("hx-request"):
             return page(request, "_speedport_reading.html", request.state.user, note=note, note_err=bad,
-                        **m.page_ctx(rt))
+                        csrf=request.state.user.csrf, **m.page_ctx(rt))
         return back("/modules/speedport", err=note) if bad else back("/modules/speedport", msg=note)
 
     def speedtests_partial(request: Request, note: str = "", note_err: bool = False):
@@ -386,6 +394,22 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                 note, bad = ((f"Speed test: {last['down']:.1f} / {last['up']:.1f} Mbit/s", False) if last["ok"]
                              else (f"Speed test failed: {last['error']}", True))
         return speedtests_partial(request, note, bad)
+
+    @app.post("/modules/internet/ookla")
+    async def ookla_install(request: Request):
+        rt = rt_of(request)
+        form = await form_of(request, request.state.user)
+        if form is None:
+            return back("/modules/internet", err="Form expired")
+        if not MODULES["internet"].load(rt)["speed"].get("ookla_accepted"):
+            return back("/modules/internet", err="Accept Ookla's license and save first")
+        from .modules.internet.speedtest import OOKLA_VERSION, install_ookla
+
+        err = await install_ookla(rt.cfg.ookla_dir)
+        if err:
+            return back("/modules/internet", err=err)
+        audit(rt.db, request.state.user.username, "ookla", f"installed {OOKLA_VERSION}")
+        return back("/modules/internet", msg=f"Ookla Speedtest CLI {OOKLA_VERSION} installed")
 
     @app.post("/modules/internet/speedtest")
     async def speedtest_now(request: Request):
@@ -598,14 +622,14 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         except (ValueError, AssertionError):
             return back("/notifications", err="Weekly report: invalid day or time")
         rt.db.set("report.schedule", {"weekday": wd, "time": f"{h:02d}:{m:02d}"})
-        for c in rt.notifier.channels(enabled_only=False):
+        for c in rt.notifier.channels():  # disabled channels can't be ticked; keep their choice for later
             rt.db.run("UPDATE channels SET weekly_report=? WHERE id=?", (int(form.get(f"report.{c['id']}") == "on"),
                                                                          c["id"]))
         audit(rt.db, user.username, "report", f"weekday={wd} time={h:02d}:{m:02d}")
         if form.get("send_now"):
             n = await rt.send_report()
             if not n:
-                return back("/notifications", err="Tick at least one channel for the weekly report")
+                return back("/notifications", err="No enabled channel is ticked for the weekly report")
             return back("/notifications", msg=f"Weekly report sent to {n} channel(s)")
         return back("/notifications", msg="Weekly report saved")
 

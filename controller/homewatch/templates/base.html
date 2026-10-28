@@ -19,13 +19,7 @@
     <a href="/" class="{{ 'on' if p == '/' }}">Status</a>
     <a href="/history" class="{{ 'on' if p == '/history' }}">History</a>
     {% if user.is_admin %}
-    <details class="menu">
-      <summary class="{{ 'on' if p.startswith('/modules') }}">Modules</summary>
-      <div class="menu-list">
-        <a href="/modules">All modules</a>
-        {% for id, name, ready in CATALOG %}{% if ready %}<a href="/modules/{{ id }}" class="{{ 'on' if p == '/modules/' ~ id }}">{{ name }}</a>{% else %}<span class="soon">{{ name }}<small>coming soon</small></span>{% endif %}{% endfor %}
-      </div>
-    </details>
+    <a href="/modules" class="{{ 'on' if p.startswith('/modules') }}">Modules</a>
     <a href="/checks" class="{{ 'on' if p == '/checks' }}">Checks</a>
     <a href="/maintenance" class="{{ 'on' if p == '/maintenance' }}">Maintenance</a>
     <a href="/notifications" class="{{ 'on' if p == '/notifications' }}">Notifications</a>
@@ -41,8 +35,10 @@
 {% endif %}
 <main class="wrap">
   {% if update and user and user.is_admin %}<div class="flash ok">homewatch {{ update }} is available. See System for how to update.</div>{% endif %}
-  {% if flash %}<div class="flash ok">{{ flash }}</div>{% endif %}
-  {% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+  {% if not box_id %}
+  {% if flash %}<div class="flash ok" data-autohide role="status">{{ flash }}</div>{% endif %}
+  {% if error %}<div class="flash err" role="alert">{{ error }}<button type="button" class="close" data-dismiss aria-label="Close">×</button></div>{% endif %}
+  {% endif %}
   {% block content %}{% endblock %}
   <p class="quiet small" style="margin-top:32px">homewatch {{ version }}</p>
 </main>

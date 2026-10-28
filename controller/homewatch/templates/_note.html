@@ -1,0 +1,5 @@
+{# A form's result, shown inside its own card: {% from "_note.html" import note with context %} … {{ note("id") }} #}
+{% macro note(box) %}{% if box_id == box %}
+  {% if flash %}<div class="flash ok" data-autohide role="status">{{ flash }}</div>{% endif %}
+  {% if error %}<div class="flash err" role="alert">{{ error }}<button type="button" class="close" data-dismiss aria-label="Close">×</button></div>{% endif %}
+{% endif %}{% endmacro %}

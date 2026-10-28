@@ -74,8 +74,51 @@ async def _run(http: httpx.AsyncClient, seconds: float, streams: int, upload: bo
     return total * 8 / elapsed / 1e6
 
 
+OOKLA_VERSION = "1.2.0"
+OOKLA_URL = "https://install.speedtest.net/app/cli/ookla-speedtest-{v}-linux-{arch}.tgz"
+OOKLA_ARCH = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64", "armv7l": "armhf"}
+
+
 def ookla_path(ookla_dir: str) -> str:
     return os.path.join(ookla_dir, "speedtest")
+
+
+async def install_ookla(ookla_dir: str, http: httpx.AsyncClient | None = None) -> str:
+    """Download the official Ookla CLI from Ookla's site into the data volume. Returns '' or an error.
+
+    It is fetched by this install at the admin's request after they accept Ookla's license, not shipped
+    with homewatch (its license does not allow redistribution)."""
+    import io
+    import platform
+    import tarfile
+
+    arch = OOKLA_ARCH.get(platform.machine())
+    if arch is None:
+        return f"No Ookla CLI build for this processor ({platform.machine()})"
+    url = OOKLA_URL.format(v=OOKLA_VERSION, arch=arch)
+    own = http is None
+    http = http or httpx.AsyncClient(timeout=60, follow_redirects=True)
+    try:
+        r = await http.get(url)
+        r.raise_for_status()
+    except httpx.HTTPError as e:
+        return f"Download from Ookla failed ({type(e).__name__})"
+    finally:
+        if own:
+            await http.aclose()
+    try:
+        with tarfile.open(fileobj=io.BytesIO(r.content), mode="r:gz") as tar:
+            member = tar.getmember("speedtest")
+            data = tar.extractfile(member).read()
+    except (tarfile.TarError, KeyError) as e:
+        return f"Unexpected download from Ookla: {e}"
+    os.makedirs(ookla_dir, exist_ok=True)
+    tmp = ookla_path(ookla_dir) + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.chmod(tmp, 0o755)
+    os.replace(tmp, ookla_path(ookla_dir))
+    return ""
 
 
 async def ookla(ookla_dir: str) -> Result:
