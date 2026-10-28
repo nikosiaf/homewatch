@@ -6,15 +6,18 @@
 </h1>
 
 A small, self-hosted monitor for your home network, configured from a plain web page.
-v0.1 watches one thing well: **your internet line**. It tells you *what* broke ("router
-unreachable", "line down", "DNS failing", "slow line") and sends alerts to Telegram or ntfy.
-Later versions add one module per release (Proxmox, OPNsense, Home Assistant, …).
+v0.1 watches **your internet line** and, if you have one, **your provider's DSL modem**. It tells
+you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link down", "slow line")
+and sends alerts to Telegram or ntfy. Later versions add one module per release (Proxmox,
+OPNsense, Home Assistant, …).
 
 - Runs as a Docker Compose stack on any Linux host (amd64 or arm64)
 - LAN / Tailscale only: it never needs a port open to the internet
 - MIT licensed
 
 ## What v0.1 does
+
+### Internet line module
 
 | Probe | Default | Checks |
 |---|---|---|
@@ -36,13 +39,45 @@ Every probe can be switched off, and every threshold changed, in the web page.
 | Line speed | < 70 % of contract on 2 tests in a row | |
 | Probe data fresh | | no data for > 3 min |
 
+### ISP modem module (optional)
+
+Reads the DSL line from your provider's modem every 15 minutes. Read-only: nothing on the modem
+is changed. Supported model in v0.1:
+
+- **Telekom Speedport Plus 2** (Sercomm VD4224BDTP / VD4224BDT), the modem-router TELEKOM
+  (formerly COSMOTE) provides for VDSL and FTTH connections in Greece.
+
+| Check | WARNING | ERROR |
+|---|---|---|
+| Modem readable | | can't log in or read for 2.5 read intervals |
+| DSL link | | the modem has no sync |
+| Sync rate (share of the contracted speed) | < 85 % | < 50 % |
+| SNR margin (lower of down and up) | < 6 dB | < 3 dB |
+| Resyncs in 24 h | ≥ 1 | ≥ 5 |
+| PPP session on the modem | | down (off by default; for router-mode setups) |
+
+Things to know before you add a modem:
+- **Password:** the Speedport has only its admin login, so homewatch stores that password
+  (encrypted, never shown again).
+- **Sessions:** each reading logs in, which ends any open browser session on the modem.
+- **Rejected logins:** after a rejected login homewatch waits 6 hours, because the modem slows
+  down further attempts.
+
+### Alerts and notifications
+
+Notification providers: **Telegram**, **ntfy** (one topic URL) and the **healthchecks.io
+heartbeat**. Email and webhook are coming.
+
 Alerting works like this:
 - **Confirmation:** a change must hold for 2 runs (about 4 minutes) before it's sent.
 - **Reminders:** open problems are repeated every 12 h.
 - **Offline queue:** messages that can't be sent while the line is down go out when it's back, with the outage times.
 - **Snooze and maintenance windows:** they hold notifications without losing the history.
-- **Weekly report:** optional, switched on per channel.
-- **healthchecks.io heartbeat:** optional. It tells you when homewatch itself goes quiet.
+- **Quiet hours** per channel: warnings wait until they end, errors are always sent.
+- **Weekly report:** optional; pick the day, the time and the channels.
+- **healthchecks.io heartbeat:** optional. homewatch pings it after every run, and healthchecks.io
+  alerts you when the pings stop (host, power or internet down).
+- **History** is a timeline of every problem and its return to OK.
 
 There are two account roles: **admin**, who can change everything, and **viewer**, who can only see
 status and history.
@@ -106,10 +141,14 @@ enter them again.
 
 ## Ookla speed test (optional)
 
-The Ookla Speedtest CLI can't be bundled with an MIT package, so you add it yourself:
-1. Download the Linux build from <https://www.speedtest.net/apps/cli>.
-2. Copy it into the container: `docker compose cp speedtest controller:/data/ookla/speedtest`.
-3. On the Internet page, pick "Ookla" and accept its license.
+The default speed test uses Cloudflare and needs nothing extra. To use Ookla instead:
+1. Go to **Modules → Internet line** and pick **Ookla Speedtest CLI** as the engine.
+2. Accept Ookla's EULA and privacy policy.
+3. Press **Save and install Ookla CLI**.
+
+homewatch then downloads the official CLI from speedtest.net for your processor (x86_64, arm64 or
+armhf) into its data volume. It isn't bundled with homewatch, because Ookla's license doesn't
+allow redistribution. **System → Health** shows the installed version.
 
 ## Security notes
 
