@@ -25,7 +25,8 @@
     const axis = { stroke: ink, grid: { stroke: grid }, ticks: { stroke: grid } };
     const opts = {
       width: el.clientWidth, height: 240,
-      series: [{}].concat(d.series.map((s, i) => ({ label: s.name, stroke: colors[i % colors.length], width: 1.5, spanGaps: false,
+      series: [{}].concat(d.series.map((s, i) => ({ label: s.name, stroke: colors[i % colors.length], width: 1.5,
+        spanGaps: chart === "speed", points: { show: chart === "speed", size: 6 },
         value: (u, v) => v == null ? "–" : v + " " + d.unit }))),
       axes: [axis, Object.assign({ label: d.unit, labelSize: 20 }, axis)],
       scales: { y: { range: (u, min, max) => [0, Math.max(max * 1.1, 1)] } },

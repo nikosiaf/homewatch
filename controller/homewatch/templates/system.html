@@ -41,6 +41,24 @@
     <div><button>Add user</button></div>
   </form>
 </div>
+<h2>Danger zone</h2>
+<div class="grid2">
+  <form method="post" action="/system/reset" class="card danger-zone">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="mode" value="history">
+    <b>Delete history</b>
+    <p class="quiet small">Deletes all issues, speed test results and stored metrics. Settings, channels and users stay.</p>
+    <label for="cd">Type DELETE to confirm</label><input id="cd" type="text" name="confirm" autocomplete="off">
+    <p><button class="danger" data-confirm="Delete all history and metrics? This cannot be undone.">Delete history</button></p>
+  </form>
+  <form method="post" action="/system/reset" class="card danger-zone">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="mode" value="all">
+    <b>Reset everything</b>
+    <p class="quiet small">Deletes all settings, channels, tokens, users and history, then starts the setup wizard again.
+      The master key in <code>.env</code> is kept.</p>
+    <label for="cr">Type RESET to confirm</label><input id="cr" type="text" name="confirm" autocomplete="off">
+    <p><button class="danger" data-confirm="Reset homewatch completely? Everyone is logged out and all data is deleted.">Reset everything</button></p>
+  </form>
+</div>
 <h2>Audit log</h2>
 <div class="card scroll"><table>
   <tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr>

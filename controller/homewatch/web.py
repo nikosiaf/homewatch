@@ -20,7 +20,7 @@ from . import __version__
 from . import config as config_mod
 from .auth import ROLES, Auth, AuthError, User, audit
 from .engine import DEFAULT_TIMING, thresholds, timing, tz
-from .modules import LEVEL_WORD, OK
+from .modules import CATALOG, LEVEL_WORD, OK
 from .modules.internet import checks as inet_checks
 from .modules.internet import save as save_internet
 from .modules.internet import speedtest as st
@@ -66,6 +66,7 @@ templates.env.filters["ts"] = _fmt_ts
 templates.env.filters["dur"] = _fmt_dur
 templates.env.globals["LEVEL_WORD"] = LEVEL_WORD
 templates.env.globals["version"] = __version__
+templates.env.globals["CATALOG"] = CATALOG
 
 
 def create_app(rt: Runtime | None = None, start_loops: bool = True) -> FastAPI:
@@ -321,6 +322,14 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
 
     # -- internet module ------------------------------------------------------------------------
     @app.get("/internet")
+    async def internet_old(request: Request):
+        return RedirectResponse("/modules/internet", status_code=308)
+
+    @app.get("/modules")
+    async def modules_page(request: Request):
+        return page(request, "modules.html", request.state.user)
+
+    @app.get("/modules/internet")
     async def internet_page(request: Request):
         rt = rt_of(request)
         tests = rt.db.all("SELECT * FROM speedtests WHERE site=? ORDER BY ts DESC LIMIT 10", (rt.cfg.site,))
@@ -329,24 +338,24 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                     csrf=request.state.user.csrf, ookla_found=ookla_found, ookla_dir=rt.cfg.ookla_dir,
                     running=rt.speed_running)
 
-    @app.post("/internet")
+    @app.post("/modules/internet")
     async def internet_save(request: Request):
         form = await form_of(request, request.state.user)
         if form is None:
-            return back("/internet", err="Form expired, please try again")
+            return back("/modules/internet", err="Form expired, please try again")
         err = _save_section(request, "internet", form, request.state.user)
-        return back("/internet", err=err) if err else back("/internet", msg="Saved")
+        return back("/modules/internet", err=err) if err else back("/modules/internet", msg="Saved")
 
-    @app.post("/internet/speedtest")
+    @app.post("/modules/internet/speedtest")
     async def speedtest_now(request: Request):
         rt = rt_of(request)
         if await form_of(request, request.state.user) is None:
-            return back("/internet", err="Form expired")
+            return back("/modules/internet", err="Form expired")
         res = await rt.run_speedtest()
         audit(rt.db, request.state.user.username, "speedtest", "run now")
         if res.ok:
-            return back("/internet", msg=f"Speed test: {res.down:.1f} / {res.up:.1f} Mbit/s")
-        return back("/internet", err=f"Speed test failed: {res.error}")
+            return back("/modules/internet", msg=f"Speed test: {res.down:.1f} / {res.up:.1f} Mbit/s")
+        return back("/modules/internet", err=f"Speed test failed: {res.error}")
 
     # -- checks, thresholds, snooze -------------------------------------------------------------
     @app.get("/checks")
@@ -395,6 +404,17 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             audit(rt.db, user.username, "checks", "; ".join(changes))
         rt.wake.set()
         return back("/checks", msg="Saved")
+
+    @app.post("/checks/run")
+    async def checks_run(request: Request):
+        rt = rt_of(request)
+        if await form_of(request, request.state.user) is None:
+            return back("/", err="Form expired")
+        await rt.run_checks()
+        if rt.last_error:
+            return back("/", err=f"Check run failed: {rt.last_error}")
+        return back("/", msg=f"Checks ran at {_fmt_ts(rt.last_run, '%H:%M:%S')}. A change still needs "
+                             f"{int(timing(rt.db)['confirm'])} runs in a row before it is sent.")
 
     @app.post("/checks/snooze")
     async def snooze(request: Request):
@@ -683,6 +703,28 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         resp = back("/login", msg="Password changed, please log in again")
         resp.delete_cookie(COOKIE)
         return resp
+
+    @app.post("/system/reset")
+    async def system_reset(request: Request):
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/system", err="Form expired")
+        everything = form.get("mode") == "all"
+        word = "RESET" if everything else "DELETE"
+        if form.get("confirm", "").strip() != word:
+            return back("/system", err=f"Type {word} in the box to confirm")
+        warning = await rt.reset(everything)
+        if everything:
+            log.warning("all configuration and history reset by %s", user.username)
+            resp = RedirectResponse("/setup", status_code=303)
+            resp.delete_cookie(COOKIE)
+            return resp
+        audit(rt.db, user.username, "history.delete", "issues, speed tests and metrics deleted")
+        if warning:
+            return back("/system", err=f"History deleted, but metrics could not be: {warning}")
+        return back("/system", msg="History and metrics deleted")
 
     @app.post("/system/updates")
     async def updates_toggle(request: Request):

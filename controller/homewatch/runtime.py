@@ -26,6 +26,9 @@ from .secrets import Secrets
 log = logging.getLogger("homewatch.runtime")
 
 HC_SECRET = "healthchecks.url"
+SPEED_RETRY = 15 * 60  # after a failed speed test, try again this soon instead of waiting a full interval
+HISTORY_TABLES = ("issues", "speedtests", "check_state", "outbox", "snoozes")
+CONFIG_TABLES = ("settings", "checks", "secrets", "maintenance", "channels", "sessions", "users", "audit")
 RELEASES = "https://api.github.com/repos/nikosiaf/homewatch/releases/latest"
 
 
@@ -137,13 +140,36 @@ class Runtime:
         await asyncio.sleep(60)
         while True:
             s = self.internet_settings()["speed"]
-            last = self.db.one("SELECT MAX(ts) t FROM speedtests WHERE site=?", (self.cfg.site,))["t"] or 0
-            if s["enabled"] and time.time() - last >= float(s["interval_h"]) * 3600:
+            if s["enabled"] and self.speed_due(float(s["interval_h"]), time.time()):
                 try:
                     await self.run_speedtest()
                 except Exception:  # noqa: BLE001
                     log.exception("speed test failed")
             await asyncio.sleep(60)
+
+    def speed_due(self, interval_h: float, now: float) -> bool:
+        last = self.db.one("SELECT ts, ok FROM speedtests WHERE site=? ORDER BY ts DESC LIMIT 1", (self.cfg.site,))
+        if last is None:
+            return True
+        wait = interval_h * 3600 if last["ok"] else min(SPEED_RETRY, interval_h * 3600)
+        return now - last["ts"] >= wait
+
+    async def reset(self, everything: bool) -> str:
+        """Delete history (issues, speed tests, metrics); with everything=True also all settings and users."""
+        tables = HISTORY_TABLES + (CONFIG_TABLES if everything else ())
+        with self.db.tx() as db:
+            for t in tables:
+                db.run(f"DELETE FROM {t}")  # noqa: S608 - fixed table names
+        self.results, self.last_run, self.last_error = [], 0, ""
+        warning = ""
+        try:
+            await self.metrics.delete_site(self.cfg.site)
+        except MetricsError as e:
+            warning = str(e)
+        if everything:
+            self.sync_telegraf()
+        self.wake.set()
+        return warning
 
     async def run_speedtest(self) -> speedtest.Result:
         if self.speed_running:

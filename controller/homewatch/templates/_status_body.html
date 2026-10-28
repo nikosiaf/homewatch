@@ -6,6 +6,8 @@
     <div class="quiet small">{% if last_run %}Last run {{ last_run | ts('%H:%M:%S') }}{% else %}Waiting for the first run…{% endif %}
       {% if last_error %} · <span style="color:var(--err)">{{ last_error }}</span>{% endif %}</div>
   </div>
+  {% if user.is_admin %}<form method="post" action="/checks/run" style="margin-left:auto">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}"><button class="secondary">Check now</button></form>{% endif %}
 </div>
 {% if open %}
 <h2>Needs attention</h2>

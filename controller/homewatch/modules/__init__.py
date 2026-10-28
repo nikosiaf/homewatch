@@ -7,6 +7,19 @@ from dataclasses import dataclass, field
 OK, WARNING, ERROR = 0, 1, 2
 LEVEL_WORD = {OK: "OK", WARNING: "WARNING", ERROR: "ERROR"}
 
+# (id, name, available in this release); the rest show greyed out as "coming soon"
+CATALOG = [
+    ("internet", "Internet line", True),
+    ("proxmox", "Proxmox VE", False),
+    ("opnsense", "OPNsense", False),
+    ("homeassistant", "Home Assistant", False),
+    ("pbs", "Proxmox Backup Server", False),
+    ("synology", "Synology NAS", False),
+    ("mikrotik", "MikroTik", False),
+    ("unifi", "UniFi", False),
+    ("ups", "UPS (NUT)", False),
+]
+
 
 @dataclass(frozen=True)
 class CheckDef:

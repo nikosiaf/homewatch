@@ -53,6 +53,15 @@ class Metrics:
         if r.status_code >= 300:
             raise MetricsError(f"VictoriaMetrics write failed: HTTP {r.status_code} {r.text[:200]}")
 
+    async def delete_site(self, site: str) -> None:
+        try:
+            r = await self.http.post(f"{self.base}/api/v1/admin/tsdb/delete_series",
+                                     data={"match[]": f'{{site="{site}"}}'})
+        except httpx.HTTPError as e:
+            raise MetricsError(f"VictoriaMetrics unreachable: {e}") from e
+        if r.status_code >= 300:
+            raise MetricsError(f"VictoriaMetrics delete failed: HTTP {r.status_code} {r.text[:200]}")
+
     async def healthy(self) -> bool:
         try:
             r = await self.http.get(f"{self.base}/health")

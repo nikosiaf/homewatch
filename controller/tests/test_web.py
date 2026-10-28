@@ -70,7 +70,7 @@ def test_viewer_is_read_only(client, cfg):
     r = client.post("/login", data={"csrf": csrf(r.text), "username": "family", "password": "another-long-one"})
     assert r.url.path == "/"
     assert client.get("/history").status_code == 200
-    for path in ("/checks", "/notifications", "/system", "/internet", "/maintenance"):
+    for path in ("/checks", "/notifications", "/system", "/modules/internet", "/maintenance", "/modules"):
         assert client.get(path).status_code == 403
 
 
@@ -98,6 +98,39 @@ def test_thresholds_saved_and_audited(client):
 
 def test_pages_render(client):
     setup_admin(client)
-    for path in ("/", "/history", "/internet", "/checks", "/maintenance", "/notifications", "/system", "/password",
-                 "/partials/status"):
+    for path in ("/", "/history", "/modules", "/modules/internet", "/internet", "/checks", "/maintenance",
+                 "/notifications", "/system", "/password", "/partials/status"):
         assert client.get(path).status_code == 200, path
+
+
+def test_menu_lists_modules_with_coming_soon(client):
+    setup_admin(client)
+    r = client.get("/")
+    assert 'href="/modules/internet"' in r.text and "Proxmox VE<small>coming soon</small>" in r.text
+
+
+def test_check_now_reports_read_failure(client):
+    tok = setup_admin(client)
+    r = client.post("/checks/run", data={"csrf": tok})
+    assert "Check run failed" in r.text  # no VictoriaMetrics in the test environment
+
+
+def test_delete_history_needs_the_word(client):
+    tok = setup_admin(client)
+    db = client.rt.db
+    db.run("INSERT INTO issues(site,check_key,level,worst,started) VALUES('home','internet.loss',1,1,1)")
+    r = client.post("/system/reset", data={"csrf": tok, "mode": "history", "confirm": "nope"})
+    assert "Type DELETE" in r.text and db.one("SELECT COUNT(*) n FROM issues")["n"] == 1
+    client.post("/system/reset", data={"csrf": tok, "mode": "history", "confirm": "DELETE"})
+    assert db.one("SELECT COUNT(*) n FROM issues")["n"] == 0
+    assert db.one("SELECT COUNT(*) n FROM users")["n"] == 1
+
+
+def test_reset_everything_restarts_the_wizard(client):
+    tok = setup_admin(client)
+    client.post("/setup/home", data={"csrf": tok, "name": "Old Home", "tz": "Europe/Athens"})
+    r = client.post("/system/reset", data={"csrf": tok, "mode": "all", "confirm": "RESET"})
+    assert r.url.path == "/setup" and "first-run setup" in r.text
+    db = client.rt.db
+    assert db.one("SELECT COUNT(*) n FROM users")["n"] == 0
+    assert db.get("home.name") is None

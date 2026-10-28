@@ -78,3 +78,17 @@ def test_report_due_once_a_week(db):
     assert due(db, mon_8)
     db.set("report.last_sent", mon_8)
     assert not due(db, mon_8 + 3600)
+
+
+def test_failed_speed_test_retries_sooner(cfg):
+    from homewatch.runtime import Runtime
+
+    rt = Runtime.create(cfg)
+    t = 1_800_000_000.0
+    assert rt.speed_due(3, t)
+    rt.db.run("INSERT INTO speedtests(site,ts,engine,ok,error) VALUES('home',?,'cloudflare',0,'WriteTimeout')", (t,))
+    assert not rt.speed_due(3, t + 600)
+    assert rt.speed_due(3, t + 16 * 60)
+    rt.db.run("INSERT INTO speedtests(site,ts,engine,down,up,ok) VALUES('home',?,'cloudflare',98,9,1)", (t + 1000,))
+    assert not rt.speed_due(3, t + 1000 + 3600)
+    assert rt.speed_due(3, t + 1000 + 3 * 3600)
