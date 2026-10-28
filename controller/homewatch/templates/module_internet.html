@@ -7,18 +7,7 @@
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="settings">
   {{ note("settings") }}
   {% include "_internet_form.html" %}
-  {% if s.speed.engine == 'ookla' and not ookla_found %}
-  <div class="callout">
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 3 2 21h20L12 3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v5M12 18v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-    <div><b>The Ookla Speedtest CLI is not installed yet.</b>
-      {% if s.speed.ookla_accepted %}
-      <p class="small" style="margin:4px 0 8px">homewatch can download it from Ookla's site into its data folder.</p>
-      <button class="secondary" formaction="/modules/internet/ookla" formnovalidate>Install Ookla CLI</button>
-      {% else %}<p class="small" style="margin:4px 0 0">Tick "I accept Ookla's EULA…" below and save; then an Install button appears here.</p>{% endif %}
-    </div>
-  </div>
-  {% endif %}
-  <button>Save</button>
+  <button data-save data-ookla-installed="{{ '1' if ookla_found else '' }}">Save</button>
 </form>
 <h2>Speed tests</h2>
 {% include "_speedtests.html" %}

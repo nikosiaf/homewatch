@@ -91,3 +91,12 @@ tr.running td { color: var(--quiet); }
 .callout ul { margin: 6px 0 0 18px; padding: 0; }
 fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
 fieldset.plain:disabled { opacity: .5; }
+details.module { background: var(--card); border: 1px solid var(--line); border-left: 5px solid var(--ok);
+  border-radius: 10px; margin-bottom: 10px; }
+details.module.s1 { border-left-color: var(--warn); } details.module.s2 { border-left-color: var(--err); }
+details.module > summary { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 12px 14px;
+  cursor: pointer; list-style: none; }
+details.module > summary::-webkit-details-marker { display: none; }
+details.module > summary::after { content: "▸"; margin-left: auto; color: var(--quiet); }
+details.module[open] > summary::after { content: "▾"; }
+details.module > .tiles { padding: 0 14px 14px; }

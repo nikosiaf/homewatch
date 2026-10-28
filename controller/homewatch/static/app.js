@@ -53,3 +53,53 @@ document.querySelectorAll("[data-enable-toggle]").forEach(function (box) {
   });
   form.addEventListener("submit", function () { target.disabled = false; });
 });
+
+// Save buttons stay greyed out until something in their form changes.
+// Internet module: the Ookla license only shows for the Ookla engine, is required for it, and the
+// button says it will install the CLI when it isn't there yet.
+document.querySelectorAll("button[data-save]").forEach(function (btn) {
+  const form = btn.form;
+  const engine = form.querySelector("[data-engine-select]");
+  const eula = form.querySelector("[data-ookla-eula]");
+  const snap = function () { return new URLSearchParams(new FormData(form)).toString(); };
+  const initial = snap();
+  function update() {
+    let ok = snap() !== initial;
+    if (engine) {
+      const ookla = engine.value === "ookla";
+      form.querySelectorAll("[data-ookla-only]").forEach(function (el) { el.hidden = !ookla; });
+      if (ookla && eula && !eula.checked) ok = false;
+      btn.textContent = ookla && !btn.dataset.ooklaInstalled ? "Save and install Ookla CLI" : "Save";
+    }
+    btn.disabled = !ok;
+  }
+  form.addEventListener("input", update);
+  form.addEventListener("change", update);
+  update();
+});
+// The setup wizard uses the same Internet form without a Save button: just show / hide the license.
+document.querySelectorAll("[data-engine-select]").forEach(function (sel) {
+  if (sel.form.querySelector("button[data-save]")) return;
+  function show() { sel.form.querySelectorAll("[data-ookla-only]").forEach(function (el) { el.hidden = sel.value !== "ookla"; }); }
+  sel.addEventListener("change", show);
+  show();
+});
+
+// Status page: remember which module lines are expanded, across the 30 s refresh.
+(function () {
+  const KEY = "hw-open-modules";
+  function load() { try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { return []; } }
+  function restore(root) {
+    const open = load();
+    root.querySelectorAll("details[data-module]").forEach(function (d) { d.open = open.includes(d.dataset.module); });
+  }
+  document.addEventListener("toggle", function (e) {
+    const d = e.target;
+    if (!d.matches || !d.matches("details[data-module]")) return;
+    const open = load().filter(function (m) { return m !== d.dataset.module; });
+    if (d.open) open.push(d.dataset.module);
+    try { localStorage.setItem(KEY, JSON.stringify(open)); } catch (e) { /* private mode: not remembered */ }
+  }, true);
+  restore(document);
+  document.body.addEventListener("htmx:afterSwap", function (e) { restore(e.target); });
+})();

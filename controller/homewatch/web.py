@@ -241,7 +241,9 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back(f"/setup/{step}", err="Form expired, please try again")
         nxt = SETUP_STEPS[SETUP_STEPS.index(step) + 1] if step != SETUP_STEPS[-1] else None
         if form.get("skip") is None:
-            err = _save_section(request, step, form, user)
+            err = await _ookla_ready(rt_of(request), form, user) if (
+                step == "internet" and form.get("speed.engine") == "ookla") else ""
+            err = err or _save_section(request, step, form, user)
             if err:
                 return back(f"/setup/{step}", err=err)
         if nxt:
@@ -360,6 +362,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         form = await form_of(request, request.state.user)
         if form is None:
             return back(f"/modules/{mid}", err="Form expired, please try again")
+        if mid == "internet" and form.get("speed.engine") == "ookla":
+            err = await _ookla_ready(rt, form, request.state.user)
+            if err:
+                return back(f"/modules/{mid}", err=err)
         err = m.save(rt, form, request.state.user)
         return back(f"/modules/{mid}", err=err) if err else back(f"/modules/{mid}", msg="Saved")
 
@@ -374,7 +380,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             rt.wake.set()
             note, bad = (f"Reading the modem failed: {err}", True) if err else ("Modem read successfully", False)
         if request.headers.get("hx-request"):
-            return page(request, "_speedport_reading.html", request.state.user, note=note, note_err=bad,
+            return page(request, "_speedport_reading.html", request.state.user, result=note, result_err=bad,
                         csrf=request.state.user.csrf, **m.page_ctx(rt))
         return back("/modules/speedport", err=note) if bad else back("/modules/speedport", msg=note)
 
@@ -382,7 +388,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt = rt_of(request)
         m = MODULES["internet"]
         return page(request, "_speedtests.html", request.state.user, s=m.load(rt), csrf=request.state.user.csrf,
-                    started=rt.speed_started, note=note, note_err=note_err, **m.page_ctx(rt))
+                    started=rt.speed_started, result=note, result_err=note_err, **m.page_ctx(rt))
 
     @app.get("/modules/internet/speedtests")
     async def speedtests(request: Request):
@@ -394,22 +400,6 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                 note, bad = ((f"Speed test: {last['down']:.1f} / {last['up']:.1f} Mbit/s", False) if last["ok"]
                              else (f"Speed test failed: {last['error']}", True))
         return speedtests_partial(request, note, bad)
-
-    @app.post("/modules/internet/ookla")
-    async def ookla_install(request: Request):
-        rt = rt_of(request)
-        form = await form_of(request, request.state.user)
-        if form is None:
-            return back("/modules/internet", err="Form expired")
-        if not MODULES["internet"].load(rt)["speed"].get("ookla_accepted"):
-            return back("/modules/internet", err="Accept Ookla's license and save first")
-        from .modules.internet.speedtest import OOKLA_VERSION, install_ookla
-
-        err = await install_ookla(rt.cfg.ookla_dir)
-        if err:
-            return back("/modules/internet", err=err)
-        audit(rt.db, request.state.user.username, "ookla", f"installed {OOKLA_VERSION}")
-        return back("/modules/internet", msg=f"Ookla Speedtest CLI {OOKLA_VERSION} installed")
 
     @app.post("/modules/internet/speedtest")
     async def speedtest_now(request: Request):
@@ -805,6 +795,21 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         return back("/system", msg="Saved")
 
 
+async def _ookla_ready(rt, form: dict, user) -> str:
+    """Choosing the Ookla engine needs its license accepted and the CLI installed; install it on first save."""
+    from .modules.internet.speedtest import OOKLA_VERSION, install_ookla, ookla_path
+
+    if form.get("speed.ookla_accepted") != "on":
+        return "To use the Ookla engine, accept Ookla's EULA and privacy policy"
+    if os.access(ookla_path(rt.cfg.ookla_dir), os.X_OK):
+        return ""
+    err = await install_ookla(rt.cfg.ookla_dir)
+    if err:
+        return f"Nothing saved: {err}"
+    audit(rt.db, user.username, "ookla", f"installed {OOKLA_VERSION}")
+    return ""
+
+
 def _status_ctx(request: Request) -> dict:
     rt = rt_of(request)
     now = time.time()
@@ -820,7 +825,7 @@ def _status_ctx(request: Request) -> dict:
     for m in MODULES.values():
         mine = [t for t in tiles if t["r"].key.startswith(m.id + ".")]
         if mine:
-            groups.append((m.name, mine))
+            groups.append((m.id, m.name, mine))
     errors, warnings = rt.engine.counts()
     sp = MODULES["speedport"]
     return dict(tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,

@@ -41,7 +41,7 @@
   </div>
   {% endif %}
   <p class="row">
-    <button>Save</button>
+    <button data-save>Save</button>
     <button class="secondary" formaction="/notifications/{{ c.id }}/test" {{ 'disabled' if not c.enabled }}>{{ 'Send a test ping' if c.kind == 'healthchecks' else 'Send a test' }}</button>
     <button class="danger" formaction="/notifications/{{ c.id }}/delete" data-confirm="Remove {{ c.name }}?">Remove</button>
   </p>
@@ -64,7 +64,7 @@
         {% else %}<label class="check quiet" title="Enable the channel first"><input type="checkbox" disabled> {{ c.name }} (disabled)</label>{% endif %}
       {% else %}<span class="quiet">add a Telegram or ntfy channel first</span>{% endfor %}</div>
   </div>
-  <p class="row"><button>Save</button>
+  <p class="row"><button data-save>Save</button>
     <button class="secondary" name="send_now" value="1">Save and send it now</button></p>
 </form>
 {% endblock %}

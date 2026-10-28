@@ -263,3 +263,40 @@ def test_add_modem_flow(client):
     s = client.rt.db.get("module.speedport")
     assert s["enabled"] is False and s["host"] == "192.168.1.1" and s["interval_min"] == 15
     assert "Last reading" not in client.get("/modules/speedport").text
+
+
+def test_no_macro_repr_on_internet_page(client):
+    tok = setup_admin(client)
+    r = client.post("/modules/internet", data={"csrf": tok, "_box": "settings", "public.enabled": "on",
+                                              "public.targets": "1.1.1.1", "speed.engine": "cloudflare",
+                                              "speed.interval_h": "3"})
+    assert "Saved" in r.text and "<macro" not in r.text and "&lt;macro" not in r.text
+
+
+def test_ookla_needs_eula_and_install_failure_saves_nothing(client, monkeypatch):
+    tok = setup_admin(client)
+    base = {"csrf": tok, "public.enabled": "on", "public.targets": "1.1.1.1", "speed.enabled": "on",
+            "speed.engine": "ookla", "speed.interval_h": "3"}
+    r = client.post("/modules/internet", data=base)
+    assert "accept Ookla" in r.text
+    assert client.rt.internet_settings()["speed"]["engine"] == "cloudflare"
+
+    async def fail(_dir, http=None):
+        return "Download from Ookla failed (ConnectError)"
+
+    monkeypatch.setattr("homewatch.modules.internet.speedtest.install_ookla", fail)
+    r = client.post("/modules/internet", data={**base, "speed.ookla_accepted": "on"})
+    assert "Nothing saved" in r.text
+    assert client.rt.internet_settings()["speed"]["engine"] == "cloudflare"
+
+
+def test_status_page_has_one_line_per_module(client):
+    setup_admin(client)
+    from homewatch.modules import CheckResult
+
+    client.rt.results = [CheckResult("internet.loss", "Packet loss", 1, "packet loss 12 %"),
+                         CheckResult("internet.latency", "Latency", 0, "21 ms")]
+    client.rt.db.run("INSERT INTO check_state(site,check_key,status) VALUES('home','internet.loss',1)")
+    page = client.get("/").text
+    assert page.count('<details class="module') == 1
+    assert "Packet loss: packet loss 12 %" in page and 'data-module="internet"' in page
