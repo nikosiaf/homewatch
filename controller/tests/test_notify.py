@@ -95,3 +95,16 @@ async def test_ntfy_headers(db):
     req = route.calls.last.request
     assert req.headers["Priority"] == "urgent" and req.headers["Authorization"] == "Bearer tk_abc"
     assert "ERROR" in req.headers["Title"]
+
+
+def test_ntfy_server_and_topic_forms():
+    from homewatch.notify.ntfy import normalize
+
+    assert normalize({"server": "ntfy.sh", "topic": "home-alerts"})[0] == {"server": "https://ntfy.sh",
+                                                                        "topic": "home-alerts"}
+    assert normalize({"server": "", "topic": "x1"})[0]["server"] == "https://ntfy.sh"
+    assert normalize({"server": "", "topic": "https://ntfy.example.org/abc"})[0] == {
+        "server": "https://ntfy.example.org", "topic": "abc"}
+    assert normalize({"server": "http://192.168.2.5:8080/", "topic": "t"})[0]["server"] == "http://192.168.2.5:8080"
+    assert normalize({"server": "ntfy.sh", "topic": ""})[1]
+    assert normalize({"server": "ftp://x", "topic": "t"})[1]

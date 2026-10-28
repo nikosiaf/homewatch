@@ -565,6 +565,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/notifications", err="Unknown channel")
         mod = KINDS[ch["kind"]]
         config = {k: form.get(k, "").strip() for k, _, _ in mod.FIELDS}
+        if ch["kind"] == "ntfy":
+            config, err = mod.normalize(config)
+            if err:
+                return back("/notifications", err=err)
         levels = [lv for lv in (1, 2) if form.get(f"level{lv}") == "on"]
         qs, qe = form.get("quiet_start", ""), form.get("quiet_end", "")
         if bool(qs) != bool(qe):
@@ -801,10 +805,10 @@ def _save_section(request: Request, section: str, form: dict, user: User) -> str
         config = {k: form.get(k, "").strip() for k, _, _ in mod.FIELDS}
         if kind == "telegram" and not (config["chat_id"] and form.get("secret")):
             return "Telegram needs a bot token and a chat ID"
-        if kind == "ntfy" and not config["topic"]:
-            return "ntfy needs a topic"
-        if kind == "ntfy" and config["server"] and not config["server"].startswith(("https://", "http://")):
-            return "ntfy server must start with https://"
+        if kind == "ntfy":
+            config, err = KINDS["ntfy"].normalize(config)
+            if err:
+                return err
         name = form.get("name", "").strip()[:60] or kind.capitalize()
         cid = rt.db.run("INSERT INTO channels(kind,name,levels,config) VALUES(?,?,?,?)",
                         (kind, name, json.dumps([1, 2]), json.dumps(config)))
