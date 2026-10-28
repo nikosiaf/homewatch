@@ -1,0 +1,22 @@
+{
+	admin off
+	auto_https off
+}
+
+:80 {
+	redir https://{host}{uri} 308
+}
+
+:443 {
+	tls /certs/cert.pem /certs/key.pem
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "same-origin"
+		Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
+		-Server
+	}
+	reverse_proxy controller:8000
+}

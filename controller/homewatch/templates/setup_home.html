@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Setup{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h1>Your home</h1>
+  {% include "_steps.html" %}
+  <form method="post" action="/setup/home">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% include "_home_form.html" %}
+    <p><button>Next</button></p>
+  </form>
+</div>
+{% endblock %}

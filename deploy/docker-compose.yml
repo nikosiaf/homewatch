@@ -1,0 +1,60 @@
+# homewatch — see README.md for the install steps.
+name: homewatch
+
+services:
+  caddy:
+    image: caddy:2.11.7
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy-data:/data
+    depends_on:
+      - controller
+    read_only: true
+    tmpfs: [/tmp, /config]
+
+  controller:
+    image: ghcr.io/nikosiaf/homewatch:${HW_VERSION:-0.1.0}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      HW_VM_URL: http://victoriametrics:8428
+      HW_DATA_DIR: /data
+      HW_TELEGRAF_DIR: /telegraf
+    volumes:
+      - hw-data:/data
+      - telegraf-config:/telegraf
+    depends_on:
+      - victoriametrics
+    read_only: true
+    tmpfs: [/tmp]
+
+  telegraf:
+    image: telegraf:1.40.2
+    restart: unless-stopped
+    command: ["telegraf", "--config", "/telegraf/telegraf.conf", "--watch-config", "poll"]
+    volumes:
+      - telegraf-config:/telegraf:ro
+    cap_add: [NET_RAW]
+    depends_on:
+      controller:
+        condition: service_healthy
+      victoriametrics:
+        condition: service_started
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.154.0
+    restart: unless-stopped
+    command: ["-storageDataPath=/storage", "-retentionPeriod=${HW_RETENTION:-1y}", "-httpListenAddr=:8428"]
+    volumes:
+      - vm-data:/storage
+
+volumes:
+  hw-data:
+  caddy-data:
+  telegraf-config:
+  vm-data:

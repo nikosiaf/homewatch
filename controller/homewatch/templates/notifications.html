@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Notifications{% endblock %}
+{% block content %}
+<h1>Notifications</h1>
+{% for c in chans %}
+<form method="post" action="/notifications/{{ c.id }}" class="card">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">{{ c.name }} <span class="quiet small">{{ c.kind }}</span></h2>
+    <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if c.enabled }}> Enabled</label>
+  </div>
+  {% if queued.get(c.id) %}<p class="flash err">{{ queued[c.id].n }} message(s) waiting{% if queued[c.id].e %}: {{ queued[c.id].e }}{% endif %}</p>{% endif %}
+  <div class="row">
+    <div><label>Name</label><input type="text" name="name" value="{{ c.name }}" maxlength="60"></div>
+    {% for k, label, hint in kinds[c.kind].FIELDS %}
+    <div><label>{{ label }}</label><input type="text" name="{{ k }}" value="{{ c.config.get(k, '') }}" placeholder="{{ hint }}"></div>{% endfor %}
+    <div><label>{{ kinds[c.kind].SECRET_LABEL }} · {{ 'set' if c.has_secret else 'not set' }}</label>
+      <input type="password" name="secret" placeholder="{{ 'leave empty to keep' if c.has_secret else '' }}" autocomplete="off"></div>
+  </div>
+  <div class="row">
+    <div><label>Levels</label>
+      <label class="check"><input type="checkbox" name="level1" {{ 'checked' if 1 in c.levels }}> WARNING</label>
+      <label class="check"><input type="checkbox" name="level2" {{ 'checked' if 2 in c.levels }}> ERROR</label></div>
+    <div><label>Quiet hours (WARNING held, ERROR always sent)</label>
+      <input type="time" name="quiet_start" value="{{ c.quiet_start or '' }}" style="max-width:130px"> –
+      <input type="time" name="quiet_end" value="{{ c.quiet_end or '' }}" style="max-width:130px"></div>
+    <div><label class="check"><input type="checkbox" name="weekly_report" {{ 'checked' if c.weekly_report }}> Weekly report</label></div>
+  </div>
+  <p class="row">
+    <button>Save</button>
+    <button class="secondary" formaction="/notifications/{{ c.id }}/test">Send a test</button>
+    <button class="danger" formaction="/notifications/{{ c.id }}/delete" data-confirm="Remove this channel?">Remove</button>
+  </p>
+</form>
+{% else %}<p class="quiet">No channels yet.</p>{% endfor %}
+
+<h2>Add a channel</h2>
+<form method="post" action="/notifications/add" class="card">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% include "_channel_add_form.html" %}
+  <p><button>Add channel</button></p>
+</form>
+
+<h2>General</h2>
+<form method="post" action="/settings/general" class="card">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label for="url">This page's address (linked in messages)</label>
+  <input id="url" type="url" name="url" value="{{ url }}" placeholder="https://192.168.1.50">
+  <label for="hc">healthchecks.io ping URL · {{ 'set' if hc else 'not set' }}{% if hc_last %}, last ping {{ hc_last | ts }}{% endif %}</label>
+  <input id="hc" type="password" name="hc_url" placeholder="{{ 'leave empty to keep' if hc else 'https://hc-ping.com/…' }}" autocomplete="off">
+  {% if hc %}<label class="check"><input type="checkbox" name="hc_clear"> Remove the heartbeat URL</label>{% endif %}
+  <div class="row">
+    <div><label for="rw">Weekly report day</label><select id="rw" name="report_weekday">
+      {% for d in ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] %}<option value="{{ loop.index0 }}" {{ 'selected' if loop.index0 == schedule.weekday }}>{{ d }}</option>{% endfor %}</select></div>
+    <div><label for="rt">Time</label><input id="rt" type="time" name="report_time" value="{{ schedule.time }}"></div>
+  </div>
+  <p class="row"><button>Save</button>
+    <button class="secondary" formaction="/report/send">Send the weekly report now</button></p>
+</form>
+{% endblock %}

@@ -1,0 +1,17 @@
+<div class="row">
+  <div><label for="ck">Type</label>
+    <select id="ck" name="kind">
+      {% for k in kinds %}<option value="{{ k }}">{{ {'telegram':'Telegram','ntfy':'ntfy'}[k] }}</option>{% endfor %}
+      {% for k in coming %}<option disabled>{{ k | capitalize }} (coming soon)</option>{% endfor %}
+    </select></div>
+  <div><label for="cn">Name</label><input id="cn" type="text" name="name" placeholder="e.g. Family chat" maxlength="60"></div>
+</div>
+<p class="quiet small"><b>Telegram:</b> create a bot with @BotFather, send it a message, then fill in the bot token and your chat ID.
+<b>ntfy:</b> pick a hard-to-guess topic and subscribe to it in the ntfy app.</p>
+<div class="row">
+  <div><label for="cc">Telegram chat ID</label><input id="cc" type="text" name="chat_id" placeholder="123456789"></div>
+  <div><label for="cs">ntfy server</label><input id="cs" type="text" name="server" placeholder="https://ntfy.sh"></div>
+  <div><label for="ct">ntfy topic</label><input id="ct" type="text" name="topic"></div>
+</div>
+<label for="sec">Bot token (Telegram) or access token (ntfy, optional) · stored encrypted, never shown again</label>
+<input id="sec" type="password" name="secret" autocomplete="off">

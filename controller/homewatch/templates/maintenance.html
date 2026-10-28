@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Maintenance{% endblock %}
+{% block content %}
+<h1>Maintenance windows</h1>
+<p class="quiet">During a window, problems are recorded but not sent. Anything still open when it ends is sent then.</p>
+<div class="card scroll">
+  <table>
+    <tr><th>Name</th><th>When</th><th>Checks</th><th>By</th><th></th></tr>
+    {% set days = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'] %}
+    {% for m in rows %}<tr>
+      <td>{{ m.name }}</td>
+      <td>{% if m.kind == 'weekly' %}Every {{ days[m.weekday] }} {{ '%02d:%02d' | format(m.start_min // 60, m.start_min % 60) }}, {{ m.dur_min }} min
+          {% else %}{{ m.start_ts | ts }} → {{ m.end_ts | ts }}{% if m.end_ts < now %} <span class="quiet">(past)</span>{% endif %}{% endif %}</td>
+      <td>{% if m.checks %}{% for k in json.loads(m.checks) %}{{ names.get(k, k) }}{{ ', ' if not loop.last }}{% endfor %}{% else %}All{% endif %}</td>
+      <td>{{ m.created_by }}</td>
+      <td><form class="inline" method="post" action="/maintenance/{{ m.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="danger">Remove</button></form></td>
+    </tr>{% else %}<tr><td colspan="5" class="quiet">No windows.</td></tr>{% endfor %}
+  </table>
+</div>
+<h2>Add a window</h2>
+<form method="post" action="/maintenance" class="card">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label for="mn">Name</label><input id="mn" type="text" name="name" placeholder="e.g. Router firmware update" maxlength="100">
+  <div class="grid2">
+    <fieldset><legend><label class="check"><input type="radio" name="kind" value="once" checked> One-off</label></legend>
+      <label for="ms">Start</label><input id="ms" type="datetime-local" name="start">
+      <label for="me">End</label><input id="me" type="datetime-local" name="end"></fieldset>
+    <fieldset><legend><label class="check"><input type="radio" name="kind" value="weekly"> Weekly</label></legend>
+      <div class="row">
+        <div><label for="mw">Day</label><select id="mw" name="weekday">{% for d in days %}<option value="{{ loop.index0 }}">{{ d }}</option>{% endfor %}</select></div>
+        <div><label for="mt">Start</label><input id="mt" type="time" name="start_time" value="03:00"></div>
+        <div><label for="md">Minutes</label><input class="num" id="md" type="number" name="dur_min" value="60" min="1"></div>
+      </div></fieldset>
+  </div>
+  <fieldset><legend>Checks</legend>
+    <label class="check"><input type="radio" name="scope" value="all" checked> All checks</label>
+    <label class="check"><input type="radio" name="scope" value="some"> Only these:</label>
+    <div class="row">{% for k, n in names.items() %}<label class="check"><input type="checkbox" name="check.{{ k }}"> {{ n }}</label>{% endfor %}</div>
+  </fieldset>
+  <button>Add window</button>
+</form>
+{% endblock %}

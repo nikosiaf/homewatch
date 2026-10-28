@@ -1,0 +1,36 @@
+<fieldset>
+  <legend><label class="check"><input type="checkbox" name="public.enabled" {{ 'checked' if s.public.enabled }}> Public ping</label></legend>
+  <p class="quiet small">Pings 1–4 public addresses every 30 s. The line counts as down only when none of them answers.</p>
+  <label for="pt">Targets (space or comma separated)</label>
+  <input id="pt" type="text" name="public.targets" value="{{ s.public.targets | join(' ') }}">
+</fieldset>
+<fieldset>
+  <legend><label class="check"><input type="checkbox" name="gateway.enabled" {{ 'checked' if s.gateway.enabled }}> Gateway ping</label></legend>
+  <p class="quiet small">Pings your router, so "router or LAN problem" can be told apart from "line down".</p>
+  <label for="gw">Gateway address</label>
+  <input id="gw" type="text" name="gateway.target" value="{{ s.gateway.target }}" placeholder="e.g. 192.168.1.1">
+</fieldset>
+<fieldset>
+  <legend><label class="check"><input type="checkbox" name="dns.enabled" {{ 'checked' if s.dns.enabled }}> DNS lookup</label></legend>
+  <p class="quiet small">Resolves a name through your home's DNS server every 60 s.</p>
+  <div class="row">
+    <div><label for="ds">DNS server</label><input id="ds" type="text" name="dns.server" value="{{ s.dns.server }}" placeholder="usually your router"></div>
+    <div><label for="dd">Name to look up</label><input id="dd" type="text" name="dns.domain" value="{{ s.dns.domain }}"></div>
+  </div>
+</fieldset>
+<fieldset>
+  <legend><label class="check"><input type="checkbox" name="speed.enabled" {{ 'checked' if s.speed.enabled }}> Speed test</label></legend>
+  <div class="row">
+    <div><label for="se">Engine</label>
+      <select id="se" name="speed.engine">
+        <option value="cloudflare" {{ 'selected' if s.speed.engine == 'cloudflare' }}>Cloudflare (no install)</option>
+        <option value="ookla" {{ 'selected' if s.speed.engine == 'ookla' }}>Ookla Speedtest CLI</option>
+      </select></div>
+    <div><label for="si">Every (hours)</label><input class="num" id="si" type="number" step="0.5" min="0.5" max="48" name="speed.interval_h" value="{{ s.speed.interval_h }}"></div>
+    <div><label for="cd">Contract download (Mbit/s)</label><input class="num" id="cd" type="number" step="any" min="0" name="speed.contract_down" value="{{ s.speed.contract_down }}"></div>
+    <div><label for="cu">Contract upload (Mbit/s)</label><input class="num" id="cu" type="number" step="any" min="0" name="speed.contract_up" value="{{ s.speed.contract_up }}"></div>
+  </div>
+  <label class="check" style="margin-top:12px"><input type="checkbox" name="speed.ookla_accepted" {{ 'checked' if s.speed.ookla_accepted }}>
+    I accept Ookla's <a href="https://www.speedtest.net/about/eula" target="_blank" rel="noopener">EULA</a> and
+    <a href="https://www.speedtest.net/about/privacy" target="_blank" rel="noopener">privacy policy</a> (only needed for the Ookla engine)</label>
+</fieldset>

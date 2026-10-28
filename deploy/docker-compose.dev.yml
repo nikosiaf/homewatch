@@ -1,0 +1,7 @@
+# Build the controller from source instead of pulling the release image:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+services:
+  controller:
+    image: homewatch:dev
+    build:
+      context: ../controller

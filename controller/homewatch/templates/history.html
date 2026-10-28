@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}History{% endblock %}
+{% block content %}
+<h1>History</h1>
+<div class="card">
+  <form class="row" method="get" action="/history">
+    <div><label for="c">Check</label><select id="c" name="check"><option value="">All checks</option>
+      {% for k, n in names.items() %}<option value="{{ k }}" {{ 'selected' if k == check }}>{{ n }}</option>{% endfor %}</select></div>
+    <div><label for="l">Worst level</label><select id="l" name="level"><option value="">Any</option>
+      <option value="1" {{ 'selected' if level == '1' }}>WARNING</option><option value="2" {{ 'selected' if level == '2' }}>ERROR</option></select></div>
+    <div><label for="d">Period</label><select id="d" name="days">
+      {% for d in [1, 7, 30, 90, 365] %}<option value="{{ d }}" {{ 'selected' if d == days }}>{{ d }} day{{ 's' if d > 1 }}</option>{% endfor %}</select></div>
+    <div><button>Show</button></div>
+  </form>
+  <p>Internet uptime over {{ days }} day{{ 's' if days > 1 }}: <b>{{ '%.2f' | format(uptime) }} %</b> · {{ outages }} outage{{ 's' if outages != 1 }}</p>
+</div>
+<div class="card scroll"><table>
+  <tr><th>Check</th><th>Worst</th><th>Started</th><th>Resolved</th><th>Duration</th><th>Detail</th></tr>
+  {% for i in rows %}<tr>
+    <td>{{ names.get(i.check_key, i.check_key) }}</td>
+    <td><span class="badge s{{ i.worst }}">{{ LEVEL_WORD[i.worst] }}</span></td>
+    <td>{{ i.started | ts }}</td>
+    <td>{% if i.resolved %}{{ i.resolved | ts }}{% else %}<b>open</b>{% endif %}</td>
+    <td>{{ ((i.resolved or now) - i.started) | dur }}</td>
+    <td>{{ i.detail }}{% if i.resolved_detail %}<div class="quiet small">→ {{ i.resolved_detail }}</div>{% endif %}</td>
+  </tr>{% else %}<tr><td colspan="6" class="quiet">No issues in this period.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

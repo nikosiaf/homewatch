@@ -1,0 +1,35 @@
+name: test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r controller/requirements-dev.txt
+      - run: python -m pytest -q
+        working-directory: controller
+  stack:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the stack from source
+        working-directory: deploy
+        run: |
+          ./install.sh --dev
+          for i in $(seq 1 30); do
+            curl -skf https://localhost/healthz && break
+            sleep 2
+          done
+          curl -skf https://localhost/healthz
+          curl -sk -o /dev/null -w '%{http_code} %{redirect_url}\n' https://localhost/ | grep -q '^303'
+      - name: Logs
+        if: always()
+        working-directory: deploy
+        run: docker compose logs --tail 50

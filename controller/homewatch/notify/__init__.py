@@ -1,0 +1,185 @@
+"""Notifications: render events per channel, queue them in the outbox, deliver with retries.
+
+Messages are queued first and sent by a separate loop, so nothing is lost while the line is down;
+when several messages wait for the same channel they go out as one.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import httpx
+
+from ..db import DB
+from ..engine import Event, tz
+from ..modules import ERROR, LEVEL_WORD, OK, WARNING
+from ..secrets import Secrets
+from . import ntfy, telegram
+
+log = logging.getLogger("homewatch.notify")
+
+ICON = {OK: "✅", WARNING: "🟡", ERROR: "🔴"}
+KINDS = {"telegram": telegram, "ntfy": ntfy}
+COMING_SOON = ("email", "webhook")
+RETRY_MAX = 120
+
+
+@dataclass
+class Message:
+    level: int
+    title: str
+    body: str
+
+
+def channel_secret(channel_id: int) -> str:
+    return f"channel.{channel_id}"
+
+
+def _dur(seconds: float) -> str:
+    m = int(seconds // 60)
+    if m < 60:
+        return f"{max(m, 1)} min"
+    h, m = divmod(m, 60)
+    if h < 48:
+        return f"{h} h {m} min" if m else f"{h} h"
+    return f"{h // 24} d {h % 24} h"
+
+
+def _hm(ts: float, zone: ZoneInfo) -> str:
+    return datetime.fromtimestamp(ts, zone).strftime("%H:%M")
+
+
+def render(events: list[Event], home: str, open_counts: tuple[int, int], link: str, zone: ZoneInfo) -> Message:
+    level = max((e.level for e in events), default=OK)
+    if all(e.kind in ("resolve", "selfok") for e in events):
+        title = f"{ICON[OK]} {home}: back to OK"
+    elif all(e.kind == "remind" for e in events):
+        title = f"{ICON[level]} {home}: still {LEVEL_WORD[level]} (reminder)"
+    else:
+        title = f"{ICON[level]} {home}: {LEVEL_WORD[level]}"
+    lines = []
+    for e in sorted(events, key=lambda e: (-e.level, e.name)):
+        if e.kind in ("resolve", "selfok"):
+            span = ""
+            if e.started and e.resolved:
+                span = f" after {_dur(e.resolved - e.started)} ({_hm(e.started, zone)}–{_hm(e.resolved, zone)})"
+            lines.append(f"{ICON[OK]} OK · {e.name}{span}\n    {e.detail}")
+        else:
+            since = f" since {_hm(e.started, zone)}" if e.kind == "remind" and e.started else ""
+            lines.append(f"{ICON[e.level]} {LEVEL_WORD[e.level]} · {e.name}{since}\n    {e.detail}")
+    errors, warnings = open_counts
+    footer = "All checks OK." if not (errors or warnings) else f"Open now: {errors} error, {warnings} warning"
+    body = "\n".join(lines) + f"\n\n{footer}" + (f"\n{link}" if link else "")
+    return Message(level, title, body)
+
+
+def in_quiet(channel, now: float, zone: ZoneInfo) -> float | None:
+    """When the channel is in quiet hours, return the timestamp they end."""
+    qs, qe = channel["quiet_start"], channel["quiet_end"]
+    if not qs or not qe:
+        return None
+    local = datetime.fromtimestamp(now, zone)
+    sh, sm = map(int, qs.split(":"))
+    eh, em = map(int, qe.split(":"))
+    for back in (0, 1):
+        day = local.date() - timedelta(days=back)
+        start = datetime(day.year, day.month, day.day, sh, sm, tzinfo=zone)
+        end = datetime(day.year, day.month, day.day, eh, em, tzinfo=zone)
+        if end <= start:
+            end += timedelta(days=1)
+        if start <= local < end:
+            return end.timestamp()
+    return None
+
+
+class Notifier:
+    def __init__(self, db: DB, secrets: Secrets, http: httpx.AsyncClient | None = None):
+        self.db = db
+        self.secrets = secrets
+        self.http = http or httpx.AsyncClient(timeout=20)
+
+    def channels(self, enabled_only: bool = True):
+        q = "SELECT * FROM channels" + (" WHERE enabled=1" if enabled_only else "") + " ORDER BY id"
+        return self.db.all(q)
+
+    def dispatch(self, events: list[Event], open_counts: tuple[int, int], now: float | None = None) -> int:
+        """Queue one message per channel that wants at least one of the events."""
+        if not events:
+            return 0
+        now = now or time.time()
+        zone = tz(self.db)
+        home = self.db.get("home.name") or "Home"
+        link = self.db.get("home.url") or ""
+        queued = 0
+        for ch in self.channels():
+            levels = set(json.loads(ch["levels"]))
+            mine = [e for e in events if e.route_level in levels]
+            if not mine:
+                continue
+            msg = render(mine, home, open_counts, link, zone)
+            next_try = now
+            if msg.level < ERROR:
+                quiet_end = in_quiet(ch, now, zone)
+                if quiet_end:
+                    next_try = quiet_end
+            self.queue(ch["id"], msg, now, next_try)
+            queued += 1
+        return queued
+
+    def queue(self, channel_id: int, msg: Message, now: float, next_try: float | None = None) -> None:
+        self.db.run("INSERT INTO outbox(channel_id,created,level,title,body,next_try) VALUES(?,?,?,?,?,?)",
+                    (channel_id, now, msg.level, msg.title, msg.body, next_try if next_try is not None else now))
+
+    async def send_due(self, now: float | None = None) -> int:
+        """Deliver due messages; several waiting for one channel are joined into one."""
+        now = now or time.time()
+        sent = 0
+        zone = tz(self.db)
+        due = self.db.all("SELECT * FROM outbox WHERE next_try<=? ORDER BY channel_id, created", (now,))
+        by_channel: dict[int, list] = {}
+        for row in due:
+            by_channel.setdefault(row["channel_id"], []).append(row)
+        for ch_id, rows in by_channel.items():
+            ch = self.db.one("SELECT * FROM channels WHERE id=?", (ch_id,))
+            ids = [r["id"] for r in rows]
+            if ch is None or not ch["enabled"]:
+                self.db.run(f"DELETE FROM outbox WHERE id IN ({','.join('?' * len(ids))})", ids)
+                continue
+            msg = join(rows, zone, now)
+            try:
+                await self.deliver(ch, msg)
+            except Exception as e:  # noqa: BLE001 - any failure means "try again later"
+                attempts = max(r["attempts"] for r in rows) + 1
+                delay = min(15 * 2 ** (attempts - 1), RETRY_MAX)
+                self.db.run(f"UPDATE outbox SET attempts=?, next_try=?, last_error=? WHERE id IN "
+                            f"({','.join('?' * len(ids))})", (attempts, now + delay, str(e)[:300], *ids))
+                log.warning("channel %s: send failed (%s), retry in %ss", ch["name"], e, delay)
+                continue
+            self.db.run(f"DELETE FROM outbox WHERE id IN ({','.join('?' * len(ids))})", ids)
+            sent += 1
+        return sent
+
+    async def deliver(self, ch, msg: Message) -> None:
+        mod = KINDS.get(ch["kind"])
+        if mod is None:
+            raise RuntimeError(f"channel type {ch['kind']} is not available yet")
+        config = json.loads(ch["config"])
+        secret = self.secrets.get(channel_secret(ch["id"])) or ""
+        await mod.send(self.http, config, secret, msg.level, msg.title, msg.body)
+
+
+def join(rows, zone: ZoneInfo, now: float) -> Message:
+    if len(rows) == 1:
+        r = rows[0]
+        late = now - r["created"] > 300
+        suffix = f"\n\n(queued at {_hm(r['created'], zone)}, delivered late)" if late else ""
+        return Message(r["level"], r["title"], r["body"] + suffix)
+    level = max(r["level"] for r in rows)
+    parts = [f"— {_hm(r['created'], zone)} · {r['title']}\n{r['body']}" for r in rows]
+    title = f"{ICON[level]} {len(rows)} updates (queued while offline)"
+    return Message(level, title, "\n\n".join(parts))

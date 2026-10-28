@@ -1,0 +1,4 @@
+<label for="hn">Home name (used in messages)</label>
+<input id="hn" type="text" name="name" value="{{ home }}" maxlength="60" required>
+<label for="tz">Time zone</label>
+<select id="tz" name="tz">{% for z in zones %}<option value="{{ z }}" {{ 'selected' if z == tzname }}>{{ z }}</option>{% endfor %}</select>

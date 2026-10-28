@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Setup{% endblock %}
+{% block content %}
+<div class="card" style="max-width:760px;margin:0 auto">
+  <h1>Notifications</h1>
+  {% include "_steps.html" %}
+  <p class="quiet">Add one channel now; you can add more, test them and set quiet hours under Notifications.</p>
+  <form method="post" action="/setup/notify">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    {% include "_channel_add_form.html" %}
+    <p><button>Add and continue</button> <button class="secondary" name="skip" value="1" formnovalidate>Skip</button></p>
+  </form>
+</div>
+{% endblock %}

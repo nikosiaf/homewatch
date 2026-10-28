@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Setup{% endblock %}
+{% block content %}
+<div class="card narrow">
+  <h1>Welcome to homewatch</h1>
+  {% include "_steps.html" %}
+  <p class="quiet">Create the admin account. You can add read-only viewer accounts later.</p>
+  <form method="post" action="/setup">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label for="u">Username</label><input id="u" type="text" name="username" autocomplete="username" required autofocus>
+    <label for="p">Password (at least 10 characters)</label><input id="p" type="password" name="password" autocomplete="new-password" minlength="10" required>
+    <label for="p2">Password again</label><input id="p2" type="password" name="password2" autocomplete="new-password" minlength="10" required>
+    <p><button>Create account</button></p>
+  </form>
+</div>
+{% endblock %}

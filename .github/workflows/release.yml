@@ -1,0 +1,41 @@
+name: release
+on:
+  push:
+    tags: ["v*.*.*"]
+permissions:
+  contents: write
+  packages: write
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r controller/requirements-dev.txt && python -m pytest -q
+        working-directory: controller
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: v
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: controller
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ steps.v.outputs.version }}
+          tags: ghcr.io/nikosiaf/homewatch:${{ steps.v.outputs.version }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+      - name: GitHub release with the deploy files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sed -i "s/^HW_VERSION=.*/HW_VERSION=${{ steps.v.outputs.version }}/" deploy/.env.example
+          gh release create "$GITHUB_REF_NAME" --generate-notes \
+            deploy/docker-compose.yml deploy/Caddyfile deploy/.env.example deploy/install.sh
