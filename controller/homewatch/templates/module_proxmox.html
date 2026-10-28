@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% from "_note.html" import note with context %}
+{% block title %}Proxmox VE{% endblock %}
+{% block content %}
+<h1><a href="/modules" class="quiet" style="text-decoration:none">Modules</a> › {{ module.name }}</h1>
+<p class="quiet">Watches a Proxmox VE host or cluster through a read-only API token: nodes, guests, storage,
+disk health and backups. Nothing on Proxmox is changed.</p>
+
+{% macro fields(s) %}
+  <div class="row">
+    <div><label for="pu">Proxmox address</label><input id="pu" type="text" name="url" value="{{ s.url }}" placeholder="https://192.168.1.10:8006"></div>
+    <div><label for="pt">Token ID</label><input id="pt" type="text" name="token_id" value="{{ s.token_id }}" autocomplete="off"></div>
+    <div><label for="ps">Token secret · {{ 'set' if has_secret else 'not set' }}</label>
+      <input id="ps" type="password" name="secret" placeholder="{{ 'leave empty to keep' if has_secret else 'xxxxxxxx-xxxx-…' }}" autocomplete="new-password"></div>
+  </div>
+  <label class="check"><input type="checkbox" name="verify" {{ 'checked' if s.verify }}> Check the HTTPS certificate (leave off for Proxmox's own self-signed certificate)</label>
+{% endmacro %}
+
+{% if not configured %}
+<form method="post" action="/modules/proxmox" class="card" id="settings">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="settings">
+  <h2 style="margin-top:0">Add a Proxmox host</h2>
+  {{ note("settings") }}
+  <div class="callout">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11v6M12 7.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <div><b>First create a read-only token on Proxmox</b>
+      <p class="small" style="margin:4px 0">In the Proxmox shell (node → Shell), run:</p>
+      <pre class="code">{% for c in setup_commands %}{{ c }}
+{% endfor %}</pre>
+      <p class="small" style="margin:4px 0 0">The last command prints the token's secret once: paste it below. The token can only read
+        (role PVEAuditor). You can also do this in the GUI under Datacenter → Permissions.</p></div>
+  </div>
+  {{ fields(s) }}
+  <p><button>Connect</button> <span class="quiet small">homewatch tests the token before saving anything.</span></p>
+</form>
+{% else %}
+<form method="post" action="/modules/proxmox" class="card {{ 'off' if not s.enabled }}" id="settings">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="settings">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">{{ s.url }}</h2>
+    <label class="check"><input type="checkbox" name="enabled" data-enable-toggle {{ 'checked' if s.enabled }}> Enabled</label>
+  </div>
+  {{ note("settings") }}
+  {% if pve_error %}<p class="flash err">{{ pve_error }}</p>{% endif %}
+  <fieldset data-enable-target class="plain" {{ 'disabled' if not s.enabled }}>
+    {{ fields(s) }}
+    <h3>Guests to watch</h3>
+    <p class="quiet small">Ticked guests must be running ("Guests running" check), and their backups are checked when a backup job covers them.</p>
+    <div class="scroll"><table>
+      <tr><th>Watch</th><th>ID</th><th>Name</th><th>Type</th><th>Status</th><th>Newest backup</th></tr>
+      {% for g in guests %}<tr>
+        <td><input type="checkbox" name="watch.{{ g.vmid }}" {{ 'checked' if g.watched }} aria-label="watch {{ g.name }}"></td>
+        <td>{{ g.vmid }}</td><td>{{ g.name }}</td><td>{{ 'VM' if g.type == 'qemu' else 'container' }}</td>
+        <td>{% if g.status == 'running' %}<span class="badge s0">running</span>{% else %}<span class="badge mute">{{ g.status }}</span>{% endif %}</td>
+        <td class="small">{% if not g.covered %}<span class="quiet">not in a backup job</span>
+          {% elif g.backup_failed %}<span style="color:var(--err)">failed {{ g.backup_failed | ts }}</span>
+          {% elif g.backup_ok %}{{ g.backup_ok | ts }}{% else %}<span class="quiet">none in 8 days</span>{% endif %}</td>
+      </tr>{% else %}<tr><td colspan="6" class="quiet">No reading yet; it appears after the next check run.</td></tr>{% endfor %}
+    </table></div>
+  </fieldset>
+  <p class="row"><button data-save>Save</button>
+    <button class="danger" name="remove" value="1" data-confirm="Remove this Proxmox host and its token from homewatch?" formnovalidate>Remove host</button></p>
+</form>
+
+{% if s.enabled and snap %}
+<div class="card scroll" id="overview">
+  <h2 style="margin-top:0">Last reading <span class="quiet small">{{ snap_ts | ts('%H:%M:%S') }}</span></h2>
+  <table>
+    <tr><th>Node</th><th>Status</th><th>CPU</th><th>Memory</th><th>Root disk</th><th>Up for</th></tr>
+    {% for n in snap.nodes %}<tr><td>{{ n.node }}</td><td>{{ n.status }}</td>
+      <td>{{ '%.0f %%' | format((n.cpu or 0) * 100) }} of {{ n.maxcpu }}</td>
+      <td>{{ '%.0f %%' | format(100 * n.mem / n.maxmem) if n.maxmem }}</td>
+      <td>{{ '%.0f %%' | format(100 * n.disk / n.maxdisk) if n.maxdisk }}</td>
+      <td>{{ n.uptime | dur if n.uptime }}</td></tr>{% endfor %}
+  </table>
+  <h3>Storage</h3>
+  <table>
+    <tr><th>Storage</th><th>Type</th><th>Status</th><th>Used</th></tr>
+    {% for x in snap.storages | sort(attribute='storage') %}<tr><td>{{ x.storage }}</td><td>{{ x.plugintype }}</td><td>{{ x.status }}</td>
+      <td>{% if x.maxdisk %}{{ '%.0f %%' | format(100 * x.disk / x.maxdisk) }} of {{ '%.0f' | format(x.maxdisk / 1e9) }} GB{% endif %}</td></tr>{% endfor %}
+  </table>
+  {% for node, disks in snap.disks.items() if disks %}
+  <h3>Disks on {{ node }}</h3>
+  <table>
+    <tr><th>Device</th><th>Model</th><th>Type</th><th>SMART</th><th>Life left</th></tr>
+    {% for d in disks %}<tr><td>{{ d.devpath }}</td><td>{{ d.model }}</td><td>{{ d.type }}</td><td>{{ d.health }}</td>
+      <td>{{ (d.wearout ~ ' %') if d.wearout not in (none, 'N/A') else '—' }}</td></tr>{% endfor %}
+  </table>
+  {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

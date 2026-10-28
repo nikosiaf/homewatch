@@ -378,9 +378,15 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             err = await _ookla_ready(rt, form, request.state.user)
             if err:
                 return back(f"/modules/{mid}", err=err)
+        if hasattr(m, "prepare_save"):  # e.g. test the connection before anything is stored
+            err = await m.prepare_save(rt, form)
+            if err:
+                return back(f"/modules/{mid}", err=err)
         err = m.save(rt, form, request.state.user)
         if err:
             return back(f"/modules/{mid}", err=err)
+        if form.get("remove"):
+            return back(f"/modules/{mid}", msg="Removed")
         removed = mid == "speedport" and not form.get("model") and not m.page_ctx(rt)["configured"]
         return back(f"/modules/{mid}", msg="Modem removed" if removed else "Saved")
 

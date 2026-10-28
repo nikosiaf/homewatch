@@ -342,3 +342,31 @@ def test_system_health_lists_probes_and_ookla(client):
     page = client.get("/system").text
     assert "Telegraf (ping and DNS probes)" in page and "last data 20 s ago" in page
     assert "Ookla Speedtest CLI" in page and "not installed" in page
+
+
+def test_add_proxmox_tests_before_saving(client, monkeypatch):
+    tok = setup_admin(client)
+    from homewatch.modules.proxmox.plugin import plugin
+    from tests.test_proxmox import snap
+
+    async def bad(*a, **k):
+        return None, "Proxmox rejected the API token"
+
+    monkeypatch.setattr(plugin, "test", bad)
+    r = client.post("/modules/proxmox", data={"csrf": tok, "url": "192.168.1.10", "token_id": "homewatch@pve!monitor",
+                                              "secret": "x"})
+    assert "Nothing saved: Proxmox rejected the API token" in r.text
+    assert client.rt.db.get("module.proxmox") is None
+
+    async def good(*a, **k):
+        return snap(), ""
+
+    monkeypatch.setattr(plugin, "test", good)
+    r = client.post("/modules/proxmox", data={"csrf": tok, "url": "192.168.1.10", "token_id": "homewatch@pve!monitor",
+                                              "secret": "x"})
+    s = client.rt.db.get("module.proxmox")
+    assert s["url"] == "https://192.168.1.10:8006" and s["watched"] == [100, 104]  # the running guests
+    assert "Guests to watch" in r.text and client.rt.secrets.get("module.proxmox.token") == "x"
+    r = client.post("/modules/proxmox", data={"csrf": tok, "remove": "1"})
+    assert "Removed" in r.text and client.rt.db.get("module.proxmox") is None
+    plugin.snap = None

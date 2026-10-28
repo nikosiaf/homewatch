@@ -11,7 +11,7 @@ LEVEL_WORD = {OK: "OK", WARNING: "WARNING", ERROR: "ERROR"}
 CATALOG = [
     ("internet", "Internet line", True),
     ("speedport", "ISP modem", True),
-    ("proxmox", "Proxmox VE", False),
+    ("proxmox", "Proxmox VE", True),
     ("opnsense", "OPNsense", False),
     ("homeassistant", "Home Assistant", False),
     ("pbs", "Proxmox Backup Server", False),

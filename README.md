@@ -63,6 +63,24 @@ Things to know before you add a modem:
 - **Rejected logins:** after a rejected login homewatch waits 6 hours, because the modem slows
   down further attempts.
 
+### Proxmox VE module (optional)
+
+Watches a Proxmox VE host or cluster through a **read-only API token** (role PVEAuditor; the module
+page shows the three commands to create it). homewatch tests the token before saving anything.
+
+| Check | WARNING | ERROR |
+|---|---|---|
+| API reachable | | can't connect, or the token is rejected |
+| Node online | | a node is offline |
+| Node CPU / memory / root disk | ≥ 85 / 90 / 85 % | ≥ 95 % |
+| Guests running | | a guest you chose to watch is not running |
+| Storage | ≥ 85 % full | ≥ 95 % full, or a storage unavailable |
+| Disk health | SSD life left < 20 % | SMART not PASSED, or life left < 10 % |
+| Backups (watched guests in a backup job) | newest > 26 h old, or none yet | newest > 50 h old, or the last attempt failed |
+
+Backup results come from Proxmox's backup task logs (a read-only token can't list backup contents);
+each log is read once.
+
 ### Alerts and notifications
 
 Notification providers: **Telegram**, **ntfy** (one topic URL) and the **healthchecks.io

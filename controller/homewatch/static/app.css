@@ -101,3 +101,5 @@ details.module > summary::-webkit-details-marker { display: none; }
 details.module > summary::after { content: "▸"; margin-left: auto; color: var(--quiet); }
 details.module[open] > summary::after { content: "▾"; }
 details.module > .tiles { padding: 0 14px 14px; }
+pre.code { background: var(--muted-bg); padding: 10px 12px; border-radius: 8px; overflow-x: auto; font-size: 13px; margin: 6px 0; }
+h3 { font-size: 15px; margin: 18px 0 8px; }
