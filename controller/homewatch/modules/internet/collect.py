@@ -25,8 +25,10 @@ async def collect(metrics: Metrics, db: DB, site: str, now: float | None = None)
         last_ts = await by_target(f"tlast_over_time(ping_percent_packet_loss{s}[1h])")
         loss_now = await by_target(f"last_over_time(ping_percent_packet_loss{s}[90s])")
         loss_avg = await by_target(f"avg_over_time(ping_percent_packet_loss{s}[5m])")
-        rtt = await by_target(f"avg_over_time(ping_average_response_ms{s}[5m])")
-        jitter = await by_target(f"avg_over_time(ping_standard_deviation_ms{s}[10m])")
+        # medians: one odd ping round must not raise an alert on its own (a single 1.1 s round once
+        # pushed the 10-minute jitter average to 56 ms); sustained trouble still moves the median
+        rtt = await by_target(f"median_over_time(ping_average_response_ms{s}[5m])")
+        jitter = await by_target(f"median_over_time(ping_standard_deviation_ms{s}[10m])")
         targets = {
             url: Target(loss_now.get(url), loss_avg.get(url), rtt.get(url), jitter.get(url), ts)
             for url, ts in last_ts.items()
@@ -40,7 +42,7 @@ async def collect(metrics: Metrics, db: DB, site: str, now: float | None = None)
     last = await metrics.query(f"tlast_over_time(dns_query_result_code{s}[1h])", at=now)
     if last:
         code = await metrics.query(f"max(last_over_time(dns_query_result_code{s}[150s]))", at=now)
-        qtime = await metrics.query(f"avg(avg_over_time(dns_query_query_time_ms{s}[5m]))", at=now)
+        qtime = await metrics.query(f"avg(median_over_time(dns_query_query_time_ms{s}[5m]))", at=now)
         c = int(code[0][2]) if code else None
         r.dns = Dns(
             ok_now=None if c is None else c == 0,

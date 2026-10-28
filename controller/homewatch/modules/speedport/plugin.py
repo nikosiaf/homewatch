@@ -115,7 +115,14 @@ class SpeedportModule(Module):
         # greyed-out fields (module off, no JavaScript) are not sent: keep what was there
         form = {**{k: str(old[k]) for k in ("model", "host", "username", "interval_min")}, **form}
         if not form.get("model"):
-            return "Choose your modem first"
+            if rt.db.get(KEY) is None:
+                return "Choose your modem first"
+            # "None": forget the modem: settings, password and last reading; its checks close silently
+            rt.db.run("DELETE FROM settings WHERE key IN (?, ?)", (KEY, STATE))
+            rt.secrets.delete(SECRET)
+            audit(rt.db, user.username, "speedport", "modem removed")
+            rt.wake.set()
+            return ""
         host = form.get("host", "").strip()
         if not valid_host(host):
             return "Modem address: an IP address or host name"

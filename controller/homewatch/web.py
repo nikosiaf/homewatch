@@ -379,7 +379,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             if err:
                 return back(f"/modules/{mid}", err=err)
         err = m.save(rt, form, request.state.user)
-        return back(f"/modules/{mid}", err=err) if err else back(f"/modules/{mid}", msg="Saved")
+        if err:
+            return back(f"/modules/{mid}", err=err)
+        removed = mid == "speedport" and not form.get("model") and not m.page_ctx(rt)["configured"]
+        return back(f"/modules/{mid}", msg="Modem removed" if removed else "Saved")
 
     @app.post("/modules/speedport/read")
     async def speedport_read(request: Request):

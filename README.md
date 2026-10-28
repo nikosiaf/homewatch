@@ -29,8 +29,8 @@ Every probe can be switched off, and every threshold changed, in the web page.
 |---|---|---|
 | Internet reachable | | all public targets at 100 % loss |
 | Packet loss (5-min average) | ≥ 10 % | ≥ 20 % |
-| Latency (5-min average) | ≥ 100 ms | |
-| Jitter (10-min average) | ≥ 15 ms | ≥ 30 ms |
+| Latency (5-min median) | ≥ 100 ms | |
+| Jitter (10-min median) | ≥ 15 ms | ≥ 30 ms |
 | Gateway reachable | | 100 % loss |
 | DNS | ≥ 500 ms | lookups fail while ping works |
 | Line speed | < 70 % of contract on 2 tests in a row | |

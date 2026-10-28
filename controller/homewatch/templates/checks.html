@@ -3,36 +3,6 @@
 {% block title %}Checks{% endblock %}
 {% block content %}
 <h1>Checks and thresholds</h1>
-<form method="post" action="/checks" id="thresholds">
-<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="thresholds">
-{{ note("thresholds") }}
-{% for m, th in groups %}
-<h2>{{ m.name }}</h2>
-<input type="hidden" name="{{ m.id }}.present" value="1">
-<div class="card scroll"><table>
-  <tr><th>On</th><th>Check</th><th>Now</th><th>WARNING at</th><th>ERROR at</th></tr>
-  {% for d in m.checks %}{% set key = m.id ~ '.' ~ d.id %}{% set t = th[d.id] %}{% set c = current.get(key) %}
-  <tr>
-    <td><input type="checkbox" name="{{ key }}.enabled" {{ 'checked' if t.enabled }} aria-label="enable {{ d.name }}"></td>
-    <td><b>{{ d.name }}</b><div class="quiet small">{{ d.help }}</div></td>
-    <td>{% if c %}<span class="badge s{{ c.effective }}">{{ LEVEL_WORD[c.effective] }}</span>
-        <div class="quiet small">{{ c.detail }}</div>{% else %}<span class="quiet">—</span>{% endif %}</td>
-    <td>{% if 'warn' in d.editable %}<input class="num" type="number" step="any" name="{{ key }}.warn" value="{{ t.warn if t.warn is not none }}"> {{ d.unit }}{% if d.lower_is_worse %} <span class="quiet small">(below)</span>{% endif %}{% else %}<span class="quiet">fixed</span>{% endif %}</td>
-    <td>{% if 'error' in d.editable %}<input class="num" type="number" step="any" name="{{ key }}.error" value="{{ t.error if t.error is not none }}"> {{ d.unit }}{% if d.lower_is_worse %} <span class="quiet small">(below)</span>{% endif %}{% else %}<span class="quiet">fixed</span>{% endif %}</td>
-  </tr>{% endfor %}
-</table></div>
-{% endfor %}
-<p class="quiet small">Empty a field to switch that level off. "fixed" checks are ERROR when their condition is met.</p>
-<h2>Timing</h2>
-<div class="card row">
-  <div><label for="ti">Run every (s)</label><input class="num" id="ti" type="number" name="timing.interval" value="{{ timing.interval | int }}"></div>
-  <div><label for="tc">Confirm after (runs)</label><input class="num" id="tc" type="number" name="timing.confirm" value="{{ timing.confirm | int }}"></div>
-  <div><label for="tr">Remind every (h, 0 = off)</label><input class="num" id="tr" type="number" step="any" name="timing.remind_h" value="{{ timing.remind_h }}"></div>
-  <div><label for="tf">Alert about itself after (failed runs)</label><input class="num" id="tf" type="number" name="timing.fail_alert" value="{{ timing.fail_alert | int }}"></div>
-  <div class="quiet small">Defaults: {{ default_timing.interval }} s · {{ default_timing.confirm }} runs · {{ default_timing.remind_h }} h · {{ default_timing.fail_alert }} runs</div>
-</div>
-<p><button data-save>Save</button></p>
-</form>
 <h2>Snooze</h2>
 <div class="card" id="snooze">
   {{ note("snooze") }}
@@ -52,4 +22,36 @@
     <div><button>Snooze</button></div>
   </form>
 </div>
+
+<form method="post" action="/checks" id="thresholds">
+<input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="thresholds">
+{{ note("thresholds") }}
+<h2>Timing</h2>
+<div class="card row">
+  <div><label for="ti">Run every (s)</label><input class="num" id="ti" type="number" name="timing.interval" value="{{ timing.interval | int }}"></div>
+  <div><label for="tc">Confirm after (runs)</label><input class="num" id="tc" type="number" name="timing.confirm" value="{{ timing.confirm | int }}"></div>
+  <div><label for="tr">Remind every (h, 0 = off)</label><input class="num" id="tr" type="number" step="any" name="timing.remind_h" value="{{ timing.remind_h }}"></div>
+  <div><label for="tf">Alert about itself after (failed runs)</label><input class="num" id="tf" type="number" name="timing.fail_alert" value="{{ timing.fail_alert | int }}"></div>
+  <div class="quiet small">Defaults: {{ default_timing.interval }} s · {{ default_timing.confirm }} runs · {{ default_timing.remind_h }} h · {{ default_timing.fail_alert }} runs</div>
+</div>
+<h2>Thresholds</h2>
+{% for m, th in groups %}
+<h2>{{ m.name }}</h2>
+<input type="hidden" name="{{ m.id }}.present" value="1">
+<div class="card scroll"><table>
+  <tr><th>On</th><th>Check</th><th>Now</th><th>WARNING at</th><th>ERROR at</th></tr>
+  {% for d in m.checks %}{% set key = m.id ~ '.' ~ d.id %}{% set t = th[d.id] %}{% set c = current.get(key) %}
+  <tr>
+    <td><input type="checkbox" name="{{ key }}.enabled" {{ 'checked' if t.enabled }} aria-label="enable {{ d.name }}"></td>
+    <td><b>{{ d.name }}</b><div class="quiet small">{{ d.help }}</div></td>
+    <td>{% if c %}<span class="badge s{{ c.effective }}">{{ LEVEL_WORD[c.effective] }}</span>
+        <div class="quiet small">{{ c.detail }}</div>{% else %}<span class="quiet">—</span>{% endif %}</td>
+    <td>{% if 'warn' in d.editable %}<input class="num" type="number" step="any" name="{{ key }}.warn" value="{{ t.warn if t.warn is not none }}"> {{ d.unit }}{% if d.lower_is_worse %} <span class="quiet small">(below)</span>{% endif %}{% else %}<span class="quiet">fixed</span>{% endif %}</td>
+    <td>{% if 'error' in d.editable %}<input class="num" type="number" step="any" name="{{ key }}.error" value="{{ t.error if t.error is not none }}"> {{ d.unit }}{% if d.lower_is_worse %} <span class="quiet small">(below)</span>{% endif %}{% else %}<span class="quiet">fixed</span>{% endif %}</td>
+  </tr>{% endfor %}
+</table></div>
+{% endfor %}
+<p class="quiet small">Empty a field to switch that level off. "fixed" checks are ERROR when their condition is met.</p>
+<p><button data-save>Save</button></p>
+</form>
 {% endblock %}

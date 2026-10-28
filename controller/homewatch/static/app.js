@@ -71,6 +71,14 @@ document.querySelectorAll("button[data-save]").forEach(function (btn) {
       if (ookla && eula && !eula.checked) ok = false;
       btn.textContent = ookla && !btn.dataset.ooklaInstalled ? "Save and install Ookla CLI" : "Save";
     }
+    const remove = form.querySelector("[data-remove-select]");
+    if (remove) {  // ISP modem: model "None" removes the modem
+      const removing = remove.value === "";
+      btn.textContent = removing ? "Remove modem" : "Save";
+      btn.classList.toggle("danger", removing);
+      if (removing) btn.dataset.confirm = "Remove this modem with its settings, password and last reading?";
+      else delete btn.dataset.confirm;
+    }
     btn.disabled = !ok;
   }
   form.addEventListener("input", update);

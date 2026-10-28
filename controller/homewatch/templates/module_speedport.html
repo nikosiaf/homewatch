@@ -54,11 +54,12 @@ line uptime and resyncs. Values are only read, never changed.</p>
     <label class="check"><input type="checkbox" name="enabled" data-enable-toggle {{ 'checked' if s.enabled }}> Enabled</label>
   </div>
   {{ note("settings") }}
+  <div class="row"><div><label for="mm">Modem model</label><select id="mm" name="model" data-remove-select>
+    {% for k, m in models.items() %}<option value="{{ k }}" {{ 'selected' if k == s.model }}>{{ m.name }}</option>{% endfor %}
+    <option value="">None (remove this modem)</option>
+    <option disabled>More models coming</option></select></div></div>
   <fieldset data-enable-target class="plain" {{ 'disabled' if not s.enabled }}>
     <p class="quiet small">{{ models[s.model].about }}</p>
-    <div class="row"><div><label for="mm">Modem model</label><select id="mm" name="model">
-      {% for k, m in models.items() %}<option value="{{ k }}" {{ 'selected' if k == s.model }}>{{ m.name }}</option>{% endfor %}
-      <option disabled>More models coming</option></select></div></div>
     {{ fields(s) }}
   </fieldset>
   <p><button data-save>Save</button></p>

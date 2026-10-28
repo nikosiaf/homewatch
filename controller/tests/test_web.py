@@ -315,3 +315,20 @@ def test_history_shows_back_to_ok_events(client):
     assert "Back to OK: packet loss 0.0 %" in page and "after 5 min" in page
     assert "still open" in page and "DNS failing" in page
     assert page.index("DNS failing") < page.index("Back to OK") < page.index("packet loss 12 %")  # newest first
+
+
+def test_modem_model_none_removes_it(client):
+    tok = setup_admin(client)
+    client.post("/modules/speedport", data={"csrf": tok, "enabled": "on", "model": "speedport-plus-2",
+                                            "host": "192.168.1.1", "username": "admin", "password": "pw",
+                                            "interval_min": "15"})
+    r = client.post("/modules/speedport", data={"csrf": tok, "enabled": "on", "model": ""})
+    assert "Modem removed" in r.text and "Add modem" in r.text
+    assert client.rt.db.get("module.speedport") is None
+    assert client.rt.secrets.get("module.speedport.password") is None
+
+
+def test_checks_page_order(client):
+    setup_admin(client)
+    page = client.get("/checks").text
+    assert page.index("<h2>Snooze</h2>") < page.index("<h2>Timing</h2>") < page.index("<h2>Thresholds</h2>")
