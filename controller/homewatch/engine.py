@@ -50,7 +50,7 @@ def thresholds(db: DB, site: str, module: str, defs: list[CheckDef]) -> dict[str
     for d in defs:
         r = rows.get(f"{module}.{d.id}")
         if r is None:
-            out[d.id] = Thresholds(d.warn, d.error, True)
+            out[d.id] = Thresholds(d.warn, d.error, d.default_on)
         else:
             out[d.id] = Thresholds(r["warn"] if "warn" in d.editable else d.warn,
                                    r["error"] if "error" in d.editable else d.error,

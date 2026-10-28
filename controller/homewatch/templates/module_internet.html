@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Internet{% endblock %}
 {% block content %}
-<h1><a href="/modules" class="quiet" style="text-decoration:none">Modules</a> › Internet line</h1>
+<h1><a href="/modules" class="quiet" style="text-decoration:none">Modules</a> › {{ module.name }}</h1>
 <form method="post" action="/modules/internet" class="card">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   {% include "_internet_form.html" %}

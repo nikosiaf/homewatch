@@ -19,9 +19,10 @@
     <td>{{ i.started | ts }}</td><td>{{ (now - i.started) | dur }}</td></tr>{% endfor %}
 </table></div>
 {% endif %}
-<h2>Checks</h2>
+{% for mod_name, mod_tiles in tile_groups %}
+<h2>{{ mod_name }}</h2>
 <div class="tiles">
-{% for t in tiles %}
+{% for t in mod_tiles %}
   {% set r = t.r %}
   <div class="tile s{{ t.status }} {{ 'sup' if r.suppressed_by }}">
     <div class="row" style="justify-content:space-between;align-items:center">
@@ -32,7 +33,8 @@
     {% if t.pending is not none and t.pending != t.status %}<div class="detail">Changing to {{ LEVEL_WORD[t.pending] }}, waiting for confirmation</div>{% endif %}
     {% if t.silenced %}<div class="detail">🔕 {{ t.silenced }}</div>{% endif %}
   </div>
-{% else %}
-  <p class="quiet">No results yet. The first run happens a few seconds after start, then every 2 minutes.</p>
 {% endfor %}
 </div>
+{% else %}
+<p class="quiet">No results yet. The first run happens a few seconds after start, then every 2 minutes.</p>
+{% endfor %}

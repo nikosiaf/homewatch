@@ -83,12 +83,13 @@ def test_login_required(client):
 
 def test_thresholds_saved_and_audited(client):
     tok = setup_admin(client)
-    data = {"csrf": tok, "timing.interval": "120", "timing.confirm": "2", "timing.remind_h": "12",
-            "timing.fail_alert": "5"}
+    data = {"csrf": tok, "internet.present": "1", "timing.interval": "120", "timing.confirm": "2",
+            "timing.remind_h": "12", "timing.fail_alert": "5"}
     for cid in ("fresh", "gateway", "reachable", "loss", "latency", "jitter", "dns", "speed"):
-        data[f"{cid}.enabled"] = "on"
-    data.update({"loss.warn": "5", "loss.error": "20", "latency.warn": "80", "jitter.warn": "15",
-                 "jitter.error": "30", "dns.warn": "500", "speed.warn": "70", "fresh.error": "180"})
+        data[f"internet.{cid}.enabled"] = "on"
+    data.update({"internet.loss.warn": "5", "internet.loss.error": "20", "internet.latency.warn": "80",
+                 "internet.jitter.warn": "15", "internet.jitter.error": "30", "internet.dns.warn": "500",
+                 "internet.speed.warn": "70", "internet.fresh.error": "180"})
     r = client.post("/checks", data=data)
     assert "Saved" in r.text
     row = client.rt.db.one("SELECT warn FROM checks WHERE check_key='internet.loss'")
@@ -96,9 +97,24 @@ def test_thresholds_saved_and_audited(client):
     assert client.rt.db.one("SELECT * FROM audit WHERE action='checks'")
 
 
+def test_speedport_module_settings(client):
+    tok = setup_admin(client)
+    r = client.post("/modules/speedport", data={"csrf": tok, "enabled": "on", "host": "192.168.1.1",
+                                                "username": "admin", "interval_min": "15"})
+    assert "Enter the modem password" in r.text
+    r = client.post("/modules/speedport", data={"csrf": tok, "enabled": "on", "host": "192.168.1.1",
+                                                "username": "admin", "password": "s3cret", "interval_min": "15"})
+    assert "Saved" in r.text
+    assert client.rt.secrets.get("module.speedport.password") == "s3cret"
+    assert "s3cret" not in client.get("/modules/speedport").text
+    r = client.get("/checks")
+    assert "Telekom Speedport modem" in r.text and "speedport.snr.warn" in r.text
+    assert "DSL sync" in client.get("/").text
+
+
 def test_pages_render(client):
     setup_admin(client)
-    for path in ("/", "/history", "/modules", "/modules/internet", "/internet", "/checks", "/maintenance",
+    for path in ("/", "/history", "/modules", "/modules/internet", "/modules/speedport", "/internet", "/checks", "/maintenance",
                  "/notifications", "/system", "/password", "/partials/status"):
         assert client.get(path).status_code == 200, path
 

@@ -6,6 +6,8 @@
   let chart = "latency", range = "24h", plot = null;
   const colors = ["#2457c5", "#c0392b", "#1a7f37", "#b26b00"];
 
+  // series written every few minutes or hours: join the dots instead of showing gaps
+  function sparse() { return ["speed", "sync", "snr"].includes(chart); }
   function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 
   async function load() {
@@ -26,7 +28,7 @@
     const opts = {
       width: el.clientWidth, height: 240,
       series: [{}].concat(d.series.map((s, i) => ({ label: s.name, stroke: colors[i % colors.length], width: 1.5,
-        spanGaps: chart === "speed", points: { show: chart === "speed", size: 6 },
+        spanGaps: sparse(), points: { show: chart === "speed", size: 6 },
         value: (u, v) => v == null ? "–" : v + " " + d.unit }))),
       axes: [axis, Object.assign({ label: d.unit, labelSize: 20 }, axis)],
       scales: { y: { range: (u, min, max) => [0, Math.max(max * 1.1, 1)] } },

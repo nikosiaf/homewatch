@@ -21,10 +21,7 @@ from . import config as config_mod
 from .auth import ROLES, Auth, AuthError, User, audit
 from .engine import DEFAULT_TIMING, thresholds, timing, tz
 from .modules import CATALOG, LEVEL_WORD, OK
-from .modules.internet import checks as inet_checks
-from .modules.internet import save as save_internet
-from .modules.internet import speedtest as st
-from .modules.internet import valid_host
+from .modules.registry import MODULES
 from .notify import COMING_SOON, KINDS, Message, channel_secret
 from .runtime import HC_SECRET, Runtime
 
@@ -41,6 +38,10 @@ CHARTS = {
     "jitter": ('avg_over_time(ping_standard_deviation_ms{{site="{s}",role="public"}}[{w}])', "ms"),
     "speed": ('last_over_time(hw_speedtest_download_mbps{{site="{s}"}}[{w}]) or '
               'label_set(last_over_time(hw_speedtest_upload_mbps{{site="{s}"}}[{w}]), "url", "upload")', "Mbit/s"),
+    "sync": ('label_set(last_over_time(hw_dsl_sync_down_kbps{{site="{s}"}}[{w}]) / 1000, "url", "download") or '
+             'label_set(last_over_time(hw_dsl_sync_up_kbps{{site="{s}"}}[{w}]) / 1000, "url", "upload")', "Mbit/s"),
+    "snr": ('label_set(last_over_time(hw_dsl_snr_down_db{{site="{s}"}}[{w}]), "url", "down") or '
+            'label_set(last_over_time(hw_dsl_snr_up_db{{site="{s}"}}[{w}]), "url", "up")', "dB"),
 }
 
 templates = Jinja2Templates(directory=os.path.join(HERE, "templates"))
@@ -329,22 +330,36 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     async def modules_page(request: Request):
         return page(request, "modules.html", request.state.user)
 
-    @app.get("/modules/internet")
-    async def internet_page(request: Request):
+    @app.get("/modules/{mid}")
+    async def module_page(request: Request, mid: str):
         rt = rt_of(request)
-        tests = rt.db.all("SELECT * FROM speedtests WHERE site=? ORDER BY ts DESC LIMIT 10", (rt.cfg.site,))
-        ookla_found = os.access(st.ookla_path(rt.cfg.ookla_dir), os.X_OK)
-        return page(request, "internet.html", request.state.user, s=rt.internet_settings(), tests=tests,
-                    csrf=request.state.user.csrf, ookla_found=ookla_found, ookla_dir=rt.cfg.ookla_dir,
-                    running=rt.speed_running)
+        m = MODULES.get(mid)
+        if m is None:
+            return RedirectResponse("/modules", status_code=303)
+        return page(request, f"module_{mid}.html", request.state.user, s=m.load(rt), csrf=request.state.user.csrf,
+                    module=m, **m.page_ctx(rt))
 
-    @app.post("/modules/internet")
-    async def internet_save(request: Request):
+    @app.post("/modules/{mid}")
+    async def module_save(request: Request, mid: str):
+        rt = rt_of(request)
+        m = MODULES.get(mid)
+        if m is None:
+            return RedirectResponse("/modules", status_code=303)
         form = await form_of(request, request.state.user)
         if form is None:
-            return back("/modules/internet", err="Form expired, please try again")
-        err = _save_section(request, "internet", form, request.state.user)
-        return back("/modules/internet", err=err) if err else back("/modules/internet", msg="Saved")
+            return back(f"/modules/{mid}", err="Form expired, please try again")
+        err = m.save(rt, form, request.state.user)
+        return back(f"/modules/{mid}", err=err) if err else back(f"/modules/{mid}", msg="Saved")
+
+    @app.post("/modules/speedport/read")
+    async def speedport_read(request: Request):
+        rt = rt_of(request)
+        if await form_of(request, request.state.user) is None:
+            return back("/modules/speedport", err="Form expired")
+        err = await MODULES["speedport"].read_now(rt)
+        rt.wake.set()
+        return back("/modules/speedport", err=f"Reading the modem failed: {err}") if err else \
+            back("/modules/speedport", msg="Modem read successfully")
 
     @app.post("/modules/internet/speedtest")
     async def speedtest_now(request: Request):
@@ -361,12 +376,12 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     @app.get("/checks")
     async def checks_page(request: Request):
         rt = rt_of(request)
-        th = thresholds(rt.db, rt.cfg.site, inet_checks.MODULE, inet_checks.CHECKS)
+        groups = [(m, thresholds(rt.db, rt.cfg.site, m.id, m.checks)) for m in MODULES.values()
+                  if m.enabled(m.load(rt))]
         current_vals = {r.key: r for r in rt.results}
         snoozes = {r["check_key"]: r for r in rt.db.all(
             "SELECT * FROM snoozes WHERE site=? AND until>? ORDER BY until", (rt.cfg.site, time.time()))}
-        return page(request, "checks.html", request.state.user, defs=inet_checks.CHECKS, th=th,
-                    module=inet_checks.MODULE, current=current_vals, snoozes=snoozes,
+        return page(request, "checks.html", request.state.user, groups=groups, current=current_vals, snoozes=snoozes,
                     csrf=request.state.user.csrf, timing=timing(rt.db), default_timing=DEFAULT_TIMING)
 
     @app.post("/checks")
@@ -377,20 +392,24 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if form is None:
             return back("/checks", err="Form expired")
         changes = []
-        old = thresholds(rt.db, rt.cfg.site, inet_checks.MODULE, inet_checks.CHECKS)
-        for d in inet_checks.CHECKS:
-            key = f"{inet_checks.MODULE}.{d.id}"
-            enabled = form.get(f"{d.id}.enabled") == "on"
-            warn = _float(form.get(f"{d.id}.warn")) if "warn" in d.editable else d.warn
-            error = _float(form.get(f"{d.id}.error")) if "error" in d.editable else d.error
-            if warn is not None and error is not None and not d.lower_is_worse and warn > error:
-                return back("/checks", err=f"{d.name}: the warning level must not be above the error level")
-            o = old[d.id]
-            if (o.warn, o.error, o.enabled) != (warn, error, enabled):
-                changes.append(f"{key}: warn {o.warn}→{warn}, error {o.error}→{error}, enabled {o.enabled}→{enabled}")
-            rt.db.run("INSERT INTO checks(site,check_key,enabled,warn,error) VALUES(?,?,?,?,?) "
-                      "ON CONFLICT(site,check_key) DO UPDATE SET enabled=excluded.enabled, warn=excluded.warn, "
-                      "error=excluded.error", (rt.cfg.site, key, int(enabled), warn, error))
+        for m in MODULES.values():
+            if f"{m.id}.present" not in form:
+                continue  # a module not shown on the page (switched off) keeps its thresholds
+            old = thresholds(rt.db, rt.cfg.site, m.id, m.checks)
+            for d in m.checks:
+                key = f"{m.id}.{d.id}"
+                enabled = form.get(f"{key}.enabled") == "on"
+                warn = _float(form.get(f"{key}.warn")) if "warn" in d.editable else d.warn
+                error = _float(form.get(f"{key}.error")) if "error" in d.editable else d.error
+                if warn is not None and error is not None and (error > warn if d.lower_is_worse else warn > error):
+                    return back("/checks", err=f"{d.name}: the WARNING level must come before the ERROR level")
+                o = old[d.id]
+                if (o.warn, o.error, o.enabled) != (warn, error, enabled):
+                    changes.append(f"{key}: warn {o.warn}→{warn}, error {o.error}→{error}, "
+                                   f"enabled {o.enabled}→{enabled}")
+                rt.db.run("INSERT INTO checks(site,check_key,enabled,warn,error) VALUES(?,?,?,?,?) "
+                          "ON CONFLICT(site,check_key) DO UPDATE SET enabled=excluded.enabled, "
+                          "warn=excluded.warn, error=excluded.error", (rt.cfg.site, key, int(enabled), warn, error))
         t = {}
         for k, lo, hi in (("interval", 30, 3600), ("confirm", 1, 10), ("remind_h", 0, 168), ("fail_alert", 1, 100)):
             v = _float(form.get(f"timing.{k}"))
@@ -748,8 +767,14 @@ def _status_ctx(request: Request) -> dict:
                       "pending": st_row["pending"] if st_row else None,
                       "silenced": rt.engine.silenced(r.key, now)})
     overall = max((t["status"] for t in tiles), default=OK)
+    groups = []
+    for m in MODULES.values():
+        mine = [t for t in tiles if t["r"].key.startswith(m.id + ".")]
+        if mine:
+            groups.append((m.name, mine))
     errors, warnings = rt.engine.counts()
-    return dict(tiles=tiles, overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
+    sp = MODULES["speedport"]
+    return dict(tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
                 last_run=rt.last_run, last_error=rt.last_error, errors=errors, warnings=warnings,
                 setup_done=rt.db.get("setup.done", False))
 
@@ -767,36 +792,7 @@ def _save_section(request: Request, section: str, form: dict, user: User) -> str
         audit(rt.db, user.username, "home", f"name={name} tz={zone}")
         return ""
     if section == "internet":
-        s = rt.internet_settings()
-        targets = [t.strip() for t in form.get("public.targets", "").replace(",", " ").split() if t.strip()]
-        if not 1 <= len(targets) <= 4 or not all(valid_host(t) for t in targets):
-            return "Public targets: 1 to 4 IP addresses or host names"
-        gw, dns_server, domain = (form.get("gateway.target", "").strip(), form.get("dns.server", "").strip(),
-                                  form.get("dns.domain", "").strip())
-        for label, v in (("Gateway", gw), ("DNS server", dns_server), ("DNS name", domain)):
-            if v and not valid_host(v):
-                return f"{label}: not a valid address or name"
-        engine = form.get("speed.engine", "cloudflare")
-        if engine not in ("cloudflare", "ookla"):
-            return "Unknown speed test engine"
-        interval = _float(form.get("speed.interval_h"), 3)
-        if not 0.5 <= interval <= 48:
-            return "Speed test interval: 0.5 to 48 hours"
-        new = {
-            "public": {"enabled": form.get("public.enabled") == "on", "targets": targets},
-            "gateway": {"enabled": form.get("gateway.enabled") == "on" and bool(gw), "target": gw},
-            "dns": {"enabled": form.get("dns.enabled") == "on" and bool(dns_server), "server": dns_server,
-                    "domain": domain or "cloudflare.com"},
-            "speed": {"enabled": form.get("speed.enabled") == "on", "engine": engine, "interval_h": interval,
-                      "contract_down": _float(form.get("speed.contract_down"), 0) or 0,
-                      "contract_up": _float(form.get("speed.contract_up"), 0) or 0,
-                      "ookla_accepted": form.get("speed.ookla_accepted") == "on"},
-        }
-        save_internet(rt.db, new)
-        rt.sync_telegraf()
-        audit(rt.db, user.username, "internet", json.dumps({k: new[k] for k in new if new[k] != s.get(k)}))
-        rt.wake.set()
-        return ""
+        return MODULES["internet"].save(rt, form, user)
     if section == "notify":
         kind = form.get("kind", "")
         if kind not in KINDS:

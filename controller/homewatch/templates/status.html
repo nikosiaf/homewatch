@@ -8,7 +8,7 @@
 <h2>Charts</h2>
 <div class="card">
   <div class="row charttabs" style="justify-content:space-between">
-    <div>{% for c, label in [('latency','Latency'),('loss','Packet loss'),('jitter','Jitter'),('speed','Speed')] %}
+    <div>{% for c, label in [('latency','Latency'),('loss','Packet loss'),('jitter','Jitter'),('speed','Speed')] + ([('sync','DSL sync'),('snr','SNR margin')] if dsl else []) %}
       <button class="secondary" data-chart="{{ c }}">{{ label }}</button>{% endfor %}</div>
     <div>{% for r in ['24h','7d','30d'] %}<button class="secondary" data-range="{{ r }}">{{ r }}</button>{% endfor %}</div>
   </div>

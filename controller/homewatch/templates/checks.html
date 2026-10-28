@@ -4,19 +4,23 @@
 <h1>Checks and thresholds</h1>
 <form method="post" action="/checks">
 <input type="hidden" name="csrf" value="{{ csrf }}">
+{% for m, th in groups %}
+<h2>{{ m.name }}</h2>
+<input type="hidden" name="{{ m.id }}.present" value="1">
 <div class="card scroll"><table>
   <tr><th>On</th><th>Check</th><th>Now</th><th>WARNING at</th><th>ERROR at</th></tr>
-  {% for d in defs %}{% set key = module ~ '.' ~ d.id %}{% set t = th[d.id] %}{% set c = current.get(key) %}
+  {% for d in m.checks %}{% set key = m.id ~ '.' ~ d.id %}{% set t = th[d.id] %}{% set c = current.get(key) %}
   <tr>
-    <td><input type="checkbox" name="{{ d.id }}.enabled" {{ 'checked' if t.enabled }} aria-label="enable {{ d.name }}"></td>
+    <td><input type="checkbox" name="{{ key }}.enabled" {{ 'checked' if t.enabled }} aria-label="enable {{ d.name }}"></td>
     <td><b>{{ d.name }}</b><div class="quiet small">{{ d.help }}</div></td>
     <td>{% if c %}<span class="badge s{{ c.effective }}">{{ LEVEL_WORD[c.effective] }}</span>
         <div class="quiet small">{{ c.detail }}</div>{% else %}<span class="quiet">—</span>{% endif %}</td>
-    <td>{% if 'warn' in d.editable %}<input class="num" type="number" step="any" name="{{ d.id }}.warn" value="{{ t.warn if t.warn is not none }}"> {{ d.unit }}{% if d.lower_is_worse %} <span class="quiet small">(below)</span>{% endif %}{% else %}<span class="quiet">{{ 'fixed' if d.id in ('gateway','reachable') else '—' }}</span>{% endif %}</td>
-    <td>{% if 'error' in d.editable %}<input class="num" type="number" step="any" name="{{ d.id }}.error" value="{{ t.error if t.error is not none }}"> {{ d.unit }}{% else %}<span class="quiet">{{ 'fixed' if d.id in ('gateway','reachable','dns') else '—' }}</span>{% endif %}</td>
+    <td>{% if 'warn' in d.editable %}<input class="num" type="number" step="any" name="{{ key }}.warn" value="{{ t.warn if t.warn is not none }}"> {{ d.unit }}{% if d.lower_is_worse %} <span class="quiet small">(below)</span>{% endif %}{% else %}<span class="quiet">fixed</span>{% endif %}</td>
+    <td>{% if 'error' in d.editable %}<input class="num" type="number" step="any" name="{{ key }}.error" value="{{ t.error if t.error is not none }}"> {{ d.unit }}{% if d.lower_is_worse %} <span class="quiet small">(below)</span>{% endif %}{% else %}<span class="quiet">fixed</span>{% endif %}</td>
   </tr>{% endfor %}
-</table>
-<p class="quiet small">Empty a field to switch that level off.</p></div>
+</table></div>
+{% endfor %}
+<p class="quiet small">Empty a field to switch that level off. "fixed" checks are ERROR when their condition is met.</p>
 <h2>Timing</h2>
 <div class="card row">
   <div><label for="ti">Run every (s)</label><input class="num" id="ti" type="number" name="timing.interval" value="{{ timing.interval | int }}"></div>
@@ -37,7 +41,7 @@
   </table>{% else %}<p class="quiet">Nothing is snoozed.</p>{% endif %}
   <form method="post" action="/checks/snooze" class="row" style="margin-top:12px">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <div><label for="sc">Check</label><select id="sc" name="check">{% for d in defs %}<option value="{{ module }}.{{ d.id }}">{{ d.name }}</option>{% endfor %}</select></div>
+    <div><label for="sc">Check</label><select id="sc" name="check">{% for m, th in groups %}<optgroup label="{{ m.name }}">{% for d in m.checks %}<option value="{{ m.id }}.{{ d.id }}">{{ d.name }}</option>{% endfor %}</optgroup>{% endfor %}</select></div>
     <div><label for="sf">For</label><select id="sf" name="for"><option value="1h">1 hour</option><option value="4h">4 hours</option>
       <option value="24h">24 hours</option><option value="until">until…</option></select></div>
     <div><label for="su">Until (when "until…")</label><input id="su" type="datetime-local" name="until"></div>

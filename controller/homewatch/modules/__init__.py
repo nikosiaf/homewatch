@@ -10,6 +10,7 @@ LEVEL_WORD = {OK: "OK", WARNING: "WARNING", ERROR: "ERROR"}
 # (id, name, available in this release); the rest show greyed out as "coming soon"
 CATALOG = [
     ("internet", "Internet line", True),
+    ("speedport", "Telekom Speedport modem", True),
     ("proxmox", "Proxmox VE", False),
     ("opnsense", "OPNsense", False),
     ("homeassistant", "Home Assistant", False),
@@ -34,6 +35,7 @@ class CheckDef:
     editable: tuple[str, ...] = ()  # which of "warn" / "error" the admin may edit
     lower_is_worse: bool = False  # e.g. line speed: below the threshold is bad
     help: str = ""
+    default_on: bool = True
 
 
 @dataclass
@@ -58,3 +60,51 @@ class CheckResult:
     def effective(self) -> int:
         """The level the engine alerts on: suppressed checks follow their root cause instead."""
         return OK if self.suppressed_by else self.status
+
+
+def level(value: float | None, t: Thresholds, lower_is_worse: bool = False) -> int:
+    """Map a value to OK / WARNING / ERROR against thresholds (None = that level is off)."""
+    if value is None:
+        return OK
+    if lower_is_worse:
+        if t.error is not None and value < t.error:
+            return ERROR
+        if t.warn is not None and value < t.warn:
+            return WARNING
+        return OK
+    if t.error is not None and value >= t.error:
+        return ERROR
+    if t.warn is not None and value >= t.warn:
+        return WARNING
+    return OK
+
+
+class Module:
+    """What the runtime and the web pages need from a module."""
+
+    id = ""
+    name = ""
+    checks: list[CheckDef] = []
+
+    def load(self, rt) -> dict:
+        raise NotImplementedError
+
+    def enabled(self, settings: dict) -> bool:
+        return bool(settings.get("enabled", True))
+
+    async def readings(self, rt, settings: dict, now: float):
+        raise NotImplementedError
+
+    def evaluate(self, settings: dict, thresholds: dict, readings) -> list[CheckResult]:
+        raise NotImplementedError
+
+    def save(self, rt, form: dict, user) -> str:
+        """Validate and store the settings form; return an error message or ''."""
+        raise NotImplementedError
+
+    def page_ctx(self, rt) -> dict:
+        return {}
+
+    def loops(self, rt) -> list:
+        """Coroutines to run in the background (collectors)."""
+        return []

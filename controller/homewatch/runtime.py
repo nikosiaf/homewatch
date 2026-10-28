@@ -17,9 +17,8 @@ from .engine import Engine, thresholds, timing
 from .metrics import Metrics, MetricsError, line
 from .modules import CheckResult
 from .modules import internet as inet
-from .modules.internet import checks as inet_checks
-from .modules.internet import collect as inet_collect
 from .modules.internet import speedtest, telegraf
+from .modules.registry import MODULES
 from .notify import Notifier
 from .secrets import Secrets
 
@@ -65,12 +64,16 @@ class Runtime:
             log.info("telegraf config written")
 
     def names(self) -> dict[str, str]:
-        return {f"{inet_checks.MODULE}.{c.id}": c.name for c in inet_checks.CHECKS}
+        return {f"{m.id}.{c.id}": f"{c.name}" if m.id == "internet" else f"{m.name} · {c.name}"
+                for m in MODULES.values() for c in m.checks}
 
     # ---- loops ---------------------------------------------------------------------------
     def start(self) -> None:
         self.sync_telegraf()
-        for coro in (self.check_loop(), self.speed_loop(), self.outbox_loop(), self.daily_loop()):
+        coros = [self.check_loop(), self.outbox_loop(), self.daily_loop()]
+        for m in MODULES.values():
+            coros += m.loops(self)
+        for coro in coros:
             self.tasks.append(asyncio.create_task(coro))
 
     async def stop(self) -> None:
@@ -94,10 +97,15 @@ class Runtime:
 
     async def run_checks(self, now: float | None = None) -> list[CheckResult]:
         now = now or time.time()
-        s = self.internet_settings()
-        th = thresholds(self.db, self.cfg.site, inet_checks.MODULE, inet_checks.CHECKS)
         try:
-            readings = await inet_collect.collect(self.metrics, self.db, self.cfg.site, now)
+            work = []
+            for m in MODULES.values():
+                s = m.load(self)
+                if m.enabled(s):
+                    th = thresholds(self.db, self.cfg.site, m.id, m.checks)
+                    work.append((m, s, th, await m.readings(self, s, now)))
+                else:
+                    work.append((m, s, None, None))
         except MetricsError as e:
             self.last_error = str(e)
             ev = self.engine.read_failed(str(e))
@@ -109,8 +117,11 @@ class Runtime:
         ok_ev = self.engine.read_ok()
         if ok_ev:
             events.append(ok_ev)
-        results = inet_checks.evaluate(s, th, readings)
-        events += self.engine.apply(inet_checks.MODULE, results, now)
+        results: list[CheckResult] = []
+        for m, s, th, readings in work:
+            mine = m.evaluate(s, th, readings) if th is not None else []
+            events += self.engine.apply(m.id, mine, now)  # a switched-off module closes its issues silently
+            results += mine
         names = self.names()
         events += self.engine.released(names, now)
         events += self.engine.reminders(names, now)

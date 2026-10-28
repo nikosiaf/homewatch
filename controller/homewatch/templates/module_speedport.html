@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Speedport{% endblock %}
+{% block content %}
+<h1><a href="/modules" class="quiet" style="text-decoration:none">Modules</a> › {{ module.name }}</h1>
+<p class="quiet">Reads the DSL line from a Sercomm-based Telekom Speedport (for example the Speedport Plus 2 of Telekom Greece):
+sync rate, attainable rate, SNR margin, attenuation, line uptime and resyncs. Values are only read, never changed.</p>
+<div class="flash err" style="border-color:var(--warn);color:inherit">
+  <b>Before you switch it on:</b>
+  <ul style="margin:6px 0 0 18px;padding:0">
+    <li>The Speedport has only its admin login, so homewatch needs that password. It is stored encrypted and never shown again.</li>
+    <li>Each reading logs in, which ends any open browser session on the modem's web page. Keep the interval at 15 minutes or more.</li>
+    <li>After a rejected login the modem slows down further attempts, so homewatch waits 6 hours (or until you save new credentials).</li>
+    <li>The host running homewatch must be able to reach the modem's address. Behind a separate router or firewall this may need a rule there.</li>
+  </ul>
+</div>
+<form method="post" action="/modules/speedport" class="card">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if s.enabled }}> Module on</label>
+  <div class="row">
+    <div><label for="h">Modem address</label><input id="h" type="text" name="host" value="{{ s.host }}"></div>
+    <div><label for="u">User name</label><input id="u" type="text" name="username" value="{{ s.username }}" autocomplete="off"></div>
+    <div><label for="p">Password · {{ 'set' if has_password else 'not set' }}</label>
+      <input id="p" type="password" name="password" placeholder="{{ 'leave empty to keep' if has_password else '' }}" autocomplete="new-password"></div>
+    <div><label for="i">Read every (minutes)</label><input class="num" id="i" type="number" min="5" max="240" name="interval_min" value="{{ s.interval_min }}"></div>
+  </div>
+  <p class="row"><button>Save</button>
+    <button class="secondary" formaction="/modules/speedport/read" {{ 'disabled' if not has_password }}>Read the modem now</button></p>
+</form>
+<h2>Last reading</h2>
+<div class="card scroll">
+  {% if st.last_ok %}
+  <p class="quiet small">Read {{ st.last_ok | ts('%d %b %H:%M:%S') }}{% if st.info %} ·
+    {% for k, v in st.info.items() %}{{ k }} {{ v }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</p>
+  {% set v = st['values'] %}{% set stt = st['status'] %}
+  <table>
+    <tr><th></th><th>Down</th><th>Up</th></tr>
+    <tr><td>Sync rate</td><td>{{ '%.1f' | format(v.get('sync_down_kbps', 0) / 1000) }} Mbit/s</td><td>{{ '%.1f' | format(v.get('sync_up_kbps', 0) / 1000) }} Mbit/s</td></tr>
+    <tr><td>Attainable</td><td>{{ '%.1f' | format(v.get('attainable_down_kbps', 0) / 1000) }} Mbit/s</td><td>{{ '%.1f' | format(v.get('attainable_up_kbps', 0) / 1000) }} Mbit/s</td></tr>
+    <tr><td>SNR margin</td><td>{{ '%.1f' | format(v.get('snr_down_db', 0)) }} dB</td><td>{{ '%.1f' | format(v.get('snr_up_db', 0)) }} dB</td></tr>
+    <tr><td>Attenuation</td><td>{{ '%.1f' | format(v.get('atten_down_db', 0)) }} dB</td><td>{{ '%.1f' | format(v.get('atten_up_db', 0)) }} dB</td></tr>
+    <tr><td>Power</td><td>{{ '%.1f' | format(v.get('power_down_dbm', 0)) }} dBm</td><td>{{ '%.1f' | format(v.get('power_up_dbm', 0)) }} dBm</td></tr>
+    <tr><td>DSL link</td><td colspan="2">{{ 'up' if stt.get('link_up') else 'down' }}{% if v.get('line_up_s') %}, in sync for {{ v.line_up_s | dur }}{% endif %}</td></tr>
+    {% if 'ppp_up' in stt %}<tr><td>PPP on the modem</td><td colspan="2">{{ 'up' if stt.ppp_up else 'down' }}</td></tr>{% endif %}
+    {% if v.get('modem_uptime_s') %}<tr><td>Modem uptime</td><td colspan="2">{{ v.modem_uptime_s | dur }}</td></tr>{% endif %}
+  </table>
+  {% else %}<p class="quiet">No reading yet.</p>{% endif %}
+  {% if st.last_error %}<p style="color:var(--err)">Last attempt {{ st.last_try | ts('%d %b %H:%M') }}: {{ st.last_error }}</p>{% endif %}
+</div>
+{% endblock %}
