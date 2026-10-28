@@ -13,6 +13,7 @@ sync rate, attainable rate, SNR margin, attenuation, line uptime and resyncs. Va
     <li>The host running homewatch must be able to reach the modem's address. Behind a separate router or firewall this may need a rule there.</li>
   </ul>
 </div>
+{% if not s.enabled %}<div class="flash err">The module is off: no scheduled readings and no checks. Tick "Module on" and save to start.</div>{% endif %}
 <form method="post" action="/modules/speedport" class="card">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if s.enabled }}> Module on</label>
