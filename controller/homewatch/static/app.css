@@ -85,3 +85,9 @@ header nav { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
 .wordmark span { font-weight: 500; color: var(--brand); }
 .wordmark.big { font-size: 30px; }
 .hero { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.spin { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; border: 2px solid var(--line);
+  border-top-color: var(--accent); border-radius: 50%; animation: hw-spin .8s linear infinite; }
+@keyframes hw-spin { to { transform: rotate(360deg); } }
+tr.running td { color: var(--quiet); }
+.htmx-indicator { display: none; }
+.htmx-request.htmx-indicator, .htmx-request .htmx-indicator { display: inline-flex; gap: 6px; align-items: center; }

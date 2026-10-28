@@ -9,8 +9,9 @@
   and healthchecks.io alerts you when the pings stop. Create a check with a 5-minute period and paste its ping URL.</p>
   <form method="post" action="/setup/healthchecks">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <label for="hc">Ping URL {% if hc %}(one is set; leave empty to keep it){% endif %}</label>
-    <input id="hc" type="password" name="hc_url" placeholder="https://hc-ping.com/…" autocomplete="off">
+    {% if hc %}<p>A healthchecks.io check is already set up. You can change it under Notifications.</p>
+    {% else %}<label for="hc">Ping URL</label>
+    <input id="hc" type="text" name="healthchecks.url" placeholder="https://hc-ping.com/…" style="max-width:none">{% endif %}
     <p><button>Finish</button> <button class="secondary" name="skip" value="1">Skip and finish</button></p>
   </form>
 </div>

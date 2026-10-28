@@ -6,33 +6,35 @@ from urllib.parse import urlsplit
 
 import httpx
 
-FIELDS = [("server", "Server URL", "https://ntfy.sh or your own server"),
-          ("topic", "Topic", "A hard-to-guess topic name")]
-SECRET_LABEL = "Access token (optional)"
+TITLE = "ntfy"
+DESCRIPTION = ("Push notifications through the free ntfy app (ntfy.sh or your own server). Pick a hard-to-guess "
+               "topic, subscribe to it in the app, and paste the topic's full address here.")
+LINK = "https://ntfy.sh"
+FIELDS = [("url", "Topic URL", "https://ntfy.sh/your-hard-to-guess-topic")]
+SECRET_LABEL = "Access token (optional, for protected topics)"
 DEFAULT_SERVER = "https://ntfy.sh"
 PRIORITY = {0: "default", 1: "high", 2: "urgent"}
 TAGS = {0: "white_check_mark", 1: "warning", 2: "rotating_light"}
 
 
 def normalize(config: dict) -> tuple[dict, str]:
-    """Accept the usual ways people write a server and topic; return (config, error)."""
-    server = (config.get("server") or "").strip()
-    topic = (config.get("topic") or "").strip()
-    if "://" in topic or ("/" in topic and "." in topic.split("/")[0]):  # a full topic link pasted into "topic"
-        link = topic if "://" in topic else "https://" + topic
-        parts = urlsplit(link)
-        server, topic = f"{parts.scheme}://{parts.netloc}", parts.path.strip("/")
-    if not server:
-        server = DEFAULT_SERVER
-    elif "://" not in server:
-        server = "https://" + server
-    parts = urlsplit(server)
+    """Turn the topic URL (or the older server + topic fields) into {url, server, topic}; return (config, error)."""
+    url = (config.get("url") or "").strip()
+    if not url and config.get("topic"):
+        url = f"{(config.get('server') or DEFAULT_SERVER).rstrip('/')}/{config['topic'].strip('/')}"
+    if url and "://" not in url:
+        url = "https://" + url
+    parts = urlsplit(url)
+    path = parts.path.strip("/")
     if parts.scheme not in ("https", "http") or not parts.netloc:
-        return config, "ntfy server: a web address like https://ntfy.sh"
-    topic = topic.strip("/")
-    if not topic or "/" in topic or len(topic) > 64:
-        return config, "ntfy topic: one word (letters, digits, - or _), up to 64 characters"
-    return {**config, "server": f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}", "topic": topic}, ""
+        return config, "ntfy: enter the topic's full address, e.g. https://ntfy.sh/my-home-alerts"
+    if not path:
+        return config, "ntfy: the address needs a topic at the end, e.g. https://ntfy.sh/my-home-alerts"
+    *prefix, topic = path.split("/")
+    if len(topic) > 64:
+        return config, "ntfy: the topic name can have up to 64 characters"
+    server = f"{parts.scheme}://{parts.netloc}" + ("/" + "/".join(prefix) if prefix else "")
+    return {"url": f"{server}/{topic}", "server": server, "topic": topic}, ""
 
 
 async def send(http: httpx.AsyncClient, config: dict, secret: str, level: int, title: str, body: str) -> None:

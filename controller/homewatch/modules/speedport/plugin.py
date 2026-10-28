@@ -21,12 +21,21 @@ KEY = "module.speedport"
 STATE = "speedport.state"
 SECRET = "module.speedport.password"
 BACKOFF = 6 * 3600  # after a rejected login: the modem slows down further attempts
-DEFAULTS = {"enabled": False, "host": "192.168.1.1", "username": "admin", "interval_min": 15}
+DEFAULTS = {"enabled": False, "model": "speedport-plus-2", "host": "192.168.1.1", "username": "admin",
+            "interval_min": 15}
+# supported modems; all use the Sercomm login and TR-181 JSON-RPC reads in client.py
+MODELS = {
+    "speedport-plus-2": {
+        "name": "Telekom Speedport Plus 2 (Sercomm VD4224BDTP / VD4224BDT)",
+        "about": "The VD4224BDTP (or VD4224BDT) model is the Speedport Plus 2 broadband modem-router by Sercomm, "
+                 "provided by TELEKOM (formerly COSMOTE) for VDSL and FTTH (Fiber to the Home) connections in Greece.",
+    },
+}
 
 
 class SpeedportModule(Module):
     id = checks.MODULE
-    name = "Telekom Speedport modem"
+    name = "ISP modem"
     checks = checks.CHECKS
 
     def load(self, rt) -> dict:
@@ -98,7 +107,7 @@ class SpeedportModule(Module):
         return ""
 
     def page_ctx(self, rt) -> dict:
-        return {"st": self.state(rt), "has_password": rt.secrets.has(SECRET)}
+        return {"st": self.state(rt), "has_password": rt.secrets.has(SECRET), "models": MODELS}
 
     def save(self, rt, form: dict, user) -> str:
         host = form.get("host", "").strip()
@@ -111,7 +120,11 @@ class SpeedportModule(Module):
         if not 5 <= interval <= 240:
             return "Read interval: 5 to 240 minutes"
         username = form.get("username", "").strip()[:64]
-        new = {"enabled": form.get("enabled") == "on", "host": host, "username": username, "interval_min": interval}
+        model = form.get("model", "speedport-plus-2")
+        if model not in MODELS:
+            return "Unknown modem model"
+        new = {"enabled": form.get("enabled") == "on", "model": model, "host": host, "username": username,
+               "interval_min": interval}
         if new["enabled"] and not (form.get("password") or rt.secrets.has(SECRET)):
             return "Enter the modem password to switch the module on"
         rt.db.set(KEY, new)

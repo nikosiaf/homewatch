@@ -1,0 +1,21 @@
+{# Polls every 2 s while a test runs; the running row turns into the result when it finishes. #}
+<div id="speedtests" class="card"
+     {% if running %}hx-get="/modules/internet/speedtests" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <form method="post" action="/modules/internet/speedtest" hx-post="/modules/internet/speedtest"
+        hx-target="#speedtests" hx-swap="outerHTML" class="row" style="align-items:center">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button {{ 'disabled' if running }}>Run a speed test now</button>
+    <span class="quiet small">{% if running %}Running, about 20 seconds…{% else %}Takes about 20 seconds.{% endif %}</span>
+  </form>
+  {% if note %}<p class="{{ 'flash err' if note_err else 'flash ok' }}" style="margin:12px 0 0">{{ note }}</p>{% endif %}
+  <div class="scroll"><table style="margin-top:12px">
+    <tr><th>When</th><th>Engine</th><th>Down</th><th>Up</th><th>Latency</th><th>Result</th></tr>
+    {% if running %}<tr class="running"><td>{{ started | ts }}</td><td>{{ s.speed.engine }}</td>
+      <td colspan="4"><span class="spin" aria-hidden="true"></span> Running…</td></tr>{% endif %}
+    {% for t in tests %}<tr><td>{{ t.ts | ts }}</td><td>{{ t.engine }}</td>
+      <td>{{ '%.1f' | format(t.down) if t.down is not none }}</td><td>{{ '%.1f' | format(t.up) if t.up is not none }}</td>
+      <td>{{ '%.0f ms' | format(t.latency) if t.latency is not none }}</td>
+      <td>{% if t.ok %}ok{% else %}<span style="color:var(--err)">{{ t.error }}</span>{% endif %}</td></tr>
+    {% else %}{% if not running %}<tr><td colspan="6" class="quiet">No speed tests yet.</td></tr>{% endif %}{% endfor %}
+  </table></div>
+</div>

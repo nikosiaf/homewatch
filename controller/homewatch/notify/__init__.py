@@ -19,13 +19,14 @@ from ..db import DB
 from ..engine import Event, tz
 from ..modules import ERROR, LEVEL_WORD, OK, WARNING
 from ..secrets import Secrets
-from . import ntfy, telegram
+from . import healthchecks, ntfy, telegram
 
 log = logging.getLogger("homewatch.notify")
 
 ICON = {OK: "✅", WARNING: "🟡", ERROR: "🔴"}
-KINDS = {"telegram": telegram, "ntfy": ntfy}
-COMING_SOON = ("email", "webhook")
+KINDS = {"telegram": telegram, "ntfy": ntfy}  # channels that receive messages
+PROVIDERS = {**KINDS, "healthchecks": healthchecks}  # everything that can be added on the Notifications page
+COMING_SOON = ("Email", "Webhook")
 RETRY_MAX = 120
 
 
@@ -103,9 +104,22 @@ class Notifier:
         self.secrets = secrets
         self.http = http or httpx.AsyncClient(timeout=20)
 
-    def channels(self, enabled_only: bool = True):
-        q = "SELECT * FROM channels" + (" WHERE enabled=1" if enabled_only else "") + " ORDER BY id"
-        return self.db.all(q)
+    def channels(self, enabled_only: bool = True, messages_only: bool = True):
+        q = "SELECT * FROM channels WHERE 1=1"
+        if enabled_only:
+            q += " AND enabled=1"
+        if messages_only:
+            q += f" AND kind IN ({','.join(repr(k) for k in KINDS)})"
+        return self.db.all(q + " ORDER BY id")
+
+    async def heartbeat(self) -> None:
+        """Ping every enabled healthchecks.io check after a successful run."""
+        for ch in self.db.all("SELECT * FROM channels WHERE enabled=1 AND kind='healthchecks'"):
+            try:
+                await healthchecks.ping(self.http, json.loads(ch["config"]))
+                self.db.set(f"heartbeat.{ch['id']}.last_ok", time.time())
+            except RuntimeError as e:
+                log.warning("heartbeat %s: %s", ch["name"], e)
 
     def dispatch(self, events: list[Event], open_counts: tuple[int, int], now: float | None = None) -> int:
         """Queue one message per channel that wants at least one of the events."""

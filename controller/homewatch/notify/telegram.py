@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import httpx
 
+TITLE = "Telegram"
+DESCRIPTION = ("Messages from your own Telegram bot. Create a bot with @BotFather to get its token, send the bot "
+               "a message, then use your chat ID (for example from @userinfobot).")
+LINK = "https://core.telegram.org/bots#how-do-i-create-a-bot"
 FIELDS = [("chat_id", "Chat ID", "Your chat or group ID, e.g. 123456789 or -100…")]
 SECRET_LABEL = "Bot token"
 MAX = 4000

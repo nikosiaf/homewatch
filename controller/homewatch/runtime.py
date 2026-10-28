@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -43,6 +44,7 @@ class Runtime:
     last_run: float = 0
     last_error: str = ""
     speed_running: bool = False
+    speed_started: float = 0
     wake: asyncio.Event = field(default_factory=asyncio.Event)
     tasks: list[asyncio.Task] = field(default_factory=list)
 
@@ -69,6 +71,7 @@ class Runtime:
 
     # ---- loops ---------------------------------------------------------------------------
     def start(self) -> None:
+        self.migrate_heartbeat()
         self.sync_telegraf()
         coros = [self.check_loop(), self.outbox_loop(), self.daily_loop()]
         for m in MODULES.values():
@@ -138,14 +141,26 @@ class Runtime:
         return results
 
     async def heartbeat(self) -> None:
+        await self.notifier.heartbeat()
+
+    def migrate_heartbeat(self) -> None:
+        """Before 0.1.0 the healthchecks.io URL was a setting; it is a provider (channel) now."""
         url = self.secrets.get(HC_SECRET)
         if not url:
             return
-        try:
-            await self.notifier.http.get(url, timeout=10)
-            self.db.set("healthchecks.last_ok", time.time())
-        except httpx.HTTPError as e:
-            log.warning("healthchecks ping failed: %s", type(e).__name__)
+        if not self.db.one("SELECT 1 FROM channels WHERE kind='healthchecks'"):
+            self.db.run("INSERT INTO channels(kind,name,levels,config) VALUES('healthchecks','healthchecks.io','[]',?)",
+                        (json.dumps({"url": url}),))
+        self.secrets.delete(HC_SECRET)
+
+    def speedtest_background(self) -> bool:
+        """Start a speed test without waiting for it; False when one is already running."""
+        if self.speed_running:
+            return False
+        self.speed_running = True  # set now, so the page shows the running row right away
+        self.speed_started = time.time()
+        self.tasks.append(asyncio.create_task(self.run_speedtest(already_marked=True)))
+        return True
 
     async def speed_loop(self) -> None:
         await asyncio.sleep(60)
@@ -182,10 +197,12 @@ class Runtime:
         self.wake.set()
         return warning
 
-    async def run_speedtest(self) -> speedtest.Result:
-        if self.speed_running:
+    async def run_speedtest(self, already_marked: bool = False) -> speedtest.Result:
+        if self.speed_running and not already_marked:
             return speedtest.Result(False, error="a speed test is already running")
         self.speed_running = True
+        if not already_marked:
+            self.speed_started = time.time()
         try:
             s = self.internet_settings()["speed"]
             if s["engine"] == "ookla":

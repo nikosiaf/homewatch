@@ -10,7 +10,7 @@ LEVEL_WORD = {OK: "OK", WARNING: "WARNING", ERROR: "ERROR"}
 # (id, name, available in this release); the rest show greyed out as "coming soon"
 CATALOG = [
     ("internet", "Internet line", True),
-    ("speedport", "Telekom Speedport modem", True),
+    ("speedport", "ISP modem", True),
     ("proxmox", "Proxmox VE", False),
     ("opnsense", "OPNsense", False),
     ("homeassistant", "Home Assistant", False),

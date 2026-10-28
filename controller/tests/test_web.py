@@ -1,5 +1,6 @@
 """Web flows: first-run setup, login, roles, CSRF."""
 
+import json
 import re
 
 import pytest
@@ -49,9 +50,10 @@ def test_first_run_wizard(client):
     assert '"9.9.9.9"' in conf and '"example.com"' in conf
     r = client.post("/setup/notify", data={"csrf": tok, "skip": "1"})
     assert r.url.path == "/setup/healthchecks"
-    r = client.post("/setup/healthchecks", data={"csrf": tok, "hc_url": "https://hc-ping.com/abc"})
+    r = client.post("/setup/healthchecks", data={"csrf": tok, "healthchecks.url": "https://hc-ping.com/abc"})
     assert r.url.path == "/" and "Setup done" in r.text
-    assert client.rt.secrets.get("healthchecks.url") == "https://hc-ping.com/abc"
+    hc = client.rt.db.one("SELECT * FROM channels WHERE kind='healthchecks'")
+    assert json.loads(hc["config"]) == {"url": "https://hc-ping.com/abc"}
     assert client.rt.db.get("home.name") == "Test Home"
 
 
@@ -110,7 +112,7 @@ def test_speedport_module_settings(client):
     assert client.rt.secrets.get("module.speedport.password") == "s3cret"
     assert "s3cret" not in client.get("/modules/speedport").text
     r = client.get("/checks")
-    assert "Telekom Speedport modem" in r.text and "speedport.snr.warn" in r.text
+    assert "ISP modem" in r.text and "speedport.snr.warn" in r.text
     assert "DSL sync" in client.get("/").text
 
 
@@ -152,3 +154,66 @@ def test_reset_everything_restarts_the_wizard(client):
     db = client.rt.db
     assert db.one("SELECT COUNT(*) n FROM users")["n"] == 0
     assert db.get("home.name") is None
+
+
+def test_add_providers_with_prefixed_fields(client):
+    tok = setup_admin(client)
+    r = client.post("/notifications/add", data={"csrf": tok, "kind": "ntfy", "ntfy.url": "ntfy.sh/home-alerts-x1",
+                                                "telegram.chat_id": "ignored"})
+    assert "Added" in r.text
+    ch = client.rt.db.one("SELECT * FROM channels WHERE kind='ntfy'")
+    assert json.loads(ch["config"])["url"] == "https://ntfy.sh/home-alerts-x1"
+    r = client.post("/notifications/add", data={"csrf": tok, "kind": "telegram", "telegram.chat_id": "42"})
+    assert "bot token" in r.text
+    r = client.post("/notifications/add", data={"csrf": tok, "kind": "healthchecks",
+                                                "healthchecks.url": "https://hc-ping.com/u1"})
+    assert "Added" in r.text and "https://hc-ping.com/u1" in r.text  # the ping URL is shown, not hidden
+    assert len(client.rt.notifier.channels()) == 1  # the heartbeat gets no messages
+
+
+def test_weekly_report_card(client):
+    tok = setup_admin(client)
+    client.post("/notifications/add", data={"csrf": tok, "kind": "ntfy", "ntfy.url": "https://ntfy.sh/t1"})
+    cid = client.rt.db.one("SELECT id FROM channels")["id"]
+    r = client.post("/notifications/report", data={"csrf": tok, "report_weekday": "6", "report_time": "19:30",
+                                                   f"report.{cid}": "on"})
+    assert "Weekly report saved" in r.text
+    assert client.rt.db.get("report.schedule") == {"weekday": 6, "time": "19:30"}
+    assert client.rt.db.one("SELECT weekly_report FROM channels")["weekly_report"] == 1
+
+
+def test_old_heartbeat_secret_becomes_a_provider(client):
+    client.rt.secrets.put("healthchecks.url", "https://hc-ping.com/old")
+    client.rt.migrate_heartbeat()
+    ch = client.rt.db.one("SELECT * FROM channels WHERE kind='healthchecks'")
+    assert json.loads(ch["config"])["url"] == "https://hc-ping.com/old"
+    assert client.rt.secrets.get("healthchecks.url") is None
+
+
+def test_homewatch_address_filled_from_request_and_editable(client):
+    tok = setup_admin(client)
+    assert client.rt.db.get("home.url") == "https://testserver"
+    client.post("/system/home", data={"csrf": tok, "name": "H", "tz": "UTC", "url": "https://hw.tail1234.ts.net/"})
+    assert client.rt.db.get("home.url") == "https://hw.tail1234.ts.net"
+
+
+def test_speedtest_button_returns_running_row_at_once(client, monkeypatch):
+    tok = setup_admin(client)
+
+    async def slow(already_marked=False):  # never finishes during the test
+        import asyncio
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(client.rt, "run_speedtest", slow)
+    r = client.post("/modules/internet/speedtest", data={"csrf": tok}, headers={"HX-Request": "true"})
+    assert "Running…" in r.text and 'hx-trigger="every 2s"' in r.text
+    client.rt.speed_running = False
+    for t in client.rt.tasks:
+        t.cancel()
+
+
+def test_modem_read_returns_partial(client):
+    tok = setup_admin(client)
+    r = client.post("/modules/speedport/read", data={"csrf": tok}, headers={"HX-Request": "true"})
+    assert 'id="reading"' in r.text and "No password set" in r.text
+    assert "<html" not in r.text

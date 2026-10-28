@@ -23,6 +23,11 @@
     <h2 style="margin-top:0">Home</h2>
     <input type="hidden" name="csrf" value="{{ csrf }}">
     {% set home = home_name %}{% include "_home_form.html" %}
+    <label for="hu">homewatch address</label>
+    <input id="hu" type="text" name="url" value="{{ home_url }}" placeholder="https://192.168.1.50">
+    <p class="quiet small">Added as a link at the end of every alert, so you can tap it to open homewatch.
+      It is filled in from the address you use to open this page; change it if you reach homewatch by another
+      name (for example over Tailscale).</p>
     <p><button>Save</button></p>
   </form>
 </div>

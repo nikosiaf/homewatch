@@ -1,0 +1,20 @@
+<div id="reading" class="card scroll">
+  {% if note %}<p class="{{ 'flash err' if note_err else 'flash ok' }}">{{ note }}</p>{% endif %}
+  {% if st.last_ok %}
+  <p class="quiet small">Read {{ st.last_ok | ts('%d %b %H:%M:%S') }}{% if st.info %} ·
+    {% for k, v in st.info.items() %}{{ k }} {{ v }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</p>
+  {% set v = st['values'] %}{% set stt = st['status'] %}
+  <table>
+    <tr><th></th><th>Down</th><th>Up</th></tr>
+    <tr><td>Sync rate</td><td>{{ '%.1f' | format(v.get('sync_down_kbps', 0) / 1000) }} Mbit/s</td><td>{{ '%.1f' | format(v.get('sync_up_kbps', 0) / 1000) }} Mbit/s</td></tr>
+    <tr><td>Attainable</td><td>{{ '%.1f' | format(v.get('attainable_down_kbps', 0) / 1000) }} Mbit/s</td><td>{{ '%.1f' | format(v.get('attainable_up_kbps', 0) / 1000) }} Mbit/s</td></tr>
+    <tr><td>SNR margin</td><td>{{ '%.1f' | format(v.get('snr_down_db', 0)) }} dB</td><td>{{ '%.1f' | format(v.get('snr_up_db', 0)) }} dB</td></tr>
+    <tr><td>Attenuation</td><td>{{ '%.1f' | format(v.get('atten_down_db', 0)) }} dB</td><td>{{ '%.1f' | format(v.get('atten_up_db', 0)) }} dB</td></tr>
+    <tr><td>Power</td><td>{{ '%.1f' | format(v.get('power_down_dbm', 0)) }} dBm</td><td>{{ '%.1f' | format(v.get('power_up_dbm', 0)) }} dBm</td></tr>
+    <tr><td>DSL link</td><td colspan="2">{{ 'up' if stt.get('link_up') else 'down' }}{% if v.get('line_up_s') %}, in sync for {{ v.line_up_s | dur }}{% endif %}</td></tr>
+    {% if 'ppp_up' in stt %}<tr><td>PPP on the modem</td><td colspan="2">{{ 'up' if stt.ppp_up else 'down' }}</td></tr>{% endif %}
+    {% if v.get('modem_uptime_s') %}<tr><td>Modem uptime</td><td colspan="2">{{ v.modem_uptime_s | dur }}</td></tr>{% endif %}
+  </table>
+  {% else %}<p class="quiet">No reading yet.</p>{% endif %}
+  {% if st.last_error %}<p style="color:var(--err)">Last attempt {{ st.last_try | ts('%d %b %H:%M') }}: {{ st.last_error }}</p>{% endif %}
+</div>

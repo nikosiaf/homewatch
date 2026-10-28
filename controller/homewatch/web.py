@@ -22,8 +22,8 @@ from .auth import ROLES, Auth, AuthError, User, audit
 from .engine import DEFAULT_TIMING, thresholds, timing, tz
 from .modules import CATALOG, LEVEL_WORD, OK
 from .modules.registry import MODULES
-from .notify import COMING_SOON, KINDS, Message, channel_secret
-from .runtime import HC_SECRET, Runtime
+from .notify import COMING_SOON, KINDS, PROVIDERS, Message, channel_secret
+from .runtime import Runtime
 
 log = logging.getLogger("homewatch.web")
 HERE = os.path.dirname(__file__)
@@ -103,6 +103,9 @@ def client_ip(request: Request) -> str:
 
 def page(request: Request, name: str, user: User | None, **ctx) -> HTMLResponse:
     rt = rt_of(request)
+    if user and user.is_admin and not rt.db.get("home.url"):
+        # the address the admin uses is the one to put in messages; editable under System > Home
+        rt.db.set("home.url", f"{request.url.scheme}://{request.url.netloc}")
     templates.env.globals["zone"] = tz(rt.db)
     ctx.update(request=request, user=user, home=rt.db.get("home.name") or "Home",
                update=rt.update_available(), flash=request.query_params.get("msg", ""),
@@ -218,7 +221,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         ctx = dict(step=SETUP_STEPS.index(step) + 1, steps=SETUP_STEPS, csrf=request.state.user.csrf,
                    s=rt.internet_settings(), zones=sorted(available_timezones()),
                    tzname=rt.db.get("home.tz") or os.environ.get("TZ", "UTC"),
-                   kinds=list(KINDS), coming=COMING_SOON, hc=rt.secrets.has(HC_SECRET))
+                   providers=PROVIDERS, coming=COMING_SOON, skip_heartbeat=step == "notify",
+                   hc=rt.db.one("SELECT 1 FROM channels WHERE kind='healthchecks'") is not None)
         return page(request, f"setup_{step}.html", request.state.user, **ctx)
 
     @app.post("/setup/{step}")
@@ -354,23 +358,46 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     @app.post("/modules/speedport/read")
     async def speedport_read(request: Request):
         rt = rt_of(request)
+        m = MODULES["speedport"]
         if await form_of(request, request.state.user) is None:
-            return back("/modules/speedport", err="Form expired")
-        err = await MODULES["speedport"].read_now(rt)
-        rt.wake.set()
-        return back("/modules/speedport", err=f"Reading the modem failed: {err}") if err else \
-            back("/modules/speedport", msg="Modem read successfully")
+            note, bad = "Form expired, reload the page", True
+        else:
+            err = await m.read_now(rt)
+            rt.wake.set()
+            note, bad = (f"Reading the modem failed: {err}", True) if err else ("Modem read successfully", False)
+        if request.headers.get("hx-request"):
+            return page(request, "_speedport_reading.html", request.state.user, note=note, note_err=bad,
+                        **m.page_ctx(rt))
+        return back("/modules/speedport", err=note) if bad else back("/modules/speedport", msg=note)
+
+    def speedtests_partial(request: Request, note: str = "", note_err: bool = False):
+        rt = rt_of(request)
+        m = MODULES["internet"]
+        return page(request, "_speedtests.html", request.state.user, s=m.load(rt), csrf=request.state.user.csrf,
+                    started=rt.speed_started, note=note, note_err=note_err, **m.page_ctx(rt))
+
+    @app.get("/modules/internet/speedtests")
+    async def speedtests(request: Request):
+        rt = rt_of(request)
+        note, bad = "", False
+        if not rt.speed_running:  # just finished: say how it went
+            last = rt.db.one("SELECT * FROM speedtests WHERE site=? ORDER BY ts DESC LIMIT 1", (rt.cfg.site,))
+            if last and last["ts"] >= rt.speed_started - 1:
+                note, bad = ((f"Speed test: {last['down']:.1f} / {last['up']:.1f} Mbit/s", False) if last["ok"]
+                             else (f"Speed test failed: {last['error']}", True))
+        return speedtests_partial(request, note, bad)
 
     @app.post("/modules/internet/speedtest")
     async def speedtest_now(request: Request):
         rt = rt_of(request)
         if await form_of(request, request.state.user) is None:
             return back("/modules/internet", err="Form expired")
-        res = await rt.run_speedtest()
-        audit(rt.db, request.state.user.username, "speedtest", "run now")
-        if res.ok:
-            return back("/modules/internet", msg=f"Speed test: {res.down:.1f} / {res.up:.1f} Mbit/s")
-        return back("/modules/internet", err=f"Speed test failed: {res.error}")
+        started = rt.speedtest_background()
+        if started:
+            audit(rt.db, request.state.user.username, "speedtest", "run now")
+        if request.headers.get("hx-request"):
+            return speedtests_partial(request)
+        return back("/modules/internet", msg="Speed test started; reload in about 20 seconds")
 
     # -- checks, thresholds, snooze -------------------------------------------------------------
     @app.get("/checks")
@@ -535,13 +562,17 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     @app.get("/notifications")
     async def notifications_page(request: Request):
         rt = rt_of(request)
-        chans = [dict(c) | {"config": json.loads(c["config"]), "levels": json.loads(c["levels"]),
-                            "has_secret": rt.secrets.has(channel_secret(c["id"]))}
-                 for c in rt.notifier.channels(enabled_only=False)]
+        chans = []
+        for c in rt.notifier.channels(enabled_only=False, messages_only=False):
+            config = json.loads(c["config"])
+            if c["kind"] == "ntfy" and not config.get("url"):
+                config = KINDS["ntfy"].normalize(config)[0]
+            chans.append(dict(c) | {"config": config, "levels": json.loads(c["levels"]),
+                                    "has_secret": rt.secrets.has(channel_secret(c["id"])),
+                                    "last_ping": rt.db.get(f"heartbeat.{c['id']}.last_ok", 0)})
         queued = rt.db.all("SELECT channel_id, COUNT(*) n, MAX(last_error) e FROM outbox GROUP BY channel_id")
-        return page(request, "notifications.html", request.state.user, chans=chans, kinds=KINDS,
-                    coming=COMING_SOON, csrf=request.state.user.csrf, hc=rt.secrets.has(HC_SECRET),
-                    hc_last=rt.db.get("healthchecks.last_ok", 0), url=rt.db.get("home.url") or "",
+        return page(request, "notifications.html", request.state.user, chans=chans, providers=PROVIDERS,
+                    coming=COMING_SOON, csrf=request.state.user.csrf,
                     schedule=rt.db.get("report.schedule") or {"weekday": 0, "time": "08:00"},
                     queued={q["channel_id"]: q for q in queued})
 
@@ -551,7 +582,32 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if form is None:
             return back("/notifications", err="Form expired")
         err = _save_section(request, "notify", form, request.state.user)
-        return back("/notifications", err=err) if err else back("/notifications", msg="Channel added")
+        return back("/notifications", err=err) if err else back("/notifications", msg="Added")
+
+    @app.post("/notifications/report")
+    async def report_save(request: Request):
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/notifications", err="Form expired")
+        try:
+            h, m = map(int, form.get("report_time", "08:00").split(":"))
+            wd = int(form.get("report_weekday", "0"))
+            assert 0 <= h < 24 and 0 <= m < 60 and 0 <= wd <= 6
+        except (ValueError, AssertionError):
+            return back("/notifications", err="Weekly report: invalid day or time")
+        rt.db.set("report.schedule", {"weekday": wd, "time": f"{h:02d}:{m:02d}"})
+        for c in rt.notifier.channels(enabled_only=False):
+            rt.db.run("UPDATE channels SET weekly_report=? WHERE id=?", (int(form.get(f"report.{c['id']}") == "on"),
+                                                                         c["id"]))
+        audit(rt.db, user.username, "report", f"weekday={wd} time={h:02d}:{m:02d}")
+        if form.get("send_now"):
+            n = await rt.send_report()
+            if not n:
+                return back("/notifications", err="Tick at least one channel for the weekly report")
+            return back("/notifications", msg=f"Weekly report sent to {n} channel(s)")
+        return back("/notifications", msg="Weekly report saved")
 
     @app.post("/notifications/{cid}")
     async def channel_edit(request: Request, cid: int):
@@ -561,11 +617,11 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if form is None:
             return back("/notifications", err="Form expired")
         ch = rt.db.one("SELECT * FROM channels WHERE id=?", (cid,))
-        if ch is None:
+        if ch is None or ch["kind"] not in PROVIDERS:
             return back("/notifications", err="Unknown channel")
-        mod = KINDS[ch["kind"]]
+        mod = PROVIDERS[ch["kind"]]
         config = {k: form.get(k, "").strip() for k, _, _ in mod.FIELDS}
-        if ch["kind"] == "ntfy":
+        if hasattr(mod, "normalize"):
             config, err = mod.normalize(config)
             if err:
                 return back("/notifications", err=err)
@@ -573,10 +629,9 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         qs, qe = form.get("quiet_start", ""), form.get("quiet_end", "")
         if bool(qs) != bool(qe):
             return back("/notifications", err="Quiet hours need both a start and an end")
-        rt.db.run("UPDATE channels SET name=?, enabled=?, levels=?, quiet_start=?, quiet_end=?, weekly_report=?, "
-                  "config=? WHERE id=?", (form.get("name", ch["name"])[:60], int(form.get("enabled") == "on"),
-                                          json.dumps(levels), qs or None, qe or None,
-                                          int(form.get("weekly_report") == "on"), json.dumps(config), cid))
+        rt.db.run("UPDATE channels SET name=?, enabled=?, levels=?, quiet_start=?, quiet_end=?, config=? WHERE id=?",
+                  (form.get("name", ch["name"])[:60] or ch["name"], int(form.get("enabled") == "on"),
+                   json.dumps(levels), qs or None, qe or None, json.dumps(config), cid))
         if form.get("secret"):
             rt.secrets.put(channel_secret(cid), form["secret"].strip())
         audit(rt.db, user.username, "channel.edit", f"{ch['kind']} {ch['name']}")
@@ -592,7 +647,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt.db.run("DELETE FROM outbox WHERE channel_id=?", (cid,))
         rt.secrets.delete(channel_secret(cid))
         audit(rt.db, user.username, "channel.delete", str(cid))
-        return back("/notifications", msg="Channel removed")
+        return back("/notifications", msg="Removed")
 
     @app.post("/notifications/{cid}/test")
     async def channel_test(request: Request, cid: int):
@@ -602,52 +657,18 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         ch = rt.db.one("SELECT * FROM channels WHERE id=?", (cid,))
         if ch is None:
             return back("/notifications", err="Unknown channel")
-        home = rt.db.get("home.name") or "Home"
-        msg = Message(OK, f"✅ {home}: test message", f"homewatch can reach this channel.\n{rt.db.get('home.url') or ''}")
         try:
+            if ch["kind"] == "healthchecks":
+                await PROVIDERS["healthchecks"].ping(rt.notifier.http, json.loads(ch["config"]))
+                rt.db.set(f"heartbeat.{cid}.last_ok", time.time())
+                return back("/notifications", msg=f"{ch['name']}: ping sent; healthchecks.io should show it as up")
+            home = rt.db.get("home.name") or "Home"
+            msg = Message(OK, f"✅ {home}: test message",
+                          f"homewatch can reach this channel.\n{rt.db.get('home.url') or ''}")
             await rt.notifier.deliver(ch, msg)
         except Exception as e:  # noqa: BLE001
             return back("/notifications", err=f"{ch['name']}: {e}")
         return back("/notifications", msg=f"{ch['name']}: test message sent")
-
-    @app.post("/settings/general")
-    async def general_save(request: Request):
-        rt = rt_of(request)
-        user = request.state.user
-        form = await form_of(request, user)
-        if form is None:
-            return back("/notifications", err="Form expired")
-        url = form.get("url", "").strip()
-        if url and not url.startswith("https://"):
-            return back("/notifications", err="The page address must start with https://")
-        rt.db.set("home.url", url)
-        hc = form.get("hc_url", "").strip()
-        if form.get("hc_clear") == "on":
-            rt.secrets.delete(HC_SECRET)
-        elif hc:
-            if not hc.startswith("https://"):
-                return back("/notifications", err="The healthchecks.io URL must start with https://")
-            rt.secrets.put(HC_SECRET, hc)
-        t = form.get("report_time", "08:00")
-        try:
-            h, m = map(int, t.split(":"))
-            wd = int(form.get("report_weekday", "0"))
-            assert 0 <= h < 24 and 0 <= m < 60 and 0 <= wd <= 6
-        except (ValueError, AssertionError):
-            return back("/notifications", err="Weekly report: invalid day or time")
-        rt.db.set("report.schedule", {"weekday": wd, "time": f"{h:02d}:{m:02d}"})
-        audit(rt.db, user.username, "settings.general", f"url={url} hc={'set' if hc else 'unchanged'}")
-        return back("/notifications", msg="Saved")
-
-    @app.post("/report/send")
-    async def report_send(request: Request):
-        rt = rt_of(request)
-        if await form_of(request, request.state.user) is None:
-            return back("/notifications", err="Form expired")
-        n = await rt.send_report()
-        if not n:
-            return back("/notifications", err="No channel has the weekly report switched on")
-        return back("/notifications", msg=f"Weekly report queued for {n} channel(s)")
 
     # -- system ------------------------------------------------------------------------------------
     @app.get("/system")
@@ -660,7 +681,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                     last_run=rt.last_run, last_error=rt.last_error, csrf=request.state.user.csrf,
                     updates=rt.db.get("updates.check", True), latest=rt.db.get("updates.latest", ""),
                     roles=ROLES, tzname=rt.db.get("home.tz") or "UTC", zones=sorted(available_timezones()),
-                    home_name=rt.db.get("home.name") or "Home")
+                    home_name=rt.db.get("home.name") or "Home", home_url=rt.db.get("home.url") or "")
 
     @app.post("/system/home")
     async def system_home(request: Request):
@@ -791,37 +812,42 @@ def _save_section(request: Request, section: str, form: dict, user: User) -> str
         zone = form.get("tz", "UTC")
         if zone not in available_timezones():
             return "Unknown time zone"
+        if "url" in form:
+            url = form.get("url", "").strip().rstrip("/")
+            if url and not url.startswith(("https://", "http://")):
+                return "homewatch address: start it with https://"
+            rt.db.set("home.url", url)
         rt.db.set("home.name", name or "Home")
         rt.db.set("home.tz", zone)
         audit(rt.db, user.username, "home", f"name={name} tz={zone}")
         return ""
     if section == "internet":
         return MODULES["internet"].save(rt, form, user)
+    if section == "healthchecks":  # wizard step: the heartbeat is a provider like the others
+        if not form.get("healthchecks.url", "").strip():
+            return ""
+        form = {**form, "kind": "healthchecks"}
+        section = "notify"
     if section == "notify":
         kind = form.get("kind", "")
-        if kind not in KINDS:
-            return "Pick Telegram or ntfy"
-        mod = KINDS[kind]
-        config = {k: form.get(k, "").strip() for k, _, _ in mod.FIELDS}
-        if kind == "telegram" and not (config["chat_id"] and form.get("secret")):
+        if kind not in PROVIDERS:
+            return "Pick a provider"
+        mod = PROVIDERS[kind]
+        # fields are named "<kind>.<field>" because every provider's fields are on the page at once
+        config = {k: form.get(f"{kind}.{k}", "").strip() for k, _, _ in mod.FIELDS}
+        secret = form.get(f"{kind}.secret", "").strip()
+        if kind == "telegram" and not (config["chat_id"] and secret):
             return "Telegram needs a bot token and a chat ID"
-        if kind == "ntfy":
-            config, err = KINDS["ntfy"].normalize(config)
+        if hasattr(mod, "normalize"):
+            config, err = mod.normalize(config)
             if err:
                 return err
-        name = form.get("name", "").strip()[:60] or kind.capitalize()
+        name = form.get(f"{kind}.name", "").strip()[:60] or mod.TITLE
+        levels = [] if kind == "healthchecks" else [1, 2]
         cid = rt.db.run("INSERT INTO channels(kind,name,levels,config) VALUES(?,?,?,?)",
-                        (kind, name, json.dumps([1, 2]), json.dumps(config)))
-        if form.get("secret"):
-            rt.secrets.put(channel_secret(cid), form["secret"].strip())
+                        (kind, name, json.dumps(levels), json.dumps(config)))
+        if secret:
+            rt.secrets.put(channel_secret(cid), secret)
         audit(rt.db, user.username, "channel.add", f"{kind} {name}")
-        return ""
-    if section == "healthchecks":
-        url = form.get("hc_url", "").strip()
-        if url:
-            if not url.startswith("https://"):
-                return "The healthchecks.io URL must start with https://"
-            rt.secrets.put(HC_SECRET, url)
-            audit(rt.db, user.username, "healthchecks", "set")
         return ""
     return "Unknown section"

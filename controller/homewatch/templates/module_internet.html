@@ -13,19 +13,5 @@
   <button>Save</button>
 </form>
 <h2>Speed tests</h2>
-<div class="card">
-  <form method="post" action="/modules/internet/speedtest" class="inline">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <button {{ 'disabled' if running }}>{{ 'Running…' if running else 'Run a speed test now' }}</button>
-    <span class="quiet small">Takes about 20 seconds.</span>
-  </form>
-  <div class="scroll"><table style="margin-top:12px">
-    <tr><th>When</th><th>Engine</th><th>Down</th><th>Up</th><th>Latency</th><th>Result</th></tr>
-    {% for t in tests %}<tr><td>{{ t.ts | ts }}</td><td>{{ t.engine }}</td>
-      <td>{{ '%.1f' | format(t.down) if t.down is not none }}</td><td>{{ '%.1f' | format(t.up) if t.up is not none }}</td>
-      <td>{{ '%.0f ms' | format(t.latency) if t.latency is not none }}</td>
-      <td>{% if t.ok %}ok{% else %}<span style="color:var(--err)">{{ t.error }}</span>{% endif %}</td></tr>
-    {% else %}<tr><td colspan="6" class="quiet">No speed tests yet.</td></tr>{% endfor %}
-  </table></div>
-</div>
+{% include "_speedtests.html" %}
 {% endblock %}
