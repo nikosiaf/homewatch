@@ -365,8 +365,11 @@ def test_add_proxmox_tests_before_saving(client, monkeypatch):
     r = client.post("/modules/proxmox", data={"csrf": tok, "url": "192.168.1.10", "token_id": "homewatch@pve!monitor",
                                               "secret": "x"})
     s = client.rt.db.get("module.proxmox")
-    assert s["url"] == "https://192.168.1.10:8006" and s["watched"] == [100, 104]  # the running guests
-    assert "Guests to watch" in r.text and client.rt.secrets.get("module.proxmox.token") == "x"
+    assert s["url"] == "https://192.168.1.10:8006" and s["watched"] == []  # nothing pre-selected
+    assert "No guests chosen yet" in r.text and client.rt.secrets.get("module.proxmox.token") == "x"
+    r = client.post("/modules/proxmox", data={"csrf": tok, "enabled": "on", "url": "https://192.168.1.10:8006",
+                                              "token_id": "homewatch@pve!monitor", "watch.100": "on"})
+    assert client.rt.db.get("module.proxmox")["watched"] == [100]
     r = client.post("/modules/proxmox", data={"csrf": tok, "remove": "1"})
     assert "Removed" in r.text and client.rt.db.get("module.proxmox") is None
     plugin.snap = None

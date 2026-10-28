@@ -378,6 +378,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             err = await _ookla_ready(rt, form, request.state.user)
             if err:
                 return back(f"/modules/{mid}", err=err)
+        first_connect = mid == "proxmox" and not form.get("remove") and not m.configured(rt)
         if hasattr(m, "prepare_save"):  # e.g. test the connection before anything is stored
             err = await m.prepare_save(rt, form)
             if err:
@@ -387,6 +388,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back(f"/modules/{mid}", err=err)
         if form.get("remove"):
             return back(f"/modules/{mid}", msg="Removed")
+        if first_connect:
+            return back(f"/modules/{mid}", msg="Connected. Now tick the guests homewatch should watch and press Save.")
         removed = mid == "speedport" and not form.get("model") and not m.page_ctx(rt)["configured"]
         return back(f"/modules/{mid}", msg="Modem removed" if removed else "Saved")
 

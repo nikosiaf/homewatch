@@ -45,7 +45,10 @@ disk health and backups. Nothing on Proxmox is changed.</p>
   <fieldset data-enable-target class="plain" {{ 'disabled' if not s.enabled }}>
     {{ fields(s) }}
     <h3>Guests to watch</h3>
-    <p class="quiet small">Ticked guests must be running ("Guests running" check), and their backups are checked when a backup job covers them.</p>
+    <p class="quiet small">Choose the guests homewatch should keep an eye on, then press Save. It alerts when a chosen
+      guest stops running, and checks that it is backed up when one of your Proxmox backup jobs includes it.
+      Guests you don't choose are only listed here.</p>
+    {% if not s.watched and guests %}<p class="flash ok" style="border-color:var(--warn);color:inherit">No guests chosen yet: tick the ones to watch and press Save.</p>{% endif %}
     <div class="scroll"><table>
       <tr><th>Watch</th><th>ID</th><th>Name</th><th>Type</th><th>Status</th><th>Newest backup</th></tr>
       {% for g in guests %}<tr>
@@ -58,7 +61,7 @@ disk health and backups. Nothing on Proxmox is changed.</p>
       </tr>{% else %}<tr><td colspan="6" class="quiet">No reading yet; it appears after the next check run.</td></tr>{% endfor %}
     </table></div>
   </fieldset>
-  <p class="row"><button data-save>Save</button>
+  <p class="row" style="justify-content:space-between"><button data-save>Save</button>
     <button class="danger" name="remove" value="1" data-confirm="Remove this Proxmox host and its token from homewatch?" formnovalidate>Remove host</button></p>
 </form>
 

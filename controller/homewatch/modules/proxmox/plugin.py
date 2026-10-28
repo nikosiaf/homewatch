@@ -107,8 +107,6 @@ class ProxmoxModule(Module):
             snap, err = await self.test(url, token_id, secret, form.get("verify") == "on")
             if err:
                 return f"Nothing saved: {err}"
-            if not self.configured(rt):  # first time: watch the guests that run now
-                form["_discovered_running"] = [int(g["vmid"]) for g in snap.guests if g.get("status") == "running"]
             self.snap, self.snap_ts, self.error = snap, time.time(), ""
         return ""
 
@@ -122,7 +120,8 @@ class ProxmoxModule(Module):
             return ""
         old = self.load(rt)
         first = not self.configured(rt)
-        watched = form.get("_discovered_running") if first else sorted(
+        # nothing is watched until the admin ticks guests and saves (none are pre-selected)
+        watched = [] if first else sorted(
             int(k.split(".", 1)[1]) for k in form if k.startswith("watch.") and k.split(".", 1)[1].isdigit())
         new = {"enabled": True if first else form.get("enabled") == "on",
                "url": normalize_url(form.get("url", old["url"])) or old["url"],
