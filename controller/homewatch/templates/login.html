@@ -2,7 +2,9 @@
 {% block title %}Log in{% endblock %}
 {% block content %}
 <div class="card narrow">
-  <h1>{{ home }} · homewatch</h1>
+  <div class="hero"><img src="/static/homewatch-icon.svg" alt="" width="56" height="56">
+    <span class="wordmark big"><b>home</b><span>watch</span></span></div>
+  <h1>{{ home }}</h1>
   <form method="post" action="/login">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="u">Username</label><input id="u" type="text" name="username" autocomplete="username" required autofocus>

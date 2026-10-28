@@ -1,4 +1,9 @@
-# homewatch
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/homewatch-logo-dark.svg">
+    <img alt="homewatch" src="docs/brand/homewatch-logo.svg" width="330">
+  </picture>
+</h1>
 
 A small, self-hosted monitor for your home network, configured from a plain web page.
 v0.1 watches one thing well: **your internet line**. It tells you *what* broke ("router
