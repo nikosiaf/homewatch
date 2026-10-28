@@ -13,7 +13,7 @@ def settings(**over):
     s = copy.deepcopy(DEFAULTS)
     s["gateway"]["target"] = "192.168.1.1"
     s["dns"]["server"] = "192.168.1.1"
-    s["speed"].update(contract_down=100, contract_up=10)
+    s["line"].update(contract_down=100, contract_up=10)
     for k, v in over.items():
         s[k].update(v)
     return s
@@ -129,7 +129,7 @@ def test_failed_speed_tests_are_ignored():
 
 
 def test_speed_without_contract_is_ok():
-    s = settings(speed={"contract_down": 0, "contract_up": 0})
+    s = settings(line={"contract_down": 0, "contract_up": 0})
     two_low = [Speed(NOW - 100, 4, 1, True), Speed(NOW - 10900, 6, 1, True)]
     res = by_id(evaluate(s, th(), readings(speeds=two_low)))
     assert res["speed"].status == OK and "no contracted speed" in res["speed"].detail
@@ -147,3 +147,20 @@ def test_disabled_check_and_empty_threshold():
     res = by_id(evaluate(settings(), t, r))
     assert res["latency"].status == OK
     assert "jitter" not in res
+
+
+def test_old_settings_move_the_contract_to_line(db):
+    from homewatch.modules.internet import load, save
+
+    save(db, {"speed": {"enabled": False, "engine": "cloudflare", "interval_h": 3, "contract_down": 100,
+                        "contract_up": 10}})
+    s = load(db)
+    assert s["line"] == {"contract_down": 100, "contract_up": 10}
+    assert "contract_down" not in s["speed"] and s["speed"]["enabled"] is False
+
+
+def test_contract_counts_with_speed_test_off_for_other_modules(db):
+    from homewatch.modules.internet import load, save
+
+    save(db, {"speed": {"enabled": False}, "line": {"contract_down": 100, "contract_up": 10}})
+    assert load(db)["line"]["contract_down"] == 100

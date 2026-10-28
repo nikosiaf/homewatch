@@ -18,7 +18,8 @@ CHECKS: list[CheckDef] = [
     CheckDef("link", "DSL link", "modem", help="ERROR when the modem reports the DSL line down."),
     CheckDef("sync", "Sync rate", "modem", unit="%", warn=85, error=50, editable=("warn", "error"),
              lower_is_worse=True,
-             help="Lower of download and upload sync as a share of the contracted speed (set on the Internet module)."),
+             help="Lower of download and upload sync as a share of the contracted speed (Internet line page). "
+                  "Without a contracted speed it only shows the rates."),
     CheckDef("snr", "SNR margin", "modem", unit="dB", warn=6, error=3, editable=("warn", "error"),
              lower_is_worse=True, help="Lower of the downstream and upstream noise margin."),
     CheckDef("resyncs", "Resyncs (24 h)", "modem", warn=1, error=5, editable=("warn", "error"),
@@ -99,7 +100,7 @@ def evaluate(settings: dict, th: dict[str, Thresholds], st: State) -> list[Check
             add("sync", level(share, th["sync"], True),
                 f"{rates} ({share:.0f} % of {st.contract_down:g} / {st.contract_up:g})", share)
         else:
-            add("sync", OK, f"{rates} (no contracted speed set on the Internet module)")
+            add("sync", OK, rates)
         snrs = [x for x in (v.get("snr_down_db"), v.get("snr_up_db")) if x is not None]
         if snrs:
             m = min(snrs)

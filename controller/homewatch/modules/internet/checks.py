@@ -198,7 +198,7 @@ def evaluate(settings: dict, thresholds: dict[str, Thresholds], r: Readings) -> 
 
     # 5. speed (from the speed test history, newest first)
     if probes["speed"]:
-        add_speed(settings["speed"], thresholds["speed"], r.speeds, add)
+        add_speed(settings["line"], thresholds["speed"], r.speeds, add)
 
     return [out[c.id] for c in CHECKS if c.id in out and thresholds[c.id].enabled]
 

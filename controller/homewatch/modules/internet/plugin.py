@@ -64,9 +64,9 @@ class InternetModule(Module):
             "dns": {"enabled": form.get("dns.enabled") == "on" and bool(dns_server), "server": dns_server,
                     "domain": domain or "cloudflare.com"},
             "speed": {"enabled": form.get("speed.enabled") == "on", "engine": engine, "interval_h": interval,
-                      "contract_down": _float(form.get("speed.contract_down"), 0) or 0,
-                      "contract_up": _float(form.get("speed.contract_up"), 0) or 0,
                       "ookla_accepted": form.get("speed.ookla_accepted") == "on"},
+            "line": {"contract_down": max(_float(form.get("line.contract_down"), 0) or 0, 0),
+                     "contract_up": max(_float(form.get("line.contract_up"), 0) or 0, 0)},
         }
         save(rt.db, new)
         rt.sync_telegraf()

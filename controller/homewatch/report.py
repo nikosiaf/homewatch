@@ -9,6 +9,7 @@ from .db import DB
 from .engine import tz
 from .metrics import Metrics, MetricsError
 from .modules import OK
+from .modules.internet import load as load_internet
 from .notify import Message, _dur
 
 WEEK = 7 * 24 * 3600
@@ -53,8 +54,7 @@ async def build(db: DB, metrics: Metrics, site: str, now: float | None = None) -
         avg_d = sum(t["down"] for t in tests) / len(tests)
         avg_u = sum(t["up"] for t in tests) / len(tests)
         low = min(tests, key=lambda t: t["down"])
-        s = db.get("module.internet") or {}
-        sp = s.get("speed", {})
+        sp = load_internet(db)["line"]
         contract = (f" (contract {sp['contract_down']:g} / {sp['contract_up']:g})"
                     if sp.get("contract_down") and sp.get("contract_up") else "")
         lines.append(f"Speed: average {avg_d:.1f} / {avg_u:.1f} Mbit/s{contract}, lowest download "

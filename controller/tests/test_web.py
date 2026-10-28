@@ -41,8 +41,10 @@ def test_first_run_wizard(client):
                                              "dns.enabled": "on", "dns.server": "192.168.1.1",
                                              "dns.domain": "example.com", "speed.enabled": "on",
                                              "speed.engine": "cloudflare", "speed.interval_h": "3",
-                                             "speed.contract_down": "100", "speed.contract_up": "10"})
+                                             "line.contract_down": "100", "line.contract_up": "10"})
     assert r.url.path == "/setup/notify"
+    line = client.rt.internet_settings()["line"]
+    assert line == {"contract_down": 100, "contract_up": 10}
     conf = open(client.rt.cfg.telegraf_dir + "/telegraf.conf").read()
     assert '"9.9.9.9"' in conf and '"example.com"' in conf
     r = client.post("/setup/notify", data={"csrf": tok, "skip": "1"})

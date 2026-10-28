@@ -122,4 +122,4 @@ def test_low_snr_sync_and_resyncs():
 
 def test_sync_without_contract():
     res = by_id(evaluate({}, th(), state(contract_down=0, contract_up=0)))
-    assert res["sync"].status == OK and "no contracted speed" in res["sync"].detail
+    assert res["sync"].status == OK and res["sync"].detail == "109.9 / 11.0 Mbit/s"

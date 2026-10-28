@@ -37,7 +37,7 @@ class SpeedportModule(Module):
 
     async def readings(self, rt, settings, now):
         st = self.state(rt)
-        inet = load_internet(rt.db)["speed"]
+        inet = load_internet(rt.db)["line"]
         resyncs = None
         if st.get("last_ok"):
             res = await rt.metrics.query(f'resets(hw_dsl_line_up_s{{site="{rt.cfg.site}"}}[24h])', at=now)
