@@ -328,11 +328,23 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             q += " AND worst=?"
             args.append(int(level))
         rows = rt.db.all(q + " ORDER BY started DESC LIMIT 500", tuple(args))
+        now = time.time()
+        # a timeline: each issue is a "problem" event and, once it ends, a "back to OK" event
+        events = []
+        for i in rows:
+            events.append({"ts": i["started"], "kind": "problem", "level": i["worst"], "key": i["check_key"],
+                           "detail": i["detail"], "open_for": None if i["resolved"] else now - i["started"]})
+            if i["resolved"]:
+                off = i["resolved_detail"] == "check switched off"
+                events.append({"ts": i["resolved"], "kind": "off" if off else "ok", "level": OK,
+                               "key": i["check_key"], "detail": i["resolved_detail"],
+                               "after": i["resolved"] - i["started"]})
+        events.sort(key=lambda e: e["ts"], reverse=True)
         from .report import downtime
 
         down, outages = downtime(rt.db, rt.cfg.site, "internet.reachable", since, time.time())
         uptime = 100 * (1 - down / (days * 86400))
-        return page(request, "history.html", request.state.user, rows=rows, names=rt.names(), check=check,
+        return page(request, "history.html", request.state.user, events=events, names=rt.names(), check=check,
                     level=level, days=days, uptime=uptime, outages=outages, now=time.time())
 
     # -- internet module ------------------------------------------------------------------------

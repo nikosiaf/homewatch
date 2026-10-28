@@ -2,6 +2,7 @@
 
 import json
 import re
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -300,3 +301,17 @@ def test_status_page_has_one_line_per_module(client):
     page = client.get("/").text
     assert page.count('<details class="module') == 1
     assert "Packet loss: packet loss 12 %" in page and 'data-module="internet"' in page
+
+
+def test_history_shows_back_to_ok_events(client):
+    setup_admin(client)
+    db = client.rt.db
+    t = time.time() - 3600
+    db.run("INSERT INTO issues(site,check_key,level,worst,started,resolved,detail,resolved_detail,notified) "
+           "VALUES('home','internet.loss',1,1,?,?,'packet loss 12 %','packet loss 0.0 %',1)", (t, t + 300))
+    db.run("INSERT INTO issues(site,check_key,level,worst,started,detail,notified) "
+           "VALUES('home','internet.dns',2,2,?,'DNS failing',1)", (t + 600,))
+    page = client.get("/history").text
+    assert "Back to OK: packet loss 0.0 %" in page and "after 5 min" in page
+    assert "still open" in page and "DNS failing" in page
+    assert page.index("DNS failing") < page.index("Back to OK") < page.index("packet loss 12 %")  # newest first

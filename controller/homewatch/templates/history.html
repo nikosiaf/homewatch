@@ -15,14 +15,14 @@
   <p>Internet uptime over {{ days }} day{{ 's' if days > 1 }}: <b>{{ '%.2f' | format(uptime) }} %</b> · {{ outages }} outage{{ 's' if outages != 1 }}</p>
 </div>
 <div class="card scroll"><table>
-  <tr><th>Check</th><th>Worst</th><th>Started</th><th>Resolved</th><th>Duration</th><th>Detail</th></tr>
-  {% for i in rows %}<tr>
-    <td>{{ names.get(i.check_key, i.check_key) }}</td>
-    <td><span class="badge s{{ i.worst }}">{{ LEVEL_WORD[i.worst] }}</span></td>
-    <td>{{ i.started | ts }}</td>
-    <td>{% if i.resolved %}{{ i.resolved | ts }}{% else %}<b>open</b>{% endif %}</td>
-    <td>{{ ((i.resolved or now) - i.started) | dur }}</td>
-    <td>{{ i.detail }}{% if i.resolved_detail %}<div class="quiet small">→ {{ i.resolved_detail }}</div>{% endif %}</td>
-  </tr>{% else %}<tr><td colspan="6" class="quiet">No issues in this period.</td></tr>{% endfor %}
+  <tr><th>When</th><th>Status</th><th>Check</th><th>What happened</th><th>Duration</th></tr>
+  {% for e in events %}<tr>
+    <td style="white-space:nowrap">{{ e.ts | ts }}</td>
+    <td>{% if e.kind == 'ok' %}<span class="badge s0">OK</span>{% elif e.kind == 'off' %}<span class="badge mute">OFF</span>
+        {% else %}<span class="badge s{{ e.level }}">{{ LEVEL_WORD[e.level] }}</span>{% endif %}</td>
+    <td>{{ names.get(e.key, e.key) }}</td>
+    <td>{% if e.kind == 'ok' %}Back to OK: {% elif e.kind == 'off' %}Check switched off while open{% endif %}{{ e.detail if e.kind != 'off' }}</td>
+    <td style="white-space:nowrap">{% if e.kind in ('ok', 'off') %}after {{ e.after | dur }}{% elif e.open_for is not none %}<b>still open</b>, {{ e.open_for | dur }}{% endif %}</td>
+  </tr>{% else %}<tr><td colspan="5" class="quiet">No issues in this period.</td></tr>{% endfor %}
 </table></div>
 {% endblock %}
