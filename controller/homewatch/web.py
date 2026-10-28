@@ -710,7 +710,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                     last_run=rt.last_run, last_error=rt.last_error, csrf=request.state.user.csrf,
                     updates=rt.db.get("updates.check", True), latest=rt.db.get("updates.latest", ""),
                     roles=ROLES, tzname=rt.db.get("home.tz") or "UTC", zones=sorted(available_timezones()),
-                    home_name=rt.db.get("home.name") or "Home", home_url=rt.db.get("home.url") or "")
+                    home_name=rt.db.get("home.name") or "Home", home_url=rt.db.get("home.url") or "",
+                    probe_age=_probe_age(rt), ookla=_ookla_version(rt))
 
     @app.post("/system/home")
     async def system_home(request: Request):
@@ -810,6 +811,29 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         return back("/system", msg="Saved")
 
 
+def _probe_age(rt) -> float | None:
+    """Seconds since Telegraf's last ping/DNS data, from the latest check run."""
+    fresh = next((r for r in rt.results if r.key == "internet.fresh"), None)
+    return fresh.value if fresh and fresh.value is not None else None
+
+
+def _ookla_version(rt) -> str:
+    from .modules.internet.speedtest import ookla_path
+
+    path = ookla_path(rt.cfg.ookla_dir)
+    if not os.access(path, os.X_OK):
+        return ""
+    if not rt.db.get("ookla.version"):  # installed before versions were recorded: ask the program once
+        import subprocess
+
+        try:
+            out = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=5).stdout
+            rt.db.set("ookla.version", out.split()[3] if out.startswith("Speedtest by Ookla") else "")
+        except (OSError, subprocess.SubprocessError, IndexError):
+            return "version unknown"
+    return rt.db.get("ookla.version") or "version unknown"
+
+
 async def _ookla_ready(rt, form: dict, user) -> str:
     """Choosing the Ookla engine needs its license accepted and the CLI installed; install it on first save."""
     from .modules.internet.speedtest import OOKLA_VERSION, install_ookla, ookla_path
@@ -822,6 +846,7 @@ async def _ookla_ready(rt, form: dict, user) -> str:
     if err:
         return f"Nothing saved: {err}"
     audit(rt.db, user.username, "ookla", f"installed {OOKLA_VERSION}")
+    rt.db.set("ookla.version", OOKLA_VERSION)
     return ""
 
 

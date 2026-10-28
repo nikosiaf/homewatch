@@ -31,14 +31,14 @@
   <div class="row">
     <div><label for="se">Engine</label>
       <select id="se" name="speed.engine" data-engine-select>
-        <option value="cloudflare" {{ 'selected' if s.speed.engine == 'cloudflare' }}>Cloudflare (no install)</option>
+        <option value="cloudflare" {{ 'selected' if s.speed.engine == 'cloudflare' }}>Cloudflare</option>
         <option value="ookla" {{ 'selected' if s.speed.engine == 'ookla' }}>Ookla Speedtest CLI</option>
       </select></div>
     <div><label for="si">Every (hours)</label><input class="num" id="si" type="number" step="0.5" min="0.5" max="48" name="speed.interval_h" value="{{ s.speed.interval_h }}"></div>
   </div>
   <label class="check" style="margin-top:12px" data-ookla-only><input type="checkbox" name="speed.ookla_accepted" data-ookla-eula {{ 'checked' if s.speed.ookla_accepted }}>
     I accept Ookla's <a href="https://www.speedtest.net/about/eula" target="_blank" rel="noopener">EULA</a> and
-    <a href="https://www.speedtest.net/about/privacy" target="_blank" rel="noopener">privacy policy</a> </label>
-  <p class="quiet small" data-ookla-only>The Ookla CLI is not part of homewatch (its license doesn't allow that).
-    {% if ookla_found is defined and not ookla_found %}Saving with Ookla selected downloads it from Ookla's site for this machine.{% endif %}</p>
+    <a href="https://www.speedtest.net/about/privacy" target="_blank" rel="noopener">privacy policy</a>.
+    {% if not (ookla_found is defined and ookla_found) %}When you save, homewatch downloads Ookla's speed test program from
+    speedtest.net (it can't be included with homewatch).{% endif %}</label>
 </fieldset>

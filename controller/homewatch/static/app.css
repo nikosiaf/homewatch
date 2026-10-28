@@ -8,6 +8,7 @@
           --brand: #22c55e; --ok: #4cc26a; --warn: #f0a93b; --err: #ff6b6b; --accent: #7aa2ff; --muted-bg: #252a33; }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--ink);
        font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 a { color: var(--accent); }

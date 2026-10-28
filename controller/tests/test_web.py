@@ -332,3 +332,13 @@ def test_checks_page_order(client):
     setup_admin(client)
     page = client.get("/checks").text
     assert page.index("<h2>Snooze</h2>") < page.index("<h2>Timing</h2>") < page.index("<h2>Thresholds</h2>")
+
+
+def test_system_health_lists_probes_and_ookla(client):
+    setup_admin(client)
+    from homewatch.modules import CheckResult
+
+    client.rt.results = [CheckResult("internet.fresh", "Probe data fresh", 0, "Last probe data 20 s ago", 20)]
+    page = client.get("/system").text
+    assert "Telegraf (ping and DNS probes)" in page and "last data 20 s ago" in page
+    assert "Ookla Speedtest CLI" in page and "not installed" in page
