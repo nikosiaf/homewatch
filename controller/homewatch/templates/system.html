@@ -8,22 +8,22 @@
     <h2 style="margin-top:0">Health</h2>
     {{ note("health") }}
     <table>
+      <tr><td>homewatch version</td><td>{{ version }}{% if latest %} · latest release {{ latest }}{% endif %}</td></tr>
       <tr><td>VictoriaMetrics</td><td>{% if vm_ok %}<span class="badge s0">OK</span>{% else %}<span class="badge s2">unreachable</span>{% endif %}</td></tr>
-      <tr><td>Last check run</td><td>{{ last_run | ts('%d %b %H:%M:%S') if last_run else 'not yet' }}</td></tr>
       {% if last_error %}<tr><td>Last error</td><td style="color:var(--err)">{{ last_error }}</td></tr>{% endif %}
       <tr><td>Telegraf (ping and DNS probes)</td><td>{% if probe_age is none %}<span class="badge s2">no data</span>
         {% elif probe_age > 180 %}<span class="badge s2">no data for {{ probe_age | dur }}</span>
         {% else %}<span class="badge s0">OK</span> <span class="quiet small">last data {{ probe_age | int }} s ago</span>{% endif %}</td></tr>
       <tr><td>Ookla Speedtest CLI</td><td>{% if ookla %}<span class="badge s0">installed</span> <span class="quiet small">{{ ookla }}</span>
         {% else %}<span class="quiet">not installed (only needed for the Ookla engine)</span>{% endif %}</td></tr>
-      <tr><td>Version</td><td>{{ version }}{% if latest %} · latest release {{ latest }}{% endif %}</td></tr>
     </table>
     {% if update %}<p>To update: set <code>HW_VERSION={{ update }}</code> in <code>.env</code>, then
       <code>docker compose pull && docker compose up -d</code>.</p>{% endif %}
     <form method="post" action="/system/updates">
       <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="health">
       <label class="check"><input type="checkbox" name="check" {{ 'checked' if updates }}> Check GitHub once a day for a newer release</label>
-      <p><button data-save>Save</button></p>
+      <p class="row" style="align-items:center"><button data-save>Save</button>
+        <span class="quiet small">Last check run: {{ last_run | ts('%d %b %H:%M:%S') if last_run else 'not yet' }}</span></p>
     </form>
   </div>
   <form method="post" action="/system/home" class="card" id="home">
