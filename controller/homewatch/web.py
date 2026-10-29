@@ -362,7 +362,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         m = MODULES.get(mid)
         if m is None:
             return RedirectResponse("/modules", status_code=303)
-        return page(request, f"module_{mid}.html", request.state.user, s=m.load(rt), csrf=request.state.user.csrf,
+        template = getattr(m, "template", None) or f"module_{mid}.html"
+        return page(request, template, request.state.user, s=m.load(rt), csrf=request.state.user.csrf,
                     module=m, **m.page_ctx(rt))
 
     @app.post("/modules/{mid}")
@@ -378,7 +379,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             err = await _ookla_ready(rt, form, request.state.user)
             if err:
                 return back(f"/modules/{mid}", err=err)
-        first_connect = mid == "proxmox" and not form.get("remove") and not m.configured(rt)
+        first_connect = not form.get("remove") and hasattr(m, "configured") and not m.configured(rt)
         if hasattr(m, "prepare_save"):  # e.g. test the connection before anything is stored
             err = await m.prepare_save(rt, form)
             if err:
@@ -388,8 +389,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back(f"/modules/{mid}", err=err)
         if form.get("remove"):
             return back(f"/modules/{mid}", msg="Removed")
-        if first_connect:
+        if first_connect and mid == "proxmox":
             return back(f"/modules/{mid}", msg="Connected. Now tick the guests homewatch should watch and press Save.")
+        if first_connect:
+            return back(f"/modules/{mid}", msg="Connected. The first checks run within 2 minutes.")
         removed = mid == "speedport" and not form.get("model") and not m.page_ctx(rt)["configured"]
         return back(f"/modules/{mid}", msg="Modem removed" if removed else "Saved")
 

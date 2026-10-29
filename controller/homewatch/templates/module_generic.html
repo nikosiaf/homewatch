@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% from "_note.html" import note with context %}
+{% block title %}{{ module.name }}{% endblock %}
+{% block content %}
+<h1><a href="/modules" class="quiet" style="text-decoration:none">Modules</a> › {{ module.name }}</h1>
+<p class="quiet">{{ module.description }}</p>
+
+{% macro fields_html(s) %}
+  <div class="row">
+  {% for f in module.fields if f.kind != 'check' %}
+    <div><label for="f-{{ f.key }}">{{ f.label }}</label>
+      <input id="f-{{ f.key }}" type="{{ 'number' if f.kind == 'number' else 'text' }}" {{ 'step=any' if f.kind == 'number' }}
+             name="{{ f.key }}" value="{{ s[f.key] if s[f.key] is not none }}" placeholder="{{ f.placeholder }}" autocomplete="off"></div>
+  {% endfor %}
+  {% if module.secret_label %}
+    <div><label for="f-secret">{{ module.secret_label }} · {{ 'set' if has_secret else 'not set' }}</label>
+      <input id="f-secret" type="password" name="secret" placeholder="{{ 'leave empty to keep' if has_secret else module.secret_placeholder }}" autocomplete="new-password"></div>
+  {% endif %}
+  </div>
+  {% for f in module.fields if f.kind == 'check' %}
+    <label class="check"><input type="checkbox" name="{{ f.key }}" {{ 'checked' if s[f.key] }}> {{ f.label }}</label>
+    {% if f.help %}<p class="quiet small" style="margin:0 0 0 26px">{{ f.help }}</p>{% endif %}
+  {% endfor %}
+{% endmacro %}
+
+{% if not configured %}
+<form method="post" action="/modules/{{ module.id }}" class="card" id="settings">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="settings">
+  <h2 style="margin-top:0">Add {{ module.name }}</h2>
+  {{ note("settings") }}
+  {% if module.setup %}
+  <div class="callout">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11v6M12 7.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    <div><b>First create a read-only account for homewatch</b>
+      {% for kind, text in module.setup %}{% if kind == 'code' %}<pre class="code">{{ text }}</pre>{% else %}<p class="small" style="margin:4px 0">{{ text }}</p>{% endif %}{% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  {{ fields_html(s) }}
+  <p><button>Connect</button> <span class="quiet small">homewatch tests the connection before saving anything.</span></p>
+</form>
+{% else %}
+<form method="post" action="/modules/{{ module.id }}" class="card {{ 'off' if not s.enabled }}" id="settings">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="settings">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">{{ module.name }}</h2>
+    <label class="check"><input type="checkbox" name="enabled" data-enable-toggle {{ 'checked' if s.enabled }}> Enabled</label>
+  </div>
+  {{ note("settings") }}
+  {% if api_error %}<p class="flash err">{{ api_error }}</p>{% endif %}
+  <fieldset data-enable-target class="plain" {{ 'disabled' if not s.enabled }}>
+    {{ fields_html(s) }}
+    {% if module.choices_title %}
+    <h3>{{ module.choices_title }}</h3>
+    {% if module.choices_help %}<p class="quiet small">{{ module.choices_help }}</p>{% endif %}
+    <div class="row">{% for c, on in choices %}
+      <label class="check" title="{{ c.detail }}"><input type="checkbox" name="choose.{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
+    {% else %}<span class="quiet">Appears after the first reading.</span>{% endfor %}</div>
+    {% endif %}
+  </fieldset>
+  <p class="row" style="justify-content:space-between"><button data-save>Save</button>
+    <button class="danger" name="remove" value="1" data-confirm="Remove {{ module.name }} and its saved login from homewatch?" formnovalidate>Remove</button></p>
+</form>
+
+{% if s.enabled and snap %}
+<div class="card scroll" id="overview">
+  <h2 style="margin-top:0">Last reading <span class="quiet small">{{ snap_ts | ts('%H:%M:%S') }}</span></h2>
+  {% for t in tables %}
+  {% if t.title %}<h3>{{ t.title }}</h3>{% endif %}
+  <table>
+    <tr>{% for h in t.head %}<th>{{ h }}</th>{% endfor %}</tr>
+    {% for r in t.rows %}<tr>{% for c in r %}<td>{{ c if c is not none else '—' }}</td>{% endfor %}</tr>
+    {% else %}<tr><td colspan="{{ t.head | length }}" class="quiet">nothing</td></tr>{% endfor %}
+  </table>
+  {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

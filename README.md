@@ -6,16 +6,16 @@
 </h1>
 
 A small, self-hosted monitor for your home network, configured from a plain web page.
-homewatch 0.2 watches **your internet line**, **your provider's DSL modem** and **your Proxmox VE
-host**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
+homewatch watches **your internet line**, **your provider's DSL modem**, **your Proxmox VE host**
+and **your OPNsense firewall**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
 down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy. Later versions add
-one module per release (OPNsense, Home Assistant, Synology, …).
+one module per release (Home Assistant, Synology, MikroTik, …).
 
 - Runs as a Docker Compose stack on any Linux host (amd64 or arm64)
 - LAN / Tailscale only: it never needs a port open to the internet
 - MIT licensed
 
-## What homewatch 0.2 does
+## What homewatch does
 
 ### Internet line module
 
@@ -80,6 +80,20 @@ page shows the three commands to create it). homewatch tests the token before sa
 
 Backup results come from Proxmox's backup task logs (a read-only token can't list backup contents);
 each log is read once.
+
+### OPNsense module (optional)
+
+Reads an OPNsense firewall through the API key of a user that has only the status pages it needs
+(the module page lists them). Missing privileges show as "not readable", not as alarms.
+
+| Check | WARNING | ERROR |
+|---|---|---|
+| Gateways | packet loss or delay | a gateway down |
+| CPU / memory (without ZFS cache) / root disk | ≥ 85 / 90 / 85 % | ≥ 95 % |
+| Services (the ones you choose) | | not running |
+| HAProxy servers | | a health-checked server down |
+| Certificates in use | expires in < 20 days | < 7 days, or expired |
+| Firmware | updates found at the last check, or reboot needed | |
 
 ### Alerts and notifications
 

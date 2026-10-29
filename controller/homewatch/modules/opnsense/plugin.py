@@ -1,0 +1,220 @@
+"""OPNsense: read-only API key of a user with only the needed status pages."""
+
+from __future__ import annotations
+
+import re
+
+import httpx
+
+from .. import ERROR, OK, WARNING, CheckDef, level
+from ..apibase import ApiError, ApiModule, Choice, Field, Table, https_url
+
+CHECKS = [
+    CheckDef("api", "API reachable", "api", help="ERROR when homewatch can't read the OPNsense API."),
+    CheckDef("gateways", "Gateways", "api", help="ERROR when a gateway is down; WARNING on packet loss or delay."),
+    CheckDef("cpu", "CPU", "api", unit="%", warn=85, error=95, editable=("warn", "error")),
+    CheckDef("mem", "Memory", "api", unit="%", warn=90, error=95, editable=("warn", "error"),
+             help="Used memory without the ZFS cache (ARC), which is freed when needed."),
+    CheckDef("disk", "Root disk", "api", unit="%", warn=85, error=95, editable=("warn", "error")),
+    CheckDef("services", "Services", "api", help="ERROR when a service you chose is not running."),
+    CheckDef("haproxy", "HAProxy servers", "api", help="ERROR when a health-checked HAProxy server is down."),
+    CheckDef("certs", "Certificates", "api", unit="days", warn=20, error=7, editable=("warn", "error"),
+             lower_is_worse=True, help="Days until the first certificate in use expires."),
+    CheckDef("firmware", "Firmware", "api",
+             help="WARNING when the last update check found updates, or a reboot is needed."),
+]
+GW_LEVEL = {"none": OK, "down": ERROR, "force_down": ERROR, "loss": WARNING, "delay": WARNING,
+            "highloss": ERROR, "highdelay": WARNING, "delay+loss": WARNING}
+_IDLE = re.compile(r"([\d.]+)% idle")
+
+
+class OPNsenseModule(ApiModule):
+    id = "opnsense"
+    name = "OPNsense"
+    checks = CHECKS
+    description = ("Watches an OPNsense firewall through a read-only API key: gateways, CPU, memory, disk, "
+                   "services, HAProxy servers, certificates and firmware updates. Nothing on OPNsense is changed.")
+    setup = [
+        ("text", "In OPNsense: System → Access → Users → Add. Name it homewatch, tick \"Generate a scrambled "
+                 "password\", and give it only these privileges (Effective privileges): "),
+        ("code", "Status: Gateways\nDiagnostics: System Activity\nSystem: Status\nStatus: Services\n"
+                 "System: Firmware\nSystem: Certificate Manager\nServices: HAProxy (only if you use it)"),
+        ("text", "Save, then press \"+\" under API keys to create a key. OPNsense downloads a file with the key "
+                 "and secret: paste them below."),
+    ]
+    fields = [
+        Field("url", "OPNsense address", "https://192.168.1.1", default=""),
+        Field("api_key", "API key", "the key= line of the downloaded file"),
+        Field("verify", "Check the HTTPS certificate", kind="check", default=False,
+              help="Leave off when the web GUI uses OPNsense's own self-signed certificate."),
+    ]
+    secret_label = "API secret"
+    secret_placeholder = "the secret= line of the downloaded file"
+    choices_title = "Services that must run"
+    choices_help = "homewatch alerts when one of these stops. The ones running when you connected are ticked."
+
+    def validate(self, form, old):
+        out, err = super().validate(form, old)
+        if err:
+            return out, err
+        url = https_url(out["url"])
+        if not url:
+            return out, "OPNsense address: e.g. https://192.168.1.1 (add :port when the GUI uses another one)"
+        if not out["api_key"]:
+            return out, "Enter the API key"
+        return out | {"url": url}, ""
+
+    async def fetch(self, s, secret, now):
+        async with httpx.AsyncClient(verify=bool(s.get("verify")), timeout=15,  # noqa: S501 - self-signed GUI
+                                     auth=(s["api_key"], secret)) as http:
+            async def get(path: str, optional: bool = False):
+                try:
+                    r = await http.get(f"{s['url']}/api/{path}")
+                except httpx.HTTPError as e:
+                    raise ApiError(f"can't reach OPNsense ({type(e).__name__})") from None
+                if r.status_code == 401:
+                    raise ApiError("OPNsense rejected the API key")
+                if r.status_code in (403, 404) and optional:
+                    return None
+                if r.status_code == 403:
+                    raise ApiError(f"the key's user lacks the privilege for {path}")
+                if r.status_code >= 300:
+                    raise ApiError(f"OPNsense answered HTTP {r.status_code} for {path}")
+                return r.json()
+
+            snap = {
+                "gateways": (await get("routes/gateway/status")).get("items", []),
+                "resources": await get("diagnostics/system/systemResources"),
+                "disk": await get("diagnostics/system/systemDisk"),
+                "time": await get("diagnostics/system/systemTime"),
+                "activity": await get("diagnostics/activity/getActivity", optional=True),
+                "services": (await get("core/service/search", optional=True) or {}).get("rows"),
+                # the counters list also holds nested lists (stick tables): keep the proxy/server entries
+                "haproxy": [x for x in (await get("haproxy/statistics/counters", optional=True) or [])
+                            if isinstance(x, dict)] or None,
+                "certs": [{k: c.get(k) for k in ("descr", "commonname", "valid_to", "in_use")}
+                          for c in (await get("trust/cert/search", optional=True) or {}).get("rows", [])] or None,
+                "firmware": await get("core/firmware/status", optional=True),
+                "info": await get("diagnostics/system/systemInformation", optional=True),
+            }
+        name = (snap["info"] or {}).get("name", "OPNsense")
+        version = next((v for v in (snap["info"] or {}).get("versions", []) if v.startswith("OPNsense")), "")
+        snap["_summary"] = f"{name} {version.replace('OPNsense ', '')}, up {snap['time'].get('uptime', '?')}".strip()
+        return snap
+
+    def default_chosen(self, snap):
+        return [r["id"] for r in snap.get("services") or [] if r.get("running")]
+
+    def choices(self, snap):
+        return [Choice(r["id"], r.get("description") or r["id"], "" if r.get("running") else "stopped")
+                for r in snap.get("services") or []]
+
+    def check(self, s, th, snap, now):
+        out = []
+
+        def add(cid, status, detail, value=None):
+            d = next(c for c in CHECKS if c.id == cid)
+            from .. import CheckResult
+            out.append(CheckResult(f"{self.id}.{cid}", d.name, status, detail, value, d.unit))
+
+        gws = snap["gateways"]
+        worst, notes = OK, []
+        for g in gws:
+            lv = GW_LEVEL.get(g.get("status", "none"), WARNING)
+            worst = max(worst, lv)
+            if lv:
+                notes.append(f"{g.get('name')} {g.get('status_translated', g.get('status'))} "
+                             f"(loss {g.get('loss', '?')}, delay {g.get('delay', '?')})")
+        add("gateways", worst, "; ".join(notes) if notes else
+            ", ".join(f"{g.get('name')} online, {g.get('delay', '?')}" for g in gws) or "No gateways")
+
+        idle = None
+        for line in (snap.get("activity") or {}).get("headers", []):
+            if m := _IDLE.search(line):
+                idle = float(m.group(1))
+        if idle is None:
+            add("cpu", OK, "not readable (add the privilege Diagnostics: System Activity)")
+        else:
+            cpu = 100 - idle
+            add("cpu", level(cpu, th["cpu"]), f"CPU {cpu:.0f} %, load {snap['time'].get('loadavg', '?')}", cpu)
+
+        mem = snap["resources"].get("memory", {})
+        try:
+            used = (float(mem["used"]) - float(mem.get("arc") or 0)) / float(mem["total"]) * 100
+            add("mem", level(used, th["mem"]), f"memory {used:.0f} % (without ZFS cache)", used)
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            add("mem", OK, "not reported")
+
+        root = next((d for d in snap["disk"].get("devices", []) if d.get("mountpoint") == "/"), None)
+        if root:
+            pct = float(root.get("used_pct", 0))
+            add("disk", level(pct, th["disk"]), f"root disk {pct:.0f} % ({root.get('used')} of {root.get('total')})", pct)
+        else:
+            add("disk", OK, "not reported")
+
+        services = snap.get("services")
+        if services is None:
+            add("services", OK, "not readable (add the privilege Status: Services)")
+        else:
+            chosen = set(s.get("chosen", []))
+            down = [r.get("description") or r["id"] for r in services if r["id"] in chosen and not r.get("running")]
+            add("services", ERROR if down else OK,
+                f"Not running: {', '.join(down)}" if down else f"{len(chosen)} chosen services running")
+
+        hap = snap.get("haproxy")
+        if hap is None:
+            add("haproxy", OK, "HAProxy not installed or not readable")
+        else:
+            servers = [x for x in hap if x.get("svname") not in ("FRONTEND", "BACKEND")]
+            down = [f"{x['pxname']}" for x in servers if str(x.get("status", "")).startswith("DOWN")]
+            checked = [x for x in servers if x.get("status") not in ("no check", "")]
+            add("haproxy", ERROR if down else OK, f"Down: {', '.join(down)}" if down else
+                f"{len(checked)} health-checked servers up" + (f", {len(servers) - len(checked)} without a check"
+                                                                if len(servers) > len(checked) else ""))
+
+        certs = [c for c in snap.get("certs") or [] if str(c.get("in_use") or "") not in ("", "0", "False")]
+        if snap.get("certs") is None:
+            add("certs", OK, "not readable (add the privilege System: Certificate Manager)")
+        elif not certs:
+            add("certs", OK, "No certificate in use")
+        else:
+            days, c = min(((float(c["valid_to"]) - now) / 86400, c) for c in certs if c.get("valid_to"))
+            name = c.get("descr") or c.get("commonname")
+            if days <= 0:
+                add("certs", ERROR, f"{name} expired {-days:.0f} days ago", days)
+            else:
+                add("certs", level(days, th["certs"], True), f"{name} expires in {days:.0f} days", days)
+
+        fw = snap.get("firmware")
+        if fw is None:
+            add("firmware", OK, "not readable (add the privilege System: Firmware)")
+        else:
+            n = len(fw.get("upgrade_packages") or []) + len(fw.get("new_packages") or [])
+            reboot = str(fw.get("needs_reboot", "0")) == "1"
+            version = fw.get("product_version", "?")
+            if reboot:
+                add("firmware", WARNING, f"{version}: a reboot is needed to finish an update")
+            elif n or fw.get("status") in ("update", "upgrade"):
+                add("firmware", WARNING, f"{version}: updates available ({n} packages); last check {fw.get('last_check', '?')}")
+            else:
+                add("firmware", OK, f"{version}, up to date at the last check ({fw.get('last_check', 'never')})")
+        return out
+
+    def tables(self, snap, s):
+        t = [Table("Gateways", ["Gateway", "Status", "Loss", "Delay", "Monitor"],
+                   [[g.get("name"), g.get("status_translated"), g.get("loss"), g.get("delay"), g.get("monitor")]
+                    for g in snap["gateways"]])]
+        if snap.get("haproxy"):
+            t.append(Table("HAProxy servers", ["Backend", "Status", "Health check"],
+                           [[x["pxname"], x.get("status"), x.get("check_status") or "—"] for x in snap["haproxy"]
+                            if x.get("svname") not in ("FRONTEND", "BACKEND")]))
+        if snap.get("certs"):
+            import time as _t
+            t.append(Table("Certificates", ["Certificate", "In use", "Expires"],
+                           [[c.get("descr"), "yes" if str(c.get("in_use") or "") not in ("", "0") else "",
+                             _t.strftime("%d %b %Y", _t.localtime(float(c["valid_to"]))) if c.get("valid_to") else ""]
+                            for c in snap["certs"]]))
+        return t
+
+
+plugin = OPNsenseModule()

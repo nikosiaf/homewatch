@@ -373,3 +373,40 @@ def test_add_proxmox_tests_before_saving(client, monkeypatch):
     r = client.post("/modules/proxmox", data={"csrf": tok, "remove": "1"})
     assert "Removed" in r.text and client.rt.db.get("module.proxmox") is None
     plugin.snap = None
+
+
+def test_api_module_connect_choose_switch_off_remove(client, monkeypatch):
+    tok = setup_admin(client)
+    from homewatch.modules.apibase import ApiError
+    from homewatch.modules.opnsense.plugin import plugin
+    from tests.test_opnsense import snap
+
+    async def bad(*a, **k):
+        raise ApiError("OPNsense rejected the API key")
+
+    monkeypatch.setattr(plugin, "fetch", bad)
+    page = client.get("/modules/opnsense").text
+    assert "Add OPNsense" in page and "Status: Gateways" in page
+    r = client.post("/modules/opnsense", data={"csrf": tok, "url": "192.168.1.1", "api_key": "k", "secret": "s"})
+    assert "Nothing saved: OPNsense rejected the API key" in r.text and client.rt.db.get("module.opnsense") is None
+
+    async def good(*a, **k):
+        return snap()
+
+    monkeypatch.setattr(plugin, "fetch", good)
+    r = client.post("/modules/opnsense", data={"csrf": tok, "url": "192.168.1.1", "api_key": "k", "secret": "s"})
+    s = client.rt.db.get("module.opnsense")
+    assert "Connected" in r.text and s["url"] == "https://192.168.1.1" and sorted(s["chosen"]) == ["haproxy", "unbound"]
+    assert client.rt.secrets.get("module.opnsense.secret") == "s" and "Services that must run" in r.text
+    client.post("/modules/opnsense", data={"csrf": tok, "enabled": "on", "url": "https://192.168.1.1", "api_key": "k",
+                                           "choose.unbound": "on"})
+    assert client.rt.db.get("module.opnsense")["chosen"] == ["unbound"]
+    client.post("/modules/opnsense", data={"csrf": tok})  # switched off, fields greyed out
+    s = client.rt.db.get("module.opnsense")
+    assert s["enabled"] is False and s["url"] == "https://192.168.1.1" and s["chosen"] == ["unbound"]
+    from homewatch.modules.registry import MODULES
+    assert not MODULES["opnsense"].enabled(MODULES["opnsense"].load(client.rt))
+    r = client.post("/modules/opnsense", data={"csrf": tok, "remove": "1"})
+    assert "Removed" in r.text and client.rt.db.get("module.opnsense") is None
+    assert client.rt.secrets.get("module.opnsense.secret") is None
+    plugin.snap = None
