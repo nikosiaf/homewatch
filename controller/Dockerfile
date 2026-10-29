@@ -7,8 +7,9 @@ RUN pip install -r requirements.txt \
  && useradd --system --uid 10001 --home /app homewatch \
  && mkdir -p /data /telegraf && chown homewatch /data /telegraf
 COPY homewatch ./homewatch
-ARG VERSION=0.1.0-dev
-RUN sed -i "s/^__version__ = .*/__version__ = \"${VERSION}\"/" homewatch/__init__.py
+# release builds pass the tag's version; local builds keep the "-dev" version from the source
+ARG VERSION=
+RUN if [ -n "$VERSION" ]; then sed -i "s/^__version__ = .*/__version__ = \"${VERSION}\"/" homewatch/__init__.py; fi
 USER homewatch
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status == 200 else 1)"
