@@ -23,6 +23,24 @@
   {% endfor %}
 {% endmacro %}
 
+{% macro choice_list(items_all, prefix, word) %}
+  {% if items_all and items_all[0][0].group %}
+  {% for g, items in items_all | groupby('0.group') %}{% set n_on = items | selectattr('1') | list | length %}
+  <details class="choices" data-choice-group>
+    <summary><b>{{ g }}</b> <span class="quiet small"><span data-group-count>{{ n_on }}</span> of {{ items | length }} {{ word }}{% if prefix == 'choose.' and ('group:' ~ g) in skipped %} · domain not watched{% endif %}</span></summary>
+    <label class="check all"><input type="checkbox" data-group-all {{ 'checked' if n_on == items | length }}> All {{ items | length }}</label>
+    <div class="row">{% for c, on in items %}
+      <label class="check" title="{{ c.detail }}"><input type="checkbox" name="{{ prefix }}{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
+    {% endfor %}</div>
+  </details>
+  {% endfor %}
+  {% else %}
+  <div class="row">{% for c, on in items_all %}
+    <label class="check" title="{{ c.detail }}"><input type="checkbox" name="{{ prefix }}{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
+  {% else %}<span class="quiet">Appears after the first reading.</span>{% endfor %}</div>
+  {% endif %}
+{% endmacro %}
+
 {% if not configured %}
 <form method="post" action="/modules/{{ module.id }}" class="card" id="settings">
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="settings">
@@ -50,32 +68,22 @@
   {% if api_error %}<p class="flash err">{{ api_error }}</p>{% endif %}
   <fieldset data-enable-target class="plain" {{ 'disabled' if not s.enabled }}>
     {{ fields_html(s) }}
-    {% if module.choices_title %}
+    {% if snap and (module.choices_title or module.filter_title) %}
+    <p class="quiet small" style="margin-top:14px">The lists below come from the reading at {{ snap_ts | ts('%H:%M:%S') }}
+      ({{ module.name }} is read every {{ read_every }}).
+      <button class="secondary" formaction="/modules/{{ module.id }}/refresh" formnovalidate
+              data-confirm="Read {{ module.name }} again now? Unsaved ticks on this page are lost.">Read now</button></p>
+    {% endif %}
     {% if module.filter_title %}
     <h3>{{ module.filter_title }}</h3>
     {% if module.filter_help %}<p class="quiet small">{{ module.filter_help }}</p>{% endif %}
     <input type="hidden" name="_filters_shown" value="{{ filters_shown }}">
-    <div class="row">{% for c, on in filters %}
-      <label class="check"><input type="checkbox" name="keep.{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
-    {% else %}<span class="quiet">Appears after the first reading.</span>{% endfor %}</div>
+    {{ choice_list(filters, "keep.", "watched") }}
     {% endif %}
+    {% if module.choices_title %}
     <h3>{{ module.choices_title }}</h3>
     {% if module.choices_help %}<p class="quiet small">{{ module.choices_help }}</p>{% endif %}
-    {% if choices and choices[0][0].group %}
-    {% for g, items in choices | groupby('0.group') %}{% set n_on = items | selectattr('1') | list | length %}
-    <details class="choices" data-choice-group>
-      <summary><b>{{ g }}</b> <span class="quiet small"><span data-group-count>{{ n_on }}</span> of {{ items | length }} ticked{% if g in skipped %} · not watched{% endif %}</span></summary>
-      <label class="check all"><input type="checkbox" data-group-all {{ 'checked' if n_on == items | length }}> All {{ items | length }}</label>
-      <div class="row">{% for c, on in items %}
-        <label class="check" title="{{ c.detail }}"><input type="checkbox" name="choose.{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
-      {% endfor %}</div>
-    </details>
-    {% endfor %}
-    {% else %}
-    <div class="row">{% for c, on in choices %}
-      <label class="check" title="{{ c.detail }}"><input type="checkbox" name="choose.{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
-    {% else %}<span class="quiet">Appears after the first reading.</span>{% endfor %}</div>
-    {% endif %}
+    {{ choice_list(choices, "choose.", "ticked") }}
     {% endif %}
   </fieldset>
   <p class="row" style="justify-content:space-between"><button data-save>Save</button>

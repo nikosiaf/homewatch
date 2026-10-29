@@ -210,7 +210,14 @@ class ApiModule(Module):
             # values not on the page this time (e.g. a domain that has no entities now) keep their setting
             shown = set(json.loads(form.get("_filters_shown", "[]")))
             kept = {k.split(".", 1)[1] for k in form if k.startswith("keep.")}
-            settings["skipped"] = sorted((set(old.get("skipped", [])) - shown) | (shown - kept))
+            # a group with nothing ticked is skipped as a whole ("group:<name>"), so its new members stay skipped too
+            groups: dict[str, set] = {}
+            for c in self.filters(self.snap) if self.snap else []:
+                if c.group and c.value in shown:
+                    groups.setdefault(c.group, set()).add(c.value)
+            markers = {f"group:{g}" for g in groups}
+            off = {f"group:{g}" for g, vals in groups.items() if not vals & kept}
+            settings["skipped"] = sorted((set(old.get("skipped", [])) - shown - markers) | (shown - kept) | off)
         settings.pop("_configured", None)
         rt.db.set(self.key, settings)
         if form.get("secret", "").strip():
@@ -221,11 +228,14 @@ class ApiModule(Module):
         return ""
 
     def page_ctx(self, rt) -> dict:
+        from ..engine import timing
+        every = max(self.every, timing(rt.db)["interval"])
         s = self.load(rt)
         snap = self.snap
         chosen, skipped = set(s.get("chosen", [])), set(s.get("skipped", []))
         filters = self.filters(snap) if snap and self.filter_title else []
-        return {"filters": [(c, c.value not in skipped) for c in filters], "skipped": skipped,
+        return {"filters": [(c, c.value not in skipped and f"group:{c.group}" not in skipped) for c in filters],
+                "skipped": skipped, "read_every": f"{every / 60:.0f} min" if every >= 60 else f"{every:.0f} s",
                 "filters_shown": json.dumps([c.value for c in filters]),"configured": self.configured(rt), "has_secret": rt.secrets.has(self.secret_key),
                 "snap": snap, "snap_ts": self.snap_ts, "api_error": self.error,
                 "tables": self.tables(snap, s) if snap else [],

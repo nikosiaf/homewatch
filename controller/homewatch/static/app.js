@@ -116,7 +116,7 @@ document.querySelectorAll("[data-engine-select]").forEach(function (sel) {
 document.querySelectorAll("[data-choice-group]").forEach(function (d) {
   const all = d.querySelector("[data-group-all]");
   const count = d.querySelector("[data-group-count]");
-  const boxes = Array.from(d.querySelectorAll('input[name^="choose."]'));
+  const boxes = Array.from(d.querySelectorAll('input[type="checkbox"]:not([data-group-all])'));
   function sync() {
     const n = boxes.filter(function (b) { return b.checked; }).length;
     all.checked = n === boxes.length;

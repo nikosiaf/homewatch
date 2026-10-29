@@ -128,7 +128,7 @@ def back(url: str, msg: str = "", err: str = "") -> RedirectResponse:
 
 async def form_of(request: Request, user: User | None) -> dict | None:
     """Parse a POST form and check its CSRF token. Returns None when the token is wrong."""
-    form = dict(await request.form())
+    form = dict(await request.form(max_fields=20000))  # module pages can list thousands of entities
     box = str(form.get("_box", ""))
     _box.set(box if box.replace("-", "").isalnum() else "")
     token = form.get("csrf") or request.headers.get("x-csrf-token", "")
@@ -395,6 +395,21 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back(f"/modules/{mid}", msg="Connected. The first checks run within 2 minutes.")
         removed = mid == "speedport" and not form.get("model") and not m.page_ctx(rt)["configured"]
         return back(f"/modules/{mid}", msg="Modem removed" if removed else "Saved")
+
+    @app.post("/modules/{mid}/refresh")
+    async def module_refresh(request: Request, mid: str):
+        rt = rt_of(request)
+        m = MODULES.get(mid)
+        form = await form_of(request, request.state.user)
+        if m is None or not hasattr(m, "fetch"):
+            return RedirectResponse("/modules", status_code=303)
+        if form is None:
+            return back(f"/modules/{mid}", err="Form expired, please try again")
+        m.snap_ts = float("-inf")  # read now, not at the module's next turn
+        await m.readings(rt, m.load(rt), time.time())
+        rt.wake.set()  # re-run the checks on the fresh reading
+        return back(f"/modules/{mid}", err=f"Can't read {m.name}: {m.error}") if m.error else \
+            back(f"/modules/{mid}", msg="Read again")
 
     @app.post("/modules/speedport/read")
     async def speedport_read(request: Request):

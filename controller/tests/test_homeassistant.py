@@ -60,18 +60,22 @@ def test_no_backup_sensors():
     assert run(snap(backup={}))["backups"].status == OK
 
 
-def test_unwatched_domain_is_not_reported():
+def test_unwatched_entity_or_domain_is_not_reported():
     old = {"entity_id": "sensor.gone", "state": "unavailable", "last_changed": iso(NOW - 3600), "name": "Gone"}
     sn = snap(unavailable=[old])
-    s = {"enabled": True, "chosen": [], "skipped": ["sensor"]}
     th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
-    res = {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, sn, "", NOW))}
-    assert res["unavailable"].status == OK and "ignoring 1" in res["unavailable"].detail
+    for skipped in (["sensor.gone"], ["group:sensor"]):
+        s = {"enabled": True, "chosen": [], "skipped": skipped}
+        res = {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, sn, "", NOW))}
+        assert res["unavailable"].status == OK and "ignoring 1" in res["unavailable"].detail
+    s = {"enabled": True, "chosen": [], "skipped": ["sensor.other"]}
+    assert plugin.evaluate(s, th, (s, sn, "", NOW))[2].status == WARNING
 
 
-def test_choices_grouped_by_domain_and_domain_filters():
+def test_choices_and_watch_list_grouped_by_domain():
     sn = snap(unavailable=[{"entity_id": "light.old", "name": "Old light"}, {"entity_id": "sensor.x", "name": ""}],
-              domains={"sensor": 40, "light": 3})
+              all=[["light.old", "Old light"], ["sensor.x", ""]])
     assert [(c.group, c.label, c.detail) for c in plugin.choices(sn)] == [
         ("light", "Old light", "light.old"), ("sensor", "x", "")]
-    assert [(c.value, c.detail) for c in plugin.filters(sn)] == [("light", "(3)"), ("sensor", "(40)")]
+    assert [(c.group, c.value, c.label) for c in plugin.filters(sn)] == [
+        ("light", "light.old", "Old light"), ("sensor", "sensor.x", "x")]

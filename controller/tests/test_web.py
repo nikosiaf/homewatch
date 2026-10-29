@@ -415,28 +415,40 @@ def test_api_module_connect_choose_switch_off_remove(client, monkeypatch):
     plugin.snap = None
 
 
-def test_grouped_choices_and_domain_filter_save(client, monkeypatch):
+def test_grouped_choices_watch_list_save_and_refresh(client, monkeypatch):
     tok = setup_admin(client)
     from homewatch.modules.homeassistant.plugin import plugin
     from tests.test_homeassistant import snap
 
+    reads = []
+
     async def good(*a, **k):
+        reads.append(1)
         return snap(unavailable=[{"entity_id": "light.old", "name": "Old light"}, {"entity_id": "sensor.x", "name": ""}],
-                    domains={"light": 3, "sensor": 40})
+                    all=[["light.old", "Old light"], ["light.new", ""], ["sensor.x", ""], ["sensor.y", ""]])
 
     monkeypatch.setattr(plugin, "fetch", good)
     client.post("/modules/homeassistant", data={"csrf": tok, "url": "http://ha:8123", "secret": "t"})
     s = client.rt.db.get("module.homeassistant")
     assert s["chosen"] == ["light.old", "sensor.x"] and s["skipped"] == []
     page = client.get("/modules/homeassistant").text
-    assert "Domains to watch" in page and "data-choice-group" in page and "data-group-all" in page
-    # untick the sensor domain; a domain skipped earlier but not shown now keeps its setting
-    client.rt.db.set("module.homeassistant", s | {"skipped": ["camera"]})
+    assert "Entities to watch" in page and "data-group-all" in page and "Read now" in page and "read every 2 min" in page
+    # untick all sensors and one light; something skipped earlier but not listed now keeps its setting
+    client.rt.db.set("module.homeassistant", s | {"skipped": ["camera.door"]})
+    shown = '["light.old", "light.new", "sensor.x", "sensor.y"]'
     client.post("/modules/homeassistant", data={"csrf": tok, "enabled": "on", "url": "http://ha:8123",
-                                                "_filters_shown": '["light", "sensor"]', "keep.light": "on",
+                                                "_filters_shown": shown, "keep.light.old": "on",
                                                 "choose.light.old": "on"})
     s = client.rt.db.get("module.homeassistant")
-    assert s["skipped"] == ["camera", "sensor"] and s["chosen"] == ["light.old"]
+    assert s["skipped"] == ["camera.door", "group:sensor", "light.new", "sensor.x", "sensor.y"]
+    assert s["chosen"] == ["light.old"]
+    # ticking one sensor again drops the domain-wide skip
+    client.post("/modules/homeassistant", data={"csrf": tok, "enabled": "on", "url": "http://ha:8123",
+                                                "_filters_shown": shown, "keep.light.old": "on", "keep.sensor.y": "on"})
+    assert client.rt.db.get("module.homeassistant")["skipped"] == ["camera.door", "light.new", "sensor.x"]
+    n = len(reads)
+    r = client.post("/modules/homeassistant/refresh", data={"csrf": tok})
+    assert "Read again" in r.text and len(reads) == n + 1
     plugin.snap = None
 
 

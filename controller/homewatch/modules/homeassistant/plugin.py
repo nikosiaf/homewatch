@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from datetime import datetime
 
 import httpx
@@ -52,9 +51,9 @@ class HomeAssistantModule(ApiModule):
     ]
     secret_label = "Long-lived access token"
     secret_placeholder = "eyJ0eXAiOiJKV1Qi…"
-    filter_title = "Domains to watch"
-    filter_help = ("Unavailable entities are reported only in ticked domains (number of entities in brackets). "
-                   "New domains are watched.")
+    filter_title = "Entities to watch"
+    filter_help = ("Unavailable entities are reported only when they are ticked here, grouped by domain. New entities "
+                   "are watched, except in a domain where you untick everything.")
     choices_title = "Unavailable entities to ignore"
     choices_help = ("These are unavailable now, grouped by domain. Ticked ones are ignored (on purpose, or long gone). "
                     "Entities that become unavailable later are reported; tick them here if that's expected.")
@@ -95,7 +94,7 @@ class HomeAssistantModule(ApiModule):
                            if e["entity_id"] in ("sensor.backup_last_successful_automatic_backup",
                                                  "sensor.backup_last_attempted_automatic_backup")},
                 "entities": len(states),
-                "domains": dict(Counter(e["entity_id"].split(".", 1)[0] for e in states))}
+                "all": sorted([e["entity_id"], e.get("attributes", {}).get("friendly_name") or ""] for e in states)}
         snap["_summary"] = f"Home Assistant {config.get('version', '?')}, {len(states)} entities"
         return snap
 
@@ -108,13 +107,15 @@ class HomeAssistantModule(ApiModule):
                 for e in sorted(snap["unavailable"], key=lambda e: e["entity_id"])]
 
     def filters(self, snap):
-        return [Choice(d, d, f"({n})") for d, n in sorted((snap.get("domains") or {}).items())]
+        return [Choice(eid, name or eid.split(".", 1)[1], eid if name else "", group=eid.split(".", 1)[0])
+                for eid, name in snap.get("all") or []]
 
     @staticmethod
     def _reported(s, snap):
         """Unavailable entities that count: not ignored and in a watched domain."""
         ignored, skipped = set(s.get("chosen", [])), set(s.get("skipped", []))
-        return [e for e in snap["unavailable"] if e["entity_id"] not in ignored and _domain(e) not in skipped]
+        return [e for e in snap["unavailable"] if e["entity_id"] not in ignored and e["entity_id"] not in skipped
+                and f"group:{_domain(e)}" not in skipped]
 
     def check(self, s, th, snap, now):
         out = []
