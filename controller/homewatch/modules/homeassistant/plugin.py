@@ -206,9 +206,11 @@ class HomeAssistantModule(ApiModule):
         for e in mine:
             if e["entity_id"].startswith("sensor.") and e["dc"] == "battery":
                 try:
-                    levels.append((float(e["state"]), name(e)))
+                    v = float(e["state"])
                 except (TypeError, ValueError):
-                    pass
+                    continue
+                if 0 <= v <= 100:  # e.g. a watch that isn't connected reports -1
+                    levels.append((v, name(e)))
         if levels:
             v, who = min(levels)
             add("batteries", level(v, th["batteries"], True), f"lowest {who} {v:.0f} % ({len(levels)} batteries)", v)

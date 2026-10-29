@@ -87,7 +87,8 @@ def test_alarm_safety_tamper_and_batteries():
              {"entity_id": "binary_sensor.boiler_leak", "state": "off", "dc": "moisture", "name": "Boiler leak"},
              {"entity_id": "binary_sensor.zone1_tamper", "state": "off", "dc": "tamper", "name": "Zone 1 tamper"},
              {"entity_id": "sensor.door_battery", "state": "60", "dc": "battery", "name": "Door"},
-             {"entity_id": "sensor.phone_battery", "state": "5", "dc": "battery", "name": "Phone"}]
+             {"entity_id": "sensor.phone_battery", "state": "5", "dc": "battery", "name": "Phone"},
+             {"entity_id": "sensor.watch_battery", "state": "-1", "dc": "battery", "name": "Watch"}]
     sn = snap(watch=watch)
     th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
 
@@ -98,7 +99,7 @@ def test_alarm_safety_tamper_and_batteries():
     r = res()
     assert r["alarm"].status == OK and "Home armed home" in r["alarm"].detail
     assert r["safety"].status == OK and "2 safety sensors clear" in r["safety"].detail
-    assert r["batteries"].status == ERROR and "Phone 5 %" in r["batteries"].detail
+    assert r["batteries"].status == ERROR and "Phone 5 % (2 batteries)" in r["batteries"].detail
     # unticking the phone in "Entities to watch" leaves the door battery
     assert res({"skipped": ["sensor.phone_battery"]})["batteries"].status == OK
     hot = [w | {"state": "on"} if w["dc"] in ("moisture", "tamper") else w for w in watch]
