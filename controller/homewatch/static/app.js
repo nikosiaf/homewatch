@@ -130,3 +130,11 @@ document.querySelectorAll("[data-choice-group]").forEach(function (d) {
   boxes.forEach(function (b) { b.addEventListener("change", sync); });
   sync();
 });
+
+// Narrow screens: the header menu opens and closes with the menu button.
+document.addEventListener("click", function (e) {
+  const b = e.target.closest("[data-menu-toggle]");
+  if (!b) return;
+  const open = b.closest("header").classList.toggle("open");
+  b.setAttribute("aria-expanded", open ? "true" : "false");
+});

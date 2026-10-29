@@ -1,7 +1,7 @@
 <h1>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/homewatch-logo-dark.svg">
-    <img alt="homewatch" src="docs/brand/homewatch-logo.svg" width="330">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/red-homewatch-logo-dark.svg">
+    <img alt="homewatch" src="docs/brand/red-homewatch-logo.svg" width="330">
   </picture>
 </h1>
 

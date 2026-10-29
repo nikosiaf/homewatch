@@ -39,5 +39,6 @@
   document.querySelectorAll("[data-chart]").forEach(b => b.addEventListener("click", () => { chart = b.dataset.chart; load(); }));
   document.querySelectorAll("[data-range]").forEach(b => b.addEventListener("click", () => { range = b.dataset.range; load(); }));
   window.addEventListener("resize", () => { if (plot) plot.setSize({ width: el.clientWidth, height: 240 }); });
+  window.addEventListener("hw-themechange", () => { if (plot) load(); });  // axis colours come from the theme
   load();
 })();
