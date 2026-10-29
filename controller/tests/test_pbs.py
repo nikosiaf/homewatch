@@ -25,6 +25,11 @@ def mock(tasks=None, store_error=None):
         {"backup-type": "vm", "backup-id": 100, "last-backup": NOW - 5 * 3600, "backup-count": 7},
         {"backup-type": "ct", "backup-id": 104, "last-backup": NOW - 60 * 3600, "backup-count": 7},
         {"backup-type": "vm", "backup-id": 999, "last-backup": NOW - 30 * 86400, "backup-count": 1}]}))
+    respx.get(BASE + "/admin/datastore/main/snapshots").mock(return_value=httpx.Response(200, json={"data": [
+        {"backup-type": "vm", "backup-id": "100", "backup-time": NOW - 5 * 3600, "comment": "router"},
+        {"backup-type": "vm", "backup-id": "100", "backup-time": NOW - 29 * 3600, "comment": "old name"},
+        {"backup-type": "ct", "backup-id": "104", "backup-time": NOW - 60 * 3600, "comment": "dns\nsecond line"},
+        {"backup-type": "vm", "backup-id": "999", "backup-time": NOW - 30 * 86400}]}))
     respx.get(url__startswith=BASE + "/nodes/localhost/tasks").mock(return_value=httpx.Response(200, json={"data": tasks or [
         {"worker_type": "garbage_collection", "worker_id": "main", "endtime": NOW - 3600, "status": "OK"},
         {"worker_type": "verificationjob", "worker_id": "main:v1", "endtime": NOW - 7200, "status": "OK"},
@@ -43,11 +48,15 @@ async def test_fetch_and_default_groups():
     mock()
     snap = await plugin.fetch(S, "SECRET", NOW)
     assert respx.calls.last.request.headers["authorization"] == "PBSAPIToken=homewatch@pbs!monitor:SECRET"
-    assert plugin.default_chosen(snap) == ["main/ct/104", "main/vm/100"]  # 999 is a month old: not ticked
+    # only guests backed up in the last 26 h are ticked: 104 (60 h) and 999 (a month) look left out of the job
+    assert plugin.default_chosen(snap) == ["main/vm/100"]
+    # names come from the newest snapshot's comment; one datastore: no datastore detail
+    assert [(c.label, c.detail) for c in plugin.choices(snap)] == [
+        ("VM 100 · router", ""), ("VM 999", ""), ("Container 104 · dns", "")]
     res = run(snap, ["main/vm/100"])
     assert all(r.status == OK for r in res.values()), {k: r.detail for k, r in res.items()}
     res = run(snap, ["main/vm/100", "main/ct/104"])
-    assert res["backups"].status == ERROR and "ct/104 60 h old" in res["backups"].detail
+    assert res["backups"].status == ERROR and "dns (CT 104) 60 h old" in res["backups"].detail
 
 
 @respx.mock

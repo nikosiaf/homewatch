@@ -14,7 +14,7 @@ CHECKS = [
     CheckDef("datastores", "Datastores", "api", unit="%", warn=85, error=95, editable=("warn", "error"),
              help="Fullest datastore; ERROR when a datastore reports an error (e.g. not mounted)."),
     CheckDef("backups", "Backups", "api", unit="h", warn=26, error=50, editable=("warn", "error"),
-             help="Age of the newest snapshot of each backup group you chose."),
+             help="Age of the newest backup of each VM, container or host you chose."),
     CheckDef("jobs", "Verify, prune, GC, sync", "api",
              help="ERROR when the latest run of a job type failed in the last 8 days; WARNING when it had warnings."),
     CheckDef("updates", "Updates", "api", help="WARNING when package updates are available on the PBS host."),
@@ -47,8 +47,9 @@ class PBSModule(ApiModule):
     ]
     secret_label = "Token secret"
     secret_placeholder = "xxxxxxxx-xxxx-…"
-    choices_title = "Backup groups to watch"
-    choices_help = "homewatch checks that each of these gets a fresh backup. Groups backed up in the last 8 days are ticked when you connect."
+    choices_title = "VMs, containers and hosts to watch"
+    choices_help = ("homewatch checks that each of these gets a fresh backup. When you connect, the ones backed up in "
+                    "the last 26 hours are ticked; old backups of guests you no longer back up are left unticked.")
 
     def validate(self, form, old):
         out, err = super().validate(form, old)
@@ -83,10 +84,17 @@ class PBSModule(ApiModule):
             stores = await get("status/datastore-usage") or []
             groups = []
             for st in stores:
+                # the guest's name is the comment (notes) of its newest snapshot, not of the group
+                names: dict[tuple, tuple] = {}
+                for x in await get(f"admin/datastore/{st['store']}/snapshots", optional=True) or []:
+                    k = (x.get("backup-type"), str(x.get("backup-id")))
+                    if x.get("comment") and (k not in names or x.get("backup-time", 0) > names[k][0]):
+                        names[k] = (x.get("backup-time", 0), x["comment"].splitlines()[0].strip())
                 for g in await get(f"admin/datastore/{st['store']}/groups", optional=True) or []:
-                    groups.append({"store": st["store"], "type": g.get("backup-type"), "id": str(g.get("backup-id")),
+                    k = (g.get("backup-type"), str(g.get("backup-id")))
+                    groups.append({"store": st["store"], "type": k[0], "id": k[1],
                                    "last": g.get("last-backup"), "count": g.get("backup-count"),
-                                   "comment": g.get("comment") or ""})
+                                   "comment": g.get("comment") or names.get(k, (0, ""))[1]})
             tasks = await get("nodes/localhost/tasks", optional=True, since=int(now - 8 * 86400), limit=500) or []
             updates = await get("nodes/localhost/apt/update", optional=True)
         snap = {"version": version.get("version", "?"),
@@ -104,13 +112,26 @@ class PBSModule(ApiModule):
     def _key(g):
         return f"{g['store']}/{g['type']}/{g['id']}"
 
+    @staticmethod
+    def _label(g):
+        kind = {"vm": "VM", "ct": "Container", "host": "Host"}.get(g["type"], g["type"])
+        return f"{kind} {g['id']}" + (f" · {g['comment']}" if g["comment"] else "")
+
+    @staticmethod
+    def _short(g):
+        kind = {"vm": "VM", "ct": "CT"}.get(g["type"], g["type"])
+        return f"{g['comment']} ({kind} {g['id']})" if g["comment"] else f"{kind} {g['id']}"
+
     def default_chosen(self, snap):
         import time
-        return sorted(self._key(g) for g in snap["groups"] if (g.get("last") or 0) > time.time() - 8 * 86400)
+        fresh = time.time() - 26 * 3600  # guests left out of the backup job keep old snapshots; don't watch those
+        return sorted(self._key(g) for g in snap["groups"] if (g.get("last") or 0) > fresh)
 
     def choices(self, snap):
-        return [Choice(self._key(g), f"{g['type']}/{g['id']}", (g["comment"] + " · " if g["comment"] else "") + g["store"])
-                for g in sorted(snap["groups"], key=self._key)]
+        many = len({g["store"] for g in snap["groups"]}) > 1
+        order = {"vm": 0, "ct": 1, "host": 2}
+        rows = sorted(snap["groups"], key=lambda g: (g["store"], order.get(g["type"], 3), int(g["id"]) if g["id"].isdigit() else 0, g["id"]))
+        return [Choice(self._key(g), self._label(g), f"datastore {g['store']}" if many else "") for g in rows]
 
     def check(self, s, th, snap, now):
         out = []
@@ -142,7 +163,7 @@ class PBSModule(ApiModule):
             oldest = max(oldest, age)
             g_lvl = level(age, th["backups"])
             if g_lvl:
-                problems.append(f"{g['type']}/{g['id']} {age:.0f} h old")
+                problems.append(f"{self._short(g)} {age:.0f} h old")
                 lvl = max(lvl, g_lvl)
         if not chosen:
             add("backups", OK, "No backup groups chosen")
@@ -182,8 +203,8 @@ class PBSModule(ApiModule):
                       [[x["store"], f"{100 * x['used'] / x['total']:.0f} % of {x['total'] / 1e12:.1f} TB" if x.get("total") else x.get("error"),
                         time.strftime("%d %b %Y", time.localtime(x["estimated-full-date"]))
                         if (x.get("estimated-full-date") or 0) > 0 else None] for x in snap["stores"]]),
-                Table("Backup groups", ["Group", "Datastore", "Snapshots", "Newest"],
-                      [[f"{g['type']}/{g['id']}", g["store"], g["count"],
+                Table("Backups", ["Guest", "Datastore", "Snapshots", "Newest"],
+                      [[self._label(g), g["store"], g["count"],
                         time.strftime("%d %b %H:%M", time.localtime(g["last"])) if g.get("last") else None]
                        for g in sorted(snap["groups"], key=self._key)])]
 
