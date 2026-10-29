@@ -12,6 +12,10 @@ updates:
     schedule: { interval: monthly }
     groups:
       base-image: { patterns: ["*"] }
+    ignore:
+      # stay on the Python minor version the spec pins (3.13); patch releases still come through
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   - package-ecosystem: docker-compose
     directory: /deploy
     schedule: { interval: monthly }
