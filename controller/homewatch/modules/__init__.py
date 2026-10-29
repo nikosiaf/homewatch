@@ -17,7 +17,7 @@ CATALOG = [
     ("pbs", "Proxmox Backup Server", False),
     ("synology", "Synology NAS", True),
     ("mikrotik", "MikroTik", True),
-    ("unifi", "UniFi", False),
+    ("unifi", "UniFi", True),
     ("ups", "UPS (NUT)", False),
 ]
 
