@@ -6,16 +6,16 @@
 </h1>
 
 A small, self-hosted monitor for your home network, configured from a plain web page.
-v0.1 watches **your internet line** and, if you have one, **your provider's DSL modem**. It tells
-you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link down", "slow line")
-and sends alerts to Telegram or ntfy. Later versions add one module per release (Proxmox,
-OPNsense, Home Assistant, …).
+homewatch 0.2 watches **your internet line**, **your provider's DSL modem** and **your Proxmox VE
+host**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
+down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy. Later versions add
+one module per release (OPNsense, Home Assistant, Synology, …).
 
 - Runs as a Docker Compose stack on any Linux host (amd64 or arm64)
 - LAN / Tailscale only: it never needs a port open to the internet
 - MIT licensed
 
-## What v0.1 does
+## What homewatch 0.2 does
 
 ### Internet line module
 
@@ -42,7 +42,7 @@ Every probe can be switched off, and every threshold changed, in the web page.
 ### ISP modem module (optional)
 
 Reads the DSL line from your provider's modem every 15 minutes. Read-only: nothing on the modem
-is changed. Supported model in v0.1:
+is changed. Supported model:
 
 - **Telekom Speedport Plus 2** (Sercomm VD4224BDTP / VD4224BDT), the modem-router TELEKOM
   (formerly COSMOTE) provides for VDSL and FTTH connections in Greece.
