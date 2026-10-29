@@ -71,3 +71,23 @@ def test_missing_privileges_are_not_alarms():
     res = run(snap(activity=None, services=None, haproxy=None, certs=None, firmware=None))
     assert all(r.status == OK for r in res.values())
     assert "Diagnostics: System Activity" in res["cpu"].detail
+
+
+async def test_wrong_port_says_where_the_gui_is():
+    import httpx
+    import pytest
+    import respx
+
+    from homewatch.modules.apibase import ApiError
+    s = {"url": "https://fw.test", "api_key": "k", "verify": False}
+    with respx.mock:
+        # HAProxy (or another site) on 443: a 503 page, or an HTML page that is not the API
+        respx.get(url__startswith="https://fw.test/api/").mock(return_value=httpx.Response(
+            503, text="<h1>503 Service Unavailable</h1>", headers={"content-type": "text/html"}))
+        with pytest.raises(ApiError, match="not like the OPNsense API.*TCP port"):
+            await plugin.fetch(s, "secret", 0)
+    with respx.mock:
+        respx.get(url__startswith="https://fw.test/api/").mock(return_value=httpx.Response(
+            200, text="<html>login</html>", headers={"content-type": "text/html"}))
+        with pytest.raises(ApiError, match="web GUI with its port"):
+            await plugin.fetch(s, "secret", 0)

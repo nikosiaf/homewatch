@@ -28,6 +28,10 @@ GW_LEVEL = {"none": OK, "down": ERROR, "force_down": ERROR, "loss": WARNING, "de
 _IDLE = re.compile(r"([\d.]+)% idle")
 
 
+NOT_GUI = ("Enter the address of the OPNsense web GUI with its port, e.g. https://192.168.1.1:8443 "
+           "(System → Settings → Administration → TCP port).")
+
+
 class OPNsenseModule(ApiModule):
     id = "opnsense"
     name = "OPNsense"
@@ -78,6 +82,10 @@ class OPNsenseModule(ApiModule):
                     return None
                 if r.status_code == 403:
                     raise ApiError(f"the key's user lacks the privilege for {path}")
+                is_json = "json" in r.headers.get("content-type", "")
+                if r.status_code in (301, 302, 307, 308, 502, 503) or (r.status_code < 300 and not is_json):
+                    # e.g. HAProxy or another web server on port 443 while the GUI listens on another port
+                    raise ApiError(f"{s['url']} answered HTTP {r.status_code}, not like the OPNsense API. {NOT_GUI}")
                 if r.status_code >= 300:
                     raise ApiError(f"OPNsense answered HTTP {r.status_code} for {path}")
                 return r.json()
