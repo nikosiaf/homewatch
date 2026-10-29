@@ -5,4 +5,3 @@ __pycache__/
 deploy/.env
 deploy/certs/
 deploy/data/
-CLAUDE.md
