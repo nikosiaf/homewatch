@@ -138,3 +138,11 @@ document.addEventListener("click", function (e) {
   const open = b.closest("header").classList.toggle("open");
   b.setAttribute("aria-expanded", open ? "true" : "false");
 });
+
+// Maintenance: ticking a check (or a whole group) switches the window to "Only these".
+document.addEventListener("change", function (e) {
+  const box = e.target.closest("[data-scope-some], [data-group-all]");
+  if (!box || !box.checked) return;
+  const some = box.form && box.form.querySelector('input[name="scope"][value="some"]');
+  if (some) some.checked = true;
+});

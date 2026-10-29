@@ -480,3 +480,15 @@ def test_every_module_page_renders(client):
     for mid in MODULES:
         r = client.get(f"/modules/{mid}")
         assert r.status_code == 200 and "Traceback" not in r.text, mid
+
+
+def test_maintenance_checks_grouped_by_module(client):
+    tok = setup_admin(client)
+    r = client.get("/maintenance")
+    assert "data-choice-group" in r.text and "<b>Internet line</b>" in r.text
+    assert 'name="check.internet.loss"' in r.text
+    assert 'name="check.opnsense.haproxy"' not in r.text  # modules not in use are not offered
+    r = client.post("/maintenance", data={"csrf": tok, "name": "Modem swap", "kind": "weekly", "weekday": "2",
+                                          "start_time": "03:00", "dur_min": "30", "scope": "some",
+                                          "check.internet.loss": "on"})
+    assert "Modem swap" in r.text and "Packet loss" in r.text

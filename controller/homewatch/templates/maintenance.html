@@ -38,7 +38,14 @@
   <fieldset><legend>Checks</legend>
     <label class="check"><input type="radio" name="scope" value="all" checked> All checks</label>
     <label class="check"><input type="radio" name="scope" value="some"> Only these:</label>
-    <div class="row">{% for k, n in names.items() %}<label class="check"><input type="checkbox" name="check.{{ k }}"> {{ n }}</label>{% endfor %}</div>
+    {% for group, items in check_groups %}
+    <details class="choices" data-choice-group>
+      <summary><b>{{ group }}</b> <span class="quiet small"><span data-group-count>0</span> of {{ items | length }} chosen</span></summary>
+      <label class="check all"><input type="checkbox" data-group-all> All {{ items | length }}</label>
+      <div class="row">{% for k, n in items %}<label class="check"><input type="checkbox" name="check.{{ k }}" data-scope-some> {{ n }}</label>{% endfor %}</div>
+    </details>
+    {% else %}<p class="quiet small">No modules in use yet.</p>
+    {% endfor %}
   </fieldset>
   <button>Add window</button>
 </form>

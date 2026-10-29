@@ -563,8 +563,11 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     async def maintenance_page(request: Request):
         rt = rt_of(request)
         rows = rt.db.all("SELECT * FROM maintenance WHERE site=? ORDER BY id DESC", (rt.cfg.site,))
+        # checks to pick from, folded per module like the Checks page (modules in use only)
+        check_groups = [(m.name, [(f"{m.id}.{c.id}", c.name) for c in m.checks]) for m in MODULES.values()
+                        if m.enabled(m.load(rt))]
         return page(request, "maintenance.html", request.state.user, rows=rows, names=rt.names(),
-                    csrf=request.state.user.csrf, now=time.time(), json=json)
+                    check_groups=check_groups, csrf=request.state.user.csrf, now=time.time(), json=json)
 
     @app.post("/maintenance")
     async def maintenance_add(request: Request):
