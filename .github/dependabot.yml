@@ -1,14 +1,24 @@
 version: 2
+# Monthly, one grouped pull request per ecosystem. Updates are applied in a normal release after
+# the tests pass; Dependabot then closes its own pull request.
 updates:
   - package-ecosystem: pip
     directory: /controller
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    groups:
+      python-packages: { patterns: ["*"] }
   - package-ecosystem: docker
     directory: /controller
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    groups:
+      base-image: { patterns: ["*"] }
   - package-ecosystem: docker-compose
     directory: /deploy
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    groups:
+      compose-images: { patterns: ["*"] }
   - package-ecosystem: github-actions
     directory: /
-    schedule: { interval: weekly }
+    schedule: { interval: monthly }
+    groups:
+      github-actions: { patterns: ["*"] }
