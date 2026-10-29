@@ -91,3 +91,16 @@ async def test_wrong_port_says_where_the_gui_is():
             200, text="<html>login</html>", headers={"content-type": "text/html"}))
         with pytest.raises(ApiError, match="web GUI with its port"):
             await plugin.fetch(s, "secret", 0)
+
+
+async def test_missing_privilege_is_named():
+    import httpx
+    import pytest
+    import respx
+
+    s = {"url": "https://fw.test", "api_key": "k", "verify": False}
+    with respx.mock:
+        respx.get("https://fw.test/api/routes/gateway/status").mock(return_value=httpx.Response(200, json={"items": []}))
+        respx.get(url__startswith="https://fw.test/api/diagnostics/system/").mock(return_value=httpx.Response(403, json={}))
+        with pytest.raises(ApiError, match="lacks the privilege Lobby: Dashboard"):
+            await plugin.fetch(s, "secret", 0)

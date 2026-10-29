@@ -28,6 +28,8 @@ GW_LEVEL = {"none": OK, "down": ERROR, "force_down": ERROR, "loss": WARNING, "de
 _IDLE = re.compile(r"([\d.]+)% idle")
 
 
+# the OPNsense 26.x privilege that opens each required API path
+PRIVILEGE = {"diagnostics/system/": "Lobby: Dashboard", "routes/gateway/": "System: Gateways"}
 NOT_GUI = ("Enter the address of the OPNsense web GUI with its port, e.g. https://192.168.1.1:8443 "
            "(System → Settings → Administration → TCP port).")
 
@@ -41,8 +43,9 @@ class OPNsenseModule(ApiModule):
     setup = [
         ("text", "In OPNsense: System → Access → Users → Add. Name it homewatch, tick \"Generate a scrambled "
                  "password\", and give it only these privileges (Effective privileges): "),
-        ("code", "Status: Gateways\nDiagnostics: System Activity\nSystem: Status\nStatus: Services\n"
-                 "System: Firmware\nSystem: Certificate Manager\nServices: HAProxy (only if you use it)"),
+        ("code", "Lobby: Dashboard\nSystem: Gateways\nDiagnostics: System Activity\nStatus: Services\n"
+                 "System: Firmware\nSystem: Trust: Certificates\nServices: HAProxy (only if you use it)"),
+        ("text", "Lobby: Dashboard is what lets homewatch read CPU, memory, disk, uptime and the version."),
         ("text", "Save, then press \"+\" under API keys to create a key. OPNsense downloads a file with the key "
                  "and secret: paste them below."),
     ]
@@ -81,7 +84,9 @@ class OPNsenseModule(ApiModule):
                 if r.status_code in (403, 404) and optional:
                     return None
                 if r.status_code == 403:
-                    raise ApiError(f"the key's user lacks the privilege for {path}")
+                    need = next((v for k, v in PRIVILEGE.items() if path.startswith(k)), "")
+                    raise ApiError(f"the key's user lacks the privilege {need or 'for ' + path}"
+                                   + (" (System → Access → Users → homewatch)" if need else ""))
                 is_json = "json" in r.headers.get("content-type", "")
                 if r.status_code in (301, 302, 307, 308, 502, 503) or (r.status_code < 300 and not is_json):
                     # e.g. HAProxy or another web server on port 443 while the GUI listens on another port
@@ -92,9 +97,9 @@ class OPNsenseModule(ApiModule):
 
             snap = {
                 "gateways": (await get("routes/gateway/status")).get("items", []),
-                "resources": await get("diagnostics/system/systemResources"),
-                "disk": await get("diagnostics/system/systemDisk"),
-                "time": await get("diagnostics/system/systemTime"),
+                "resources": await get("diagnostics/system/system_resources"),
+                "disk": await get("diagnostics/system/system_disk"),
+                "time": await get("diagnostics/system/system_time"),
                 "activity": await get("diagnostics/activity/getActivity", optional=True),
                 "services": (await get("core/service/search", optional=True) or {}).get("rows"),
                 # the counters list also holds nested lists (stick tables): keep the proxy/server entries
@@ -103,7 +108,7 @@ class OPNsenseModule(ApiModule):
                 "certs": [{k: c.get(k) for k in ("descr", "commonname", "valid_to", "in_use")}
                           for c in (await get("trust/cert/search", optional=True) or {}).get("rows", [])] or None,
                 "firmware": await get("core/firmware/status", optional=True),
-                "info": await get("diagnostics/system/systemInformation", optional=True),
+                "info": await get("diagnostics/system/system_information", optional=True),
             }
         name = (snap["info"] or {}).get("name", "OPNsense")
         version = next((v for v in (snap["info"] or {}).get("versions", []) if v.startswith("OPNsense")), "")
@@ -182,7 +187,7 @@ class OPNsenseModule(ApiModule):
 
         certs = [c for c in snap.get("certs") or [] if str(c.get("in_use") or "") not in ("", "0", "False")]
         if snap.get("certs") is None:
-            add("certs", OK, "not readable (add the privilege System: Certificate Manager)")
+            add("certs", OK, "not readable (add the privilege System: Trust: Certificates)")
         elif not certs:
             add("certs", OK, "No certificate in use")
         else:

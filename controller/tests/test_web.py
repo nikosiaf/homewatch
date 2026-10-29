@@ -389,7 +389,7 @@ def test_api_module_connect_choose_switch_off_remove(client, monkeypatch):
 
     monkeypatch.setattr(plugin, "fetch", bad)
     page = client.get("/modules/opnsense").text
-    assert "Add OPNsense" in page and "Status: Gateways" in page
+    assert "Add OPNsense" in page and "Lobby: Dashboard" in page
     r = client.post("/modules/opnsense", data={"csrf": tok, "url": "192.168.1.1", "api_key": "k", "secret": "s"})
     assert "Nothing saved: OPNsense rejected the API key" in r.text and client.rt.db.get("module.opnsense") is None
 
