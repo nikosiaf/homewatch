@@ -107,7 +107,7 @@ You need a Linux host with Docker Engine and the Compose plugin
 
 ```sh
 mkdir homewatch && cd homewatch
-# download docker-compose.yml, Caddyfile, .env.example and install.sh from the latest release
+# download docker-compose.yml, Caddyfile, env.example and install.sh from the latest release
 # https://github.com/nikosiaf/homewatch/releases
 chmod +x install.sh
 less install.sh          # please read it first; it's short
@@ -130,7 +130,7 @@ fingerprint when the browser warns about the certificate (once). Then follow the
 ### Manual install (without install.sh)
 
 ```sh
-cp .env.example .env && chmod 600 .env
+cp env.example .env && chmod 600 .env    # .env.example in a git checkout
 openssl rand -base64 32          # put it in .env as HW_MASTER_KEY=…; also set TZ
 mkdir certs && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
   -keyout certs/key.pem -out certs/cert.pem -subj "/CN=homewatch" -addext "subjectAltName=IP:<host ip>"

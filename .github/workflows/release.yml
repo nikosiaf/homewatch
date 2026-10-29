@@ -37,5 +37,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sed -i "s/^HW_VERSION=.*/HW_VERSION=${{ steps.v.outputs.version }}/" deploy/.env.example
+          cp deploy/.env.example deploy/env.example  # GitHub would rename ".env.example" to "default.env.example"
           gh release create "$GITHUB_REF_NAME" --generate-notes \
-            deploy/docker-compose.yml deploy/Caddyfile deploy/.env.example deploy/install.sh
+            deploy/docker-compose.yml deploy/Caddyfile deploy/env.example deploy/install.sh

@@ -21,7 +21,11 @@ ipv4() { grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | grep -vE '^127\.' | head -1; }
 
 if [[ ! -f .env ]]; then
   echo "Creating .env"
-  install -m 600 .env.example .env
+  # release downloads name it env.example: GitHub drops the leading dot of attached files
+  example=.env.example
+  [[ -f "$example" ]] || example=env.example
+  [[ -f "$example" ]] || { echo "Missing .env.example (or env.example) next to install.sh" >&2; exit 1; }
+  install -m 600 "$example" .env
   key=$(openssl rand -base64 32)
   tz=$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo UTC)
   gw=$(ip -4 route show default | awk '{print $3; exit}')
