@@ -12,6 +12,8 @@ from ..apibase import ApiError, ApiModule, Choice, Field, Table, https_url
 CHECKS = [
     CheckDef("api", "Controller reachable", "api", help="ERROR when homewatch can't log in to UniFi or read it."),
     CheckDef("devices", "Devices online", "api", help="ERROR when a device you chose is disconnected or unreachable."),
+    CheckDef("cpu", "CPU", "api", unit="%", warn=90, editable=("warn", "error"),
+             help="Busiest watched device's CPU use, as UniFi reports it."),
     CheckDef("wifi", "Wi-Fi", "api", help="WARNING when UniFi reports the WLAN subsystem as not OK."),
     CheckDef("uptime", "Uptime", "api", unit="min", warn=60, editable=("warn",), lower_is_worse=True,
              help="WARNING after a device restarted, for this many minutes."),
@@ -19,6 +21,13 @@ CHECKS = [
 ]
 STATE = {0: "disconnected", 1: "connected", 2: "pending adoption", 4: "upgrading", 5: "provisioning",
          6: "heartbeat missed", 7: "adopting", 9: "adoption failed", 10: "isolated", 11: "isolated"}
+def _num(v) -> float | None:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 _SITE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
@@ -83,7 +92,8 @@ class UniFiModule(ApiModule):
                              "model": d.get("model"), "type": d.get("type"), "state": d.get("state"),
                              "version": d.get("version"), "upgradable": bool(d.get("upgradable")),
                              "upgrade_to": d.get("upgrade_to_firmware"), "uptime": d.get("uptime") or 0,
-                             "clients": d.get("num_sta") or 0, "adopted": d.get("adopted", True)} for d in devices],
+                             "clients": d.get("num_sta") or 0, "adopted": d.get("adopted", True),
+                             "cpu": _num((d.get("system-stats") or {}).get("cpu"))} for d in devices],
                 "health": [{"subsystem": h.get("subsystem"), "status": h.get("status"), "users": h.get("num_user")}
                            for h in health]}
         wlan = next((h for h in snap["health"] if h["subsystem"] == "wlan"), {})
@@ -128,6 +138,13 @@ class UniFiModule(ApiModule):
             add("devices", WARNING, "; ".join(busy))
         else:
             add("devices", OK, f"{len(watched)} watched devices connected")
+
+        cpus = [(d["cpu"], d["name"]) for d in watched if d.get("cpu") is not None and d["state"] == 1]
+        if cpus:
+            c, name = max(cpus)
+            add("cpu", level(c, th["cpu"]), f"busiest {name} {c:.0f} %", c)
+        else:
+            add("cpu", OK, "not reported")
 
         wlan = next((h for h in snap["health"] if h["subsystem"] == "wlan"), None)
         if wlan is None or wlan["status"] in ("unknown", None):

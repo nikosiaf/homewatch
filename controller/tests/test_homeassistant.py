@@ -79,3 +79,32 @@ def test_choices_and_watch_list_grouped_by_domain():
         ("light", "Old light", "light.old"), ("sensor", "x", "")]
     assert [(c.group, c.value, c.label) for c in plugin.filters(sn)] == [
         ("light", "light.old", "Old light"), ("sensor", "sensor.x", "x")]
+
+
+def test_alarm_safety_tamper_and_batteries():
+    watch = [{"entity_id": "alarm_control_panel.home", "state": "armed_home", "dc": None, "name": "Home"},
+             {"entity_id": "binary_sensor.kitchen_smoke", "state": "off", "dc": "smoke", "name": "Kitchen smoke"},
+             {"entity_id": "binary_sensor.boiler_leak", "state": "off", "dc": "moisture", "name": "Boiler leak"},
+             {"entity_id": "binary_sensor.zone1_tamper", "state": "off", "dc": "tamper", "name": "Zone 1 tamper"},
+             {"entity_id": "sensor.door_battery", "state": "60", "dc": "battery", "name": "Door"},
+             {"entity_id": "sensor.phone_battery", "state": "5", "dc": "battery", "name": "Phone"}]
+    sn = snap(watch=watch)
+    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
+
+    def res(s_over=None, w=watch):
+        s = {"enabled": True, "chosen": ["light.old"], "skipped": []} | (s_over or {})
+        return {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, snap(watch=w), "", NOW))}
+
+    r = res()
+    assert r["alarm"].status == OK and "Home armed home" in r["alarm"].detail
+    assert r["safety"].status == OK and "2 safety sensors clear" in r["safety"].detail
+    assert r["batteries"].status == ERROR and "Phone 5 %" in r["batteries"].detail
+    # unticking the phone in "Entities to watch" leaves the door battery
+    assert res({"skipped": ["sensor.phone_battery"]})["batteries"].status == OK
+    hot = [w | {"state": "on"} if w["dc"] in ("moisture", "tamper") else w for w in watch]
+    hot[0] = hot[0] | {"state": "triggered"}
+    r = res(w=hot)
+    assert r["alarm"].status == ERROR and r["safety"].status == ERROR and "Boiler leak (moisture)" in r["safety"].detail
+    assert r["tamper"].status == ERROR
+    assert res(w=[watch[0] | {"state": "unavailable"}])["alarm"].status == WARNING
+    assert sn["watch"] == watch

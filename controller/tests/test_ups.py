@@ -50,7 +50,7 @@ async def test_on_mains_then_on_battery():
     assert all(r.status == OK for r in res.values()) and res["runtime"].value == 37
     res = run({"name": "ups", "vars": good | {"ups.status": "OB DISCHRG RB", "battery.charge": "40",
                                               "battery.runtime": "200"}})
-    assert res["power"].status == ERROR and res["health"].status == ERROR
+    assert res["power"].status == ERROR and res["health"].status == WARNING  # replace battery: plan it, not an alarm
     assert res["battery"].status == WARNING and res["runtime"].status == ERROR
 
 

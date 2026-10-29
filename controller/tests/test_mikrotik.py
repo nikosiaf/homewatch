@@ -46,3 +46,21 @@ def test_port_down_errors_reboot_and_firmware():
     assert res["errors"].status == WARNING and res["errors"].value == 50
     assert res["uptime"].status == WARNING and "rebooted 10 min ago" in res["uptime"].detail
     assert res["firmware"].status == WARNING and res["each"].status == ERROR
+
+
+def test_port_errors_count_the_last_hour():
+    from homewatch.modules.mikrotik.plugin import MikroTikModule
+    m = MikroTikModule()
+    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in m.checks}
+    th["errors"] = Thresholds(1, None)
+
+    def at(t, n):
+        ports = [{"name": "ether1", "comment": "", "running": True, "disabled": False, "errors": n}]
+        snap = {"devices": [dev("sw1", ports=ports)], "errors": {}}
+        return {r.key.split(".")[1]: r for r in m.check({"chosen": []}, th, snap, t)}["errors"]
+
+    assert at(0, 100).status == OK  # first reading: the baseline
+    assert at(1200, 103).value == 3 and at(1200, 103).status == WARNING
+    assert at(3700, 103).value == 3  # the baseline is still the reading at or before the hour's start
+    assert at(5000, 103).value == 0  # an hour without new errors
+    assert at(5100, 2).value == 0  # counters restarted (reboot)

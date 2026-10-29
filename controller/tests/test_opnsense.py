@@ -104,3 +104,20 @@ async def test_missing_privilege_is_named():
         respx.get(url__startswith="https://fw.test/api/diagnostics/system/").mock(return_value=httpx.Response(403, json={}))
         with pytest.raises(ApiError, match="lacks the privilege Lobby: Dashboard"):
             await plugin.fetch(s, "secret", 0)
+
+
+def test_cpu_is_a_ten_minute_average():
+    from homewatch.modules.opnsense.plugin import OPNsenseModule
+    m = OPNsenseModule()
+    s = {"enabled": True, "chosen": []}
+
+    def cpu(t, idle):
+        m.snap_ts = t
+        sn = snap(activity={"headers": [f"CPU:  1.0% user, 0.0% nice, 1.0% system, 0.0% interrupt, {idle}% idle"]})
+        return {r.key.split(".")[1]: r for r in m.evaluate(s, th(), (s, sn, "", t))}["cpu"]
+
+    assert cpu(1000, 90).value == pytest.approx(10)
+    r = cpu(1120, 0)  # a 100 % burst
+    assert r.value == pytest.approx(55) and r.status == OK and "now 100 %" in r.detail
+    assert cpu(1700, 90).value == pytest.approx(55)  # the first sample left the window
+    assert cpu(2400, 90).value == pytest.approx(10)  # and so did the burst

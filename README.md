@@ -35,7 +35,9 @@ Every probe can be switched off, and every threshold changed, in the web page.
 | Jitter (10-min median) | ≥ 15 ms | ≥ 30 ms |
 | Gateway reachable | | 100 % loss |
 | DNS | ≥ 500 ms | lookups fail while ping works |
-| Line speed | < 70 % of contract on 2 tests in a row | |
+| Line speed | < 70 % of contract on 2 tests in a row | optional level, e.g. < 30 % |
+| Speed test recent | no successful test for 7 h | |
+| Speed test latency | > 40 ms on 2 tests in a row | |
 | Probe data fresh | | no data for > 3 min |
 
 ### ISP modem module (optional)
@@ -88,7 +90,7 @@ Reads an OPNsense firewall through the API key of a user that has only the statu
 | Check | WARNING | ERROR |
 |---|---|---|
 | Gateways | packet loss or delay | a gateway down |
-| CPU / memory (without ZFS cache) / root disk | ≥ 85 / 90 / 85 % | ≥ 95 % |
+| CPU (10-minute average) / memory (without ZFS cache) / root disk | ≥ 85 / 90 / 85 % | ≥ 95 % |
 | Services (the ones you choose) | | not running |
 | HAProxy servers | | a health-checked server down |
 | Certificates in use | expires in < 20 days | < 7 days, or expired |
@@ -104,6 +106,13 @@ Reads Home Assistant with the long-lived token of a dedicated **non-admin** user
 | Unavailable entities (30 min or longer, not ignored) | ≥ 1 | ≥ 10 |
 | Updates (skipped versions don't count) | updates available | |
 | Automatic backups | last success > 26 h ago | > 50 h ago, or the last attempt failed |
+| Alarm panels | unavailable | triggered |
+| Safety sensors (smoke, water / moisture, gas, CO, heat, safety) | | detecting |
+| Tamper sensors | | tampered |
+| Batteries (lowest battery sensor, %) | < 25 % | < 10 % |
+
+The alarm, safety, tamper and battery checks find their sensors by Home Assistant's device class
+and follow the "Entities to watch" list: untick a phone there to keep its battery out of the check.
 
 Entities that are unavailable when you connect are ignored (you can change the list), so only
 entities that *become* unavailable are reported.
@@ -132,7 +141,7 @@ user on every device). The device's `www` service must allow the homewatch host.
 | Every device read | | one of several devices can't be read |
 | CPU / memory / temperature | ≥ 85 % / 90 % / 60 °C | ≥ 95 % / 95 % / 70 °C |
 | Ports up (the ones you choose) | | a chosen port down |
-| Port errors since the last reading | ≥ 10 | ≥ 1000 |
+| Port errors in the last hour | ≥ 10 | ≥ 1000 |
 | Uptime | rebooted in the last 60 min | |
 | RouterBOOT | older than the installed RouterOS | |
 
@@ -144,6 +153,7 @@ Reads the devices of a UniFi Network application (UniFi OS Server or a UniFi con
 | Check | WARNING | ERROR |
 |---|---|---|
 | Devices online (the ones you choose) | upgrading or provisioning | disconnected, heartbeat missed |
+| CPU (busiest watched device) | ≥ 90 % | |
 | Wi-Fi | WLAN subsystem not OK | |
 | Uptime | restarted in the last 60 min | |
 | Firmware | update available | |
@@ -172,7 +182,7 @@ Reading needs no login; the NUT server must listen on the network.
 | Battery charge | < 50 % | < 30 % |
 | Runtime | < 10 min | < 5 min |
 | Load | ≥ 80 % | ≥ 95 % |
-| UPS health | | replace battery, or overload |
+| UPS health | replace battery | overload |
 
 ### Alerts and notifications
 

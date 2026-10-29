@@ -9,6 +9,7 @@ import httpx
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
 from ..apibase import ApiError, ApiModule, Choice, Field, Table
 
+ERROR_WINDOW = 3600  # port errors are counted over the last hour
 CHECKS = [
     CheckDef("api", "Devices reachable", "api", help="ERROR when none of the devices can be read."),
     CheckDef("each", "Every device read", "api", help="ERROR when one of several devices can't be read."),
@@ -17,7 +18,7 @@ CHECKS = [
     CheckDef("temp", "Temperature", "api", unit="°C", warn=60, error=70, editable=("warn", "error")),
     CheckDef("ports", "Ports up", "api", help="ERROR when a port you chose is not running."),
     CheckDef("errors", "Port errors", "api", warn=10, error=1000, editable=("warn", "error"),
-             help="New receive/transmit errors on any port since the previous reading."),
+             help="Receive/transmit errors on all ports together in the last hour."),
     CheckDef("uptime", "Uptime", "api", unit="min", warn=60, editable=("warn",), lower_is_worse=True,
              help="WARNING after a reboot, for this many minutes."),
     CheckDef("firmware", "RouterBOOT", "api",
@@ -62,7 +63,7 @@ class MikroTikModule(ApiModule):
 
     def __init__(self):
         super().__init__()
-        self.prev_errors: dict[str, int] = {}
+        self.err_hist: dict[str, list[tuple[float, int]]] = {}  # per port: (time, error counter), last hour
 
     def validate(self, form, old):
         out, err = super().validate(form, old)
@@ -164,18 +165,22 @@ class MikroTikModule(ApiModule):
                 for d in devs for p in d["ports"] if self._key(d, p) in chosen and not p["running"]]
         add("ports", ERROR if down else OK, f"Down: {', '.join(down)}" if down else f"{len(chosen)} chosen ports up")
 
-        new_errors, worst_port = 0, ""
+        new_errors, worst_port, worst_n = 0, "", 0
         for d in devs:
             for p in d["ports"]:
-                k = self._key(d, p)
-                prev = self.prev_errors.get(k)
-                if prev is not None and p["errors"] >= prev and p["errors"] - prev > 0:
-                    if p["errors"] - prev > new_errors:
-                        worst_port = f"{d['name']} {p['name']}"
-                    new_errors += p["errors"] - prev
-                self.prev_errors[k] = p["errors"]
+                hist = self.err_hist.setdefault(self._key(d, p), [])
+                if hist and p["errors"] < hist[-1][1]:
+                    hist.clear()  # the counter restarted (reboot): count from here
+                hist.append((now, p["errors"]))
+                while len(hist) > 1 and hist[1][0] <= now - ERROR_WINDOW:
+                    hist.pop(0)  # keep one sample at or before the start of the window as the baseline
+                n = p["errors"] - hist[0][1]
+                new_errors += n
+                if n > worst_n:
+                    worst_port, worst_n = f"{d['name']} {p['name']}", n
         add("errors", level(new_errors, th["errors"]) if new_errors else OK,
-            f"{new_errors} new errors, most on {worst_port}" if new_errors else "no new errors", new_errors)
+            f"{new_errors} errors in the last hour, most on {worst_port}" if new_errors else "no errors in the last hour",
+            new_errors)
 
         recent = [(d["uptime"] / 60, d["name"]) for d in devs if d["uptime"]]
         if recent:

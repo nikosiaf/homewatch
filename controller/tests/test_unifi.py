@@ -58,3 +58,13 @@ async def test_checks():
     s = S | {"chosen": ["m1"]}
     res = {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, snap, "", NOW))}
     assert all(r.status == OK for r in res.values())
+
+
+def test_device_cpu():
+    from homewatch.modules.unifi.plugin import plugin as uni
+    snap = {"devices": [{"mac": "aa", "name": "AP1", "model": "U6", "type": "uap", "state": 1, "version": "1",
+                         "upgradable": False, "upgrade_to": None, "uptime": 99999, "clients": 3, "adopted": True,
+                         "cpu": 93.0}], "health": [], "_summary": "1"}
+    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in uni.checks}
+    r = {x.key.split(".")[1]: x for x in uni.check({"chosen": ["aa"]}, th, snap, 0)}
+    assert r["cpu"].status == WARNING and "AP1 93 %" in r["cpu"].detail

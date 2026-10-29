@@ -18,7 +18,7 @@ CHECKS = [
              lower_is_worse=True, help="Estimated minutes on battery at the current load."),
     CheckDef("load", "Load", "api", unit="%", warn=80, error=95, editable=("warn", "error")),
     CheckDef("health", "UPS health", "api",
-             help="ERROR when the UPS asks for a battery replacement or reports an overload."),
+             help="WARNING when the UPS asks for a battery replacement; ERROR when it reports an overload."),
 ]
 FLAGS = {"OL": "on mains", "OB": "on battery", "LB": "low battery", "RB": "replace battery", "CHRG": "charging",
          "DISCHRG": "discharging", "OVER": "overload", "BYPASS": "on bypass", "CAL": "calibrating", "FSD": "forced shutdown",
@@ -143,7 +143,8 @@ class UPSModule(ApiModule):
                     f"{x:.0f} {unit}" + (" (charging)" if cid == "battery" and "CHRG" in flags else ""), x)
 
         bad = [FLAGS[f] for f in ("RB", "OVER") if f in flags]
-        add("health", ERROR if bad else OK, ", ".join(bad) if bad else "no battery or overload warnings")
+        add("health", ERROR if "OVER" in flags else WARNING if bad else OK,
+            ", ".join(bad) if bad else "no battery or overload warnings")
         return out
 
     def tables(self, snap, s):

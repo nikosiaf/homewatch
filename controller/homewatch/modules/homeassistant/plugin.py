@@ -14,15 +14,30 @@ CHECKS = [
     CheckDef("core", "Core", "api", help="WARNING when Home Assistant is starting, stopping or in safe / recovery mode."),
     CheckDef("unavailable", "Unavailable entities", "api", warn=1, error=10, editable=("warn", "error"),
              help="Entities unavailable for 30 minutes or more, except ignored ones and domains you don't watch."),
+    CheckDef("alarm", "Alarm panels", "api",
+             help="ERROR when an alarm panel is triggered; WARNING when it is unavailable."),
+    CheckDef("safety", "Safety sensors", "api",
+             help="ERROR when a smoke, water / moisture, gas, CO, heat or safety sensor detects something."),
+    CheckDef("tamper", "Tamper", "api", help="ERROR when a tamper sensor reports tampering."),
+    CheckDef("batteries", "Batteries", "api", unit="%", warn=25, error=10, editable=("warn", "error"),
+             lower_is_worse=True, help="Lowest battery level among the watched battery sensors."),
     CheckDef("updates", "Updates", "api", help="WARNING when updates are available (skipped versions don't count)."),
     CheckDef("backups", "Automatic backups", "api", unit="h", warn=26, error=50, editable=("warn", "error"),
              help="Age of the last successful automatic backup; ERROR when the last attempt failed."),
 ]
-SETTLE = 30 * 60  # an entity counts as unavailable after this long (restarts and blips stay quiet)
+SETTLE = 30 * 60
+SAFETY = {"smoke", "moisture", "gas", "carbon_monoxide", "heat", "safety"}  # binary_sensor device classes  # an entity counts as unavailable after this long (restarts and blips stay quiet)
 
 
 def _domain(e) -> str:
     return e["entity_id"].split(".", 1)[0]
+
+
+def _special(e) -> bool:
+    """States the alarm / safety / tamper / battery checks look at."""
+    dom, dc = e["entity_id"].split(".", 1)[0], e.get("attributes", {}).get("device_class")
+    return (dom == "alarm_control_panel" or (dom == "binary_sensor" and (dc in SAFETY or dc == "tamper"))
+            or (dom == "sensor" and dc == "battery" and e.get("attributes", {}).get("unit_of_measurement") == "%"))
 
 
 def _ts(value) -> float | None:
@@ -94,6 +109,10 @@ class HomeAssistantModule(ApiModule):
                            if e["entity_id"] in ("sensor.backup_last_successful_automatic_backup",
                                                  "sensor.backup_last_attempted_automatic_backup")},
                 "entities": len(states),
+                "watch": [{"entity_id": e["entity_id"], "state": e.get("state"),
+                           "dc": e.get("attributes", {}).get("device_class"),
+                           "name": e.get("attributes", {}).get("friendly_name") or ""}
+                          for e in states if _special(e)],
                 "all": sorted([e["entity_id"], e.get("attributes", {}).get("friendly_name") or ""] for e in states)}
         snap["_summary"] = f"Home Assistant {config.get('version', '?')}, {len(states)} entities"
         return snap
@@ -139,6 +158,8 @@ class HomeAssistantModule(ApiModule):
         add("unavailable", level(n, th["unavailable"]) if n else OK,
             f"{n} unavailable: {names}" if n else f"none (ignoring {quiet})", n)
 
+        self._safety(s, th, snap, add)
+
         ups = [u for u in snap["updates"] if not u.get("skipped_version") or u["skipped_version"] != u.get("latest_version")]
         add("updates", WARNING if ups else OK,
             "; ".join(f"{u.get('title') or u['entity_id']} {u.get('installed_version')} → {u.get('latest_version')}"
@@ -156,6 +177,43 @@ class HomeAssistantModule(ApiModule):
             age = (now - ok_ts) / 3600
             add("backups", level(age, th["backups"]), f"last automatic backup {age:.0f} h ago", age)
         return out
+
+    def _safety(self, s, th, snap, add):
+        skipped = set(s.get("skipped", []))
+        mine = [e for e in snap.get("watch", [])
+                if e["entity_id"] not in skipped and f"group:{e['entity_id'].split('.', 1)[0]}" not in skipped]
+
+        def name(e):
+            return e["name"] or e["entity_id"]
+
+        panels = [e for e in mine if e["entity_id"].startswith("alarm_control_panel.")]
+        trig = [name(e) for e in panels if e["state"] == "triggered"]
+        gone = [name(e) for e in panels if e["state"] in ("unavailable", "unknown", None)]
+        if trig:
+            add("alarm", ERROR, "TRIGGERED: " + ", ".join(trig))
+        elif gone:
+            add("alarm", WARNING, "unavailable: " + ", ".join(gone))
+        else:
+            add("alarm", OK, "; ".join(f"{name(e)} {str(e['state']).replace('_', ' ')}" for e in panels)
+                or "no alarm panels")
+
+        for cid, classes, what in (("safety", SAFETY, "safety sensors"), ("tamper", {"tamper"}, "tamper sensors")):
+            group = [e for e in mine if e["entity_id"].startswith("binary_sensor.") and e["dc"] in classes]
+            on = [f"{name(e)} ({e['dc'].replace('_', ' ')})" for e in group if e["state"] == "on"]
+            add(cid, ERROR if on else OK, ", ".join(on) if on else f"{len(group)} {what} clear" if group else f"no {what}")
+
+        levels = []
+        for e in mine:
+            if e["entity_id"].startswith("sensor.") and e["dc"] == "battery":
+                try:
+                    levels.append((float(e["state"]), name(e)))
+                except (TypeError, ValueError):
+                    pass
+        if levels:
+            v, who = min(levels)
+            add("batteries", level(v, th["batteries"], True), f"lowest {who} {v:.0f} % ({len(levels)} batteries)", v)
+        else:
+            add("batteries", OK, "no battery sensors")
 
     def tables(self, snap, s):
         return [Table("Updates available", ["Update", "Installed", "Latest"],

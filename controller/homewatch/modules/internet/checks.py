@@ -31,8 +31,12 @@ CHECKS: list[CheckDef] = [
              help="10-minute median of the ping standard deviation, best public target."),
     CheckDef("dns", "DNS", "dns", unit="ms", warn=500, editable=("warn",),
              help="ERROR when lookups fail while ping works; WARNING when the 5-minute median is slow."),
-    CheckDef("speed", "Line speed", "speed", unit="%", warn=70, editable=("warn",), lower_is_worse=True,
-             help="WARNING when download or upload is below this share of the contract on 2 tests in a row."),
+    CheckDef("speed", "Line speed", "speed", unit="%", warn=70, editable=("warn", "error"), lower_is_worse=True,
+             help="Download or upload below this share of the contract on 2 tests in a row."),
+    CheckDef("speed_age", "Speed test recent", "speed", unit="h", warn=7, editable=("warn",),
+             help="WARNING when no speed test succeeded for this many hours (keep it above twice the test interval)."),
+    CheckDef("speed_ping", "Speed test latency", "speed", unit="ms", warn=40, editable=("warn",),
+             help="Latency measured by the speed test, on 2 tests in a row."),
 ]
 CHECK_BY_ID = {c.id: c for c in CHECKS}
 
@@ -60,6 +64,7 @@ class Speed:
     down: float | None
     up: float | None
     ok: bool
+    latency: float | None = None
 
 
 @dataclass
@@ -198,21 +203,32 @@ def evaluate(settings: dict, thresholds: dict[str, Thresholds], r: Readings) -> 
 
     # 5. speed (from the speed test history, newest first)
     if probes["speed"]:
-        add_speed(settings["line"], thresholds["speed"], r.speeds, add)
+        add_speed(settings["line"], thresholds, r.speeds, add, r.now)
 
     return [out[c.id] for c in CHECKS if c.id in out and thresholds[c.id].enabled]
 
 
-def add_speed(s: dict, t: Thresholds, speeds: list[Speed], add) -> None:
+def add_speed(s: dict, ths: dict[str, Thresholds], speeds: list[Speed], add, now: float) -> None:
+    t = ths["speed"]
     c_down, c_up = float(s.get("contract_down") or 0), float(s.get("contract_up") or 0)
     good = [x for x in speeds if x.ok][:2]
     if not good:
         add("speed", OK, "No speed test yet")
         return
     last = good[0]
+    age = (now - last.ts) / 3600
+    add("speed_age", _level(age, ths["speed_age"]),
+        f"last successful test {age:.1f} h ago" if age >= 1 else f"last successful test {age * 60:.0f} min ago", age)
+    pings = [x.latency for x in good if x.latency is not None]
+    if pings:
+        slow = len(pings) >= 2 and ths["speed_ping"].warn is not None and all(p > ths["speed_ping"].warn for p in pings)
+        add("speed_ping", WARNING if slow else OK,
+            f"{pings[0]:.0f} ms" + (" on 2 tests in a row" if slow else ""), pings[0])
+    else:
+        add("speed_ping", OK, "not measured by this engine")
     contract = f" of {c_down:g} / {c_up:g}" if c_down and c_up else ""
     detail = f"{last.down or 0:.1f} / {last.up or 0:.1f} Mbit/s"
-    if not (c_down and c_up) or t.warn is None:
+    if not (c_down and c_up) or (t.warn is None and t.error is None):
         add("speed", OK, f"{detail} (no contracted speed set)")
         return
 
@@ -221,5 +237,9 @@ def add_speed(s: dict, t: Thresholds, speeds: list[Speed], add) -> None:
 
     share = pct(last)
     detail = f"{detail} ({share:.0f} %{contract})"
-    low = len(good) >= 2 and all(pct(x) < t.warn for x in good)
-    add("speed", WARNING if low else OK, detail + (" on 2 tests in a row" if low else ""), share)
+
+    def low(limit):
+        return limit is not None and len(good) >= 2 and all(pct(x) < limit for x in good)
+
+    lvl = ERROR if low(t.error) else WARNING if low(t.warn) else OK
+    add("speed", lvl, detail + (" on 2 tests in a row" if lvl else ""), share)

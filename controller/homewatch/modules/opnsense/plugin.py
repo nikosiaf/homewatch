@@ -12,7 +12,8 @@ from ..apibase import ApiError, ApiModule, Choice, Field, Table, https_url
 CHECKS = [
     CheckDef("api", "API reachable", "api", help="ERROR when homewatch can't read the OPNsense API."),
     CheckDef("gateways", "Gateways", "api", help="ERROR when a gateway is down; WARNING on packet loss or delay."),
-    CheckDef("cpu", "CPU", "api", unit="%", warn=85, error=95, editable=("warn", "error")),
+    CheckDef("cpu", "CPU", "api", unit="%", warn=85, error=95, editable=("warn", "error"),
+             help="Average of the readings in the last 10 minutes, so short bursts stay quiet."),
     CheckDef("mem", "Memory", "api", unit="%", warn=90, error=95, editable=("warn", "error"),
              help="Used memory without the ZFS cache (ARC), which is freed when needed."),
     CheckDef("disk", "Root disk", "api", unit="%", warn=85, error=95, editable=("warn", "error")),
@@ -32,6 +33,9 @@ _IDLE = re.compile(r"([\d.]+)% idle")
 PRIVILEGE = {"diagnostics/system/": "Lobby: Dashboard", "routes/gateway/": "System: Gateways"}
 NOT_GUI = ("Enter the address of the OPNsense web GUI with its port, e.g. https://192.168.1.1:8443 "
            "(System → Settings → Administration → TCP port).")
+
+
+CPU_WINDOW = 600  # seconds the CPU check averages over
 
 
 class OPNsenseModule(ApiModule):
@@ -59,6 +63,10 @@ class OPNsenseModule(ApiModule):
     secret_placeholder = "the secret= line of the downloaded file"
     choices_title = "Services that must run"
     choices_help = "homewatch alerts when one of these stops. The ones running when you connected are ticked."
+
+    def __init__(self):
+        super().__init__()
+        self.cpu_hist: list[tuple[float, float]] = []  # (reading time, CPU %) for the 10-minute average
 
     def validate(self, form, old):
         out, err = super().validate(form, old)
@@ -149,7 +157,15 @@ class OPNsenseModule(ApiModule):
             add("cpu", OK, "not readable (add the privilege Diagnostics: System Activity)")
         else:
             cpu = 100 - idle
-            add("cpu", level(cpu, th["cpu"]), f"CPU {cpu:.0f} %, load {snap['time'].get('loadavg', '?')}", cpu)
+            ts = self.snap_ts or now
+            if self.cpu_hist and self.cpu_hist[-1][0] == ts:
+                self.cpu_hist[-1] = (ts, cpu)  # the same reading evaluated again
+            else:
+                self.cpu_hist.append((ts, cpu))
+            self.cpu_hist = [x for x in self.cpu_hist if x[0] > now - CPU_WINDOW]
+            avg = sum(c for _, c in self.cpu_hist) / len(self.cpu_hist)
+            add("cpu", level(avg, th["cpu"]), f"CPU {avg:.0f} % (10-min average; now {cpu:.0f} %), "
+                f"load {snap['time'].get('loadavg', '?')}", avg)
 
         mem = snap["resources"].get("memory", {})
         try:

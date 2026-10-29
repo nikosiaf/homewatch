@@ -45,7 +45,7 @@ def by_id(results):
 def test_all_ok():
     res = by_id(evaluate(settings(), th(), readings()))
     assert {k: r.status for k, r in res.items()} == {k: OK for k in
-                                                     ("fresh", "gateway", "reachable", "loss", "latency", "jitter",
+                                                     ("fresh", "gateway", "reachable", "loss", "latency", "jitter", "speed_age", "speed_ping",
                                                       "dns", "speed")}
     assert "best target 1.1.1.1" in res["latency"].detail
 
@@ -164,3 +164,17 @@ def test_contract_counts_with_speed_test_off_for_other_modules(db):
 
     save(db, {"speed": {"enabled": False}, "line": {"contract_down": 100, "contract_up": 10}})
     assert load(db)["line"]["contract_down"] == 100
+
+
+def test_speed_error_level_age_and_latency():
+    t = th()
+    t["speed"].error = 30
+    two_very_low = [Speed(NOW - 100, 25, 9, True, 12), Speed(NOW - 10900, 28, 9, True, 11)]
+    assert by_id(evaluate(settings(), t, readings(speeds=two_very_low)))["speed"].status == ERROR
+    old = [Speed(NOW - 8 * 3600, 95, 9.5, True, 12), Speed(NOW - 11 * 3600, 95, 9.5, True, 12)]
+    res = by_id(evaluate(settings(), th(), readings(speeds=old)))
+    assert res["speed_age"].status == WARNING and "8.0 h ago" in res["speed_age"].detail
+    slow = [Speed(NOW - 100, 95, 9.5, True, 55), Speed(NOW - 10900, 95, 9.5, True, 48)]
+    assert by_id(evaluate(settings(), th(), readings(speeds=slow)))["speed_ping"].status == WARNING
+    one_slow = [Speed(NOW - 100, 95, 9.5, True, 55), Speed(NOW - 10900, 95, 9.5, True, 12)]
+    assert by_id(evaluate(settings(), th(), readings(speeds=one_slow)))["speed_ping"].status == OK
