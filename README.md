@@ -7,9 +7,9 @@
 
 A small, self-hosted monitor for your home network, configured from a plain web page.
 homewatch watches **your internet line**, **your provider's DSL modem**, **your Proxmox VE host**,
-**your OPNsense firewall**, **Home Assistant**, **your Synology NAS**, **your MikroTik switches** and **UniFi**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
+**your OPNsense firewall**, **Home Assistant**, **your Synology NAS**, **your MikroTik switches**, **UniFi** and **Proxmox Backup Server**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
 down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy. Later versions add
-one module per release (Proxmox Backup Server, UPS).
+one module per release (next: UPS).
 
 - Runs as a Docker Compose stack on any Linux host (amd64 or arm64)
 - LAN / Tailscale only: it never needs a port open to the internet
@@ -148,6 +148,18 @@ Reads the devices of a UniFi Network application (UniFi OS Server or a UniFi con
 | Wi-Fi | WLAN subsystem not OK | |
 | Uptime | restarted in the last 60 min | |
 | Firmware | update available | |
+
+### Proxmox Backup Server module (optional)
+
+Reads PBS every 5 minutes through an API token with the read-only **Audit** role (the module page
+shows the commands to create it).
+
+| Check | WARNING | ERROR |
+|---|---|---|
+| Datastores | fullest ≥ 85 % | ≥ 95 %, or a datastore error (e.g. not mounted) |
+| Backups (the groups you choose) | newest snapshot > 26 h old | > 50 h old, or no snapshots |
+| Verify, prune, garbage collection, sync | latest run had warnings | latest run failed (last 8 days) |
+| Updates | package updates available | |
 
 ### Alerts and notifications
 
