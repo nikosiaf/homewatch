@@ -121,3 +121,14 @@ def test_cpu_is_a_ten_minute_average():
     assert r.value == pytest.approx(55) and r.status == OK and "now 100 %" in r.detail
     assert cpu(1700, 90).value == pytest.approx(55)  # the first sample left the window
     assert cpu(2400, 90).value == pytest.approx(10)  # and so did the burst
+
+
+def test_unwatched_haproxy_server_does_not_alarm():
+    hap = [{"pxname": "coffee", "svname": "coffee", "status": "DOWN"},
+           {"pxname": "nas", "svname": "nas", "status": "UP"}]
+    assert [c.value for c in plugin.filters({"haproxy": hap})] == ["coffee/coffee", "nas/nas"]
+    s = {"enabled": True, "chosen": ["unbound", "haproxy"], "skipped": ["coffee/coffee"]}
+    res = {r.key.split(".")[1]: r for r in plugin.evaluate(s, th(), (s, snap(haproxy=hap), "", NOW))}
+    assert res["haproxy"].status == OK and "1 not watched" in res["haproxy"].detail
+    table = next(t for t in plugin.tables(snap(haproxy=hap), s) if t.title == "HAProxy servers")
+    assert table.rows[0][-1] == "no" and table.rows[1][-1] == "yes"

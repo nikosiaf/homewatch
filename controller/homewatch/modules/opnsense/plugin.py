@@ -63,6 +63,9 @@ class OPNsenseModule(ApiModule):
     secret_placeholder = "the secret= line of the downloaded file"
     choices_title = "Services that must run"
     choices_help = "homewatch alerts when one of these stops. The ones running when you connected are ticked."
+    filter_title = "HAProxy servers to watch"
+    filter_help = ("Untick a server that is down on purpose (e.g. a device that is often off); it stays in the "
+                   "table below but no longer raises the HAProxy check.")
 
     def __init__(self):
         super().__init__()
@@ -130,6 +133,11 @@ class OPNsenseModule(ApiModule):
         return [Choice(r["id"], r.get("description") or r["id"], "" if r.get("running") else "stopped")
                 for r in snap.get("services") or []]
 
+    def filters(self, snap):
+        return [Choice(_server_key(x), x["pxname"] if x.get("svname") == x["pxname"] else f"{x['pxname']} / {x.get('svname')}",
+                       str(x.get("status") or ""))
+                for x in _servers(snap.get("haproxy"))]
+
     def check(self, s, th, snap, now):
         out = []
 
@@ -194,12 +202,15 @@ class OPNsenseModule(ApiModule):
         if hap is None:
             add("haproxy", OK, "HAProxy not installed or not readable")
         else:
-            servers = [x for x in hap if x.get("svname") not in ("FRONTEND", "BACKEND")]
+            skipped = set(s.get("skipped", []))
+            servers = [x for x in _servers(hap) if _server_key(x) not in skipped]
             down = [f"{x['pxname']}" for x in servers if str(x.get("status", "")).startswith("DOWN")]
             checked = [x for x in servers if x.get("status") not in ("no check", "")]
+            ignored = len(_servers(hap)) - len(servers)
             add("haproxy", ERROR if down else OK, f"Down: {', '.join(down)}" if down else
                 f"{len(checked)} health-checked servers up" + (f", {len(servers) - len(checked)} without a check"
-                                                                if len(servers) > len(checked) else ""))
+                                                                if len(servers) > len(checked) else "")
+                + (f", {ignored} not watched" if ignored else ""))
 
         certs = [c for c in snap.get("certs") or [] if str(c.get("in_use") or "") not in ("", "0", "False")]
         if snap.get("certs") is None:
@@ -234,9 +245,10 @@ class OPNsenseModule(ApiModule):
                    [[g.get("name"), g.get("status_translated"), g.get("loss"), g.get("delay"), g.get("monitor")]
                     for g in snap["gateways"]])]
         if snap.get("haproxy"):
-            t.append(Table("HAProxy servers", ["Backend", "Status", "Health check"],
-                           [[x["pxname"], x.get("status"), x.get("check_status") or "—"] for x in snap["haproxy"]
-                            if x.get("svname") not in ("FRONTEND", "BACKEND")]))
+            skipped = set(s.get("skipped", []))
+            t.append(Table("HAProxy servers", ["Backend", "Status", "Health check", "Watched"],
+                           [[x["pxname"], x.get("status"), x.get("check_status") or "—",
+                             "no" if _server_key(x) in skipped else "yes"] for x in _servers(snap["haproxy"])]))
         if snap.get("certs"):
             import time as _t
             t.append(Table("Certificates", ["Certificate", "In use", "Expires"],
@@ -247,3 +259,11 @@ class OPNsenseModule(ApiModule):
 
 
 plugin = OPNsenseModule()
+
+
+def _servers(hap) -> list[dict]:
+    return [x for x in hap or [] if x.get("svname") not in ("FRONTEND", "BACKEND")]
+
+
+def _server_key(x: dict) -> str:
+    return f"{x['pxname']}/{x.get('svname')}"

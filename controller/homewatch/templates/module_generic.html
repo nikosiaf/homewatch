@@ -74,16 +74,16 @@
       <button class="secondary" formaction="/modules/{{ module.id }}/refresh" formnovalidate
               data-confirm="Read {{ module.name }} again now? Unsaved ticks on this page are lost.">Read now</button></p>
     {% endif %}
-    {% if module.filter_title %}
-    <h3>{{ module.filter_title }}</h3>
-    {% if module.filter_help %}<p class="quiet small">{{ module.filter_help }}</p>{% endif %}
-    <input type="hidden" name="_filters_shown" value="{{ filters_shown }}">
-    {{ choice_list(filters, "keep.", "watched") }}
-    {% endif %}
     {% if module.choices_title %}
     <h3>{{ module.choices_title }}</h3>
     {% if module.choices_help %}<p class="quiet small">{{ module.choices_help }}</p>{% endif %}
     {{ choice_list(choices, "choose.", "ticked") }}
+    {% endif %}
+    {% if module.filter_title and filters %}
+    <h3>{{ module.filter_title }}</h3>
+    {% if module.filter_help %}<p class="quiet small">{{ module.filter_help }}</p>{% endif %}
+    <input type="hidden" name="_filters_shown" value="{{ filters_shown }}">
+    {{ choice_list(filters, "keep.", "watched") }}
     {% endif %}
   </fieldset>
   <p class="row" style="justify-content:space-between"><button data-save>Save</button>
