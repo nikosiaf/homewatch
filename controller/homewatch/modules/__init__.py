@@ -18,7 +18,7 @@ CATALOG = [
     ("synology", "Synology NAS", True),
     ("mikrotik", "MikroTik", True),
     ("unifi", "UniFi", True),
-    ("ups", "UPS (NUT)", False),
+    ("ups", "UPS (NUT)", True),
 ]
 
 

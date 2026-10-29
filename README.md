@@ -7,9 +7,8 @@
 
 A small, self-hosted monitor for your home network, configured from a plain web page.
 homewatch watches **your internet line**, **your provider's DSL modem**, **your Proxmox VE host**,
-**your OPNsense firewall**, **Home Assistant**, **your Synology NAS**, **your MikroTik switches**, **UniFi** and **Proxmox Backup Server**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
-down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy. Later versions add
-one module per release (next: UPS).
+**your OPNsense firewall**, **Home Assistant**, **your Synology NAS**, **your MikroTik switches**, **UniFi**, **Proxmox Backup Server** and **your UPS**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
+down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy.
 
 - Runs as a Docker Compose stack on any Linux host (amd64 or arm64)
 - LAN / Tailscale only: it never needs a port open to the internet
@@ -160,6 +159,20 @@ shows the commands to create it).
 | Backups (the groups you choose) | newest snapshot > 26 h old | > 50 h old, or no snapshots |
 | Verify, prune, garbage collection, sync | latest run had warnings | latest run failed (last 8 days) |
 | Updates | package updates available | |
+
+### UPS module (optional)
+
+Reads a UPS from a **NUT server** (Network UPS Tools), for example on your Proxmox host or NAS.
+Reading needs no login; the NUT server must listen on the network.
+
+| Check | WARNING | ERROR |
+|---|---|---|
+| NUT server reachable | | unreachable, or the UPS data is stale |
+| Mains power | | on battery, or a forced shutdown under way |
+| Battery charge | < 50 % | < 30 % |
+| Runtime | < 10 min | < 5 min |
+| Load | ≥ 80 % | ≥ 95 % |
+| UPS health | | replace battery, or overload |
 
 ### Alerts and notifications
 

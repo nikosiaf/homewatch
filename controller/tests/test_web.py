@@ -130,7 +130,7 @@ def test_modules_link_and_page(client):
     r = client.get("/")
     assert '<a href="/modules"' in r.text and "<details" not in r.text
     r = client.get("/modules")
-    assert 'href="/modules/internet"' in r.text and "ISP modem" in r.text and "Coming soon" in r.text
+    assert 'href="/modules/internet"' in r.text and "ISP modem" in r.text and "UPS (NUT)" in r.text
 
 
 def test_check_now_reports_read_failure(client):

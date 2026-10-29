@@ -2,7 +2,7 @@
 {% block title %}Modules{% endblock %}
 {% block content %}
 <h1>Modules</h1>
-<p class="quiet">Each module watches one kind of system. This release has the Internet line module; the others arrive one per release.</p>
+<p class="quiet">Each module watches one kind of system. Open one to connect it; modules you do not use stay off.</p>
 <div class="tiles">
 {% for id, name, ready in CATALOG %}
   {% if ready %}<a class="tile" href="/modules/{{ id }}" style="text-decoration:none;color:inherit">
