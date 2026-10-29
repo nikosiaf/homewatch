@@ -16,7 +16,7 @@ CATALOG = [
     ("homeassistant", "Home Assistant", True),
     ("pbs", "Proxmox Backup Server", False),
     ("synology", "Synology NAS", True),
-    ("mikrotik", "MikroTik", False),
+    ("mikrotik", "MikroTik", True),
     ("unifi", "UniFi", False),
     ("ups", "UPS (NUT)", False),
 ]

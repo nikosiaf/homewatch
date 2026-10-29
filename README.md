@@ -7,9 +7,9 @@
 
 A small, self-hosted monitor for your home network, configured from a plain web page.
 homewatch watches **your internet line**, **your provider's DSL modem**, **your Proxmox VE host**,
-**your OPNsense firewall**, **Home Assistant** and **your Synology NAS**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
+**your OPNsense firewall**, **Home Assistant**, **your Synology NAS** and **your MikroTik switches**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
 down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy. Later versions add
-one module per release (MikroTik, UniFi, Proxmox Backup Server, UPS).
+one module per release (UniFi, Proxmox Backup Server, UPS).
 
 - Runs as a Docker Compose stack on any Linux host (amd64 or arm64)
 - LAN / Tailscale only: it never needs a port open to the internet
@@ -122,6 +122,20 @@ shared folders or applications.
 | Disks | hottest ≥ 50 °C | ≥ 60 °C, a disk not normal, SMART failing or bad sectors |
 | Pools and volumes | fullest volume ≥ 85 %, or repairing / scrubbing | ≥ 95 %, degraded or crashed |
 | DSM updates | update available | |
+
+### MikroTik module (optional)
+
+Reads one or more RouterOS 7 devices over the REST API with a user in the `read` group (the same
+user on every device). The device's `www` service must allow the homewatch host.
+
+| Check | WARNING | ERROR |
+|---|---|---|
+| Every device read | | one of several devices can't be read |
+| CPU / memory / temperature | ≥ 85 % / 90 % / 60 °C | ≥ 95 % / 95 % / 70 °C |
+| Ports up (the ones you choose) | | a chosen port down |
+| Port errors since the last reading | ≥ 10 | ≥ 1000 |
+| Uptime | rebooted in the last 60 min | |
+| RouterBOOT | older than the installed RouterOS | |
 
 ### Alerts and notifications
 
