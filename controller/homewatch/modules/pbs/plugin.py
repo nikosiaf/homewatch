@@ -166,11 +166,11 @@ class PBSModule(ApiModule):
                 problems.append(f"{self._short(g)} {age:.0f} h old")
                 lvl = max(lvl, g_lvl)
         if not chosen:
-            add("backups", OK, "No backup groups chosen")
+            add("backups", OK, "Nothing chosen to watch")
         elif problems:
             add("backups", lvl, "; ".join(problems[:4]) + (f" (+{len(problems) - 4} more)" if len(problems) > 4 else ""), oldest)
         else:
-            add("backups", OK, f"{len(chosen)} groups backed up, oldest {oldest:.0f} h ago", oldest)
+            add("backups", OK, f"{len(chosen)} backed up, oldest {oldest:.0f} h ago", oldest)
 
         latest: dict[tuple, dict] = {}
         for j in snap["jobs"]:

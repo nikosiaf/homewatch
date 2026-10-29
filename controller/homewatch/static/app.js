@@ -111,3 +111,22 @@ document.querySelectorAll("[data-engine-select]").forEach(function (sel) {
   restore(document);
   document.body.addEventListener("htmx:afterSwap", function (e) { restore(e.target); });
 })();
+
+// Grouped choice lists: the "All" box ticks / unticks its group and follows the group's boxes.
+document.querySelectorAll("[data-choice-group]").forEach(function (d) {
+  const all = d.querySelector("[data-group-all]");
+  const count = d.querySelector("[data-group-count]");
+  const boxes = Array.from(d.querySelectorAll('input[name^="choose."]'));
+  function sync() {
+    const n = boxes.filter(function (b) { return b.checked; }).length;
+    all.checked = n === boxes.length;
+    all.indeterminate = n > 0 && n < boxes.length;
+    count.textContent = n;
+  }
+  all.addEventListener("change", function () {
+    boxes.forEach(function (b) { b.checked = all.checked; });
+    sync();
+  });
+  boxes.forEach(function (b) { b.addEventListener("change", sync); });
+  sync();
+});

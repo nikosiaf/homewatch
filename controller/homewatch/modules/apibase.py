@@ -40,6 +40,7 @@ class Choice:
     value: str
     label: str
     detail: str = ""
+    group: str = ""  # choices with a group are shown folded per group, with a "tick all" box
 
 
 @dataclass
@@ -70,6 +71,8 @@ class ApiModule(Module):
     every = 0  # seconds between reads; 0 = every check run
     choices_title = ""  # e.g. "Ports that should be up"; empty: no choice list
     choices_help = ""
+    filter_title = ""  # e.g. "Domains to watch": a list that is ticked by default; unticked values go to "skipped"
+    filter_help = ""
     template = "module_generic.html"
 
     def __init__(self):
@@ -88,7 +91,7 @@ class ApiModule(Module):
 
     def load(self, rt) -> dict:
         saved = rt.db.get(self.key)
-        base = {"enabled": True, "chosen": []} | {f.key: f.default for f in self.fields}
+        base = {"enabled": True, "chosen": [], "skipped": []} | {f.key: f.default for f in self.fields}
         return base | (saved or {}) | {"_configured": saved is not None}
 
     def configured(self, rt) -> bool:
@@ -127,6 +130,9 @@ class ApiModule(Module):
         return []
 
     def default_chosen(self, snap: dict) -> list[str]:
+        return []
+
+    def filters(self, snap: dict) -> list[Choice]:
         return []
 
     async def readings(self, rt, settings, now):
@@ -200,11 +206,16 @@ class ApiModule(Module):
                 settings["chosen"] = json.loads(form.get("_default_chosen", "[]"))
             elif "enabled" in form:  # the list is part of the (not greyed-out) form
                 settings["chosen"] = sorted(k.split(".", 1)[1] for k in form if k.startswith("choose."))
+        if self.filter_title and not first and "enabled" in form:
+            # values not on the page this time (e.g. a domain that has no entities now) keep their setting
+            shown = set(json.loads(form.get("_filters_shown", "[]")))
+            kept = {k.split(".", 1)[1] for k in form if k.startswith("keep.")}
+            settings["skipped"] = sorted((set(old.get("skipped", [])) - shown) | (shown - kept))
         settings.pop("_configured", None)
         rt.db.set(self.key, settings)
         if form.get("secret", "").strip():
             rt.secrets.put(self.secret_key, form["secret"].strip())
-        shown = {k: v for k, v in settings.items() if k != "chosen"}
+        shown = {k: v for k, v in settings.items() if k not in ("chosen", "skipped")}
         audit(rt.db, user.username, self.id, json.dumps(shown) + (" secret=replaced" if form.get("secret") else ""))
         rt.wake.set()
         return ""
@@ -212,8 +223,10 @@ class ApiModule(Module):
     def page_ctx(self, rt) -> dict:
         s = self.load(rt)
         snap = self.snap
-        chosen = set(s.get("chosen", []))
-        return {"configured": self.configured(rt), "has_secret": rt.secrets.has(self.secret_key),
+        chosen, skipped = set(s.get("chosen", [])), set(s.get("skipped", []))
+        filters = self.filters(snap) if snap and self.filter_title else []
+        return {"filters": [(c, c.value not in skipped) for c in filters], "skipped": skipped,
+                "filters_shown": json.dumps([c.value for c in filters]),"configured": self.configured(rt), "has_secret": rt.secrets.has(self.secret_key),
                 "snap": snap, "snap_ts": self.snap_ts, "api_error": self.error,
                 "tables": self.tables(snap, s) if snap else [],
                 "choices": [(c, c.value in chosen) for c in self.choices(snap)] if snap and self.choices_title else []}

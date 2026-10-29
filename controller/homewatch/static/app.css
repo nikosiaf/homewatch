@@ -104,3 +104,7 @@ details.module[open] > summary::after { content: "▾"; }
 details.module > .tiles { padding: 0 14px 14px; }
 pre.code { background: var(--muted-bg); padding: 10px 12px; border-radius: 8px; overflow-x: auto; font-size: 13px; margin: 6px 0; }
 h3 { font-size: 15px; margin: 18px 0 8px; }
+details.choices { border: 1px solid var(--line); border-radius: 8px; padding: 0 12px; margin-bottom: 8px; }
+details.choices > summary { cursor: pointer; padding: 8px 0; }
+details.choices[open] { padding-bottom: 10px; }
+details.choices label.all { margin-bottom: 6px; font-weight: 600; }

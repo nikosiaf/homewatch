@@ -36,9 +36,15 @@
 </div>
 <h2>Thresholds</h2>
 {% for m, th in groups %}
-<h2>{{ m.name }}</h2>
+{% set levels = [] %}{% for d in m.checks %}{% set c = current.get(m.id ~ '.' ~ d.id) %}{% if c %}{% set _ = levels.append(c.effective) %}{% endif %}{% endfor %}
+{% set worst = levels | max if levels else 0 %}
 <input type="hidden" name="{{ m.id }}.present" value="1">
-<div class="card scroll"><table>
+<details class="module s{{ worst }}" id="th-{{ m.id }}">
+<summary><b>{{ m.name }}</b>
+  <span class="badge s{{ worst }}">{{ LEVEL_WORD[worst] }}</span>
+  {% set off = th.values() | rejectattr('enabled') | list | length %}
+  <span class="quiet small">{{ m.checks | length }} checks{% if off %} · {{ off }} off{% endif %}</span></summary>
+<div class="scroll" style="padding:0 14px 14px"><table>
   <tr><th>On</th><th>Check</th><th>Now</th><th>WARNING at</th><th>ERROR at</th></tr>
   {% for d in m.checks %}{% set key = m.id ~ '.' ~ d.id %}{% set t = th[d.id] %}{% set c = current.get(key) %}
   <tr>
@@ -50,6 +56,7 @@
     <td>{% if 'error' in d.editable %}<input class="num" type="number" step="any" name="{{ key }}.error" value="{{ t.error if t.error is not none }}"> {{ d.unit }}{% if d.lower_is_worse %} <span class="quiet small">(below)</span>{% endif %}{% else %}<span class="quiet">fixed</span>{% endif %}</td>
   </tr>{% endfor %}
 </table></div>
+</details>
 {% endfor %}
 <p class="quiet small">Empty a field to switch that level off. "fixed" checks are ERROR when their condition is met.</p>
 <p><button data-save>Save</button></p>

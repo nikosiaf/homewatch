@@ -58,3 +58,20 @@ def test_updates_backups_and_safe_mode():
 
 def test_no_backup_sensors():
     assert run(snap(backup={}))["backups"].status == OK
+
+
+def test_unwatched_domain_is_not_reported():
+    old = {"entity_id": "sensor.gone", "state": "unavailable", "last_changed": iso(NOW - 3600), "name": "Gone"}
+    sn = snap(unavailable=[old])
+    s = {"enabled": True, "chosen": [], "skipped": ["sensor"]}
+    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
+    res = {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, sn, "", NOW))}
+    assert res["unavailable"].status == OK and "ignoring 1" in res["unavailable"].detail
+
+
+def test_choices_grouped_by_domain_and_domain_filters():
+    sn = snap(unavailable=[{"entity_id": "light.old", "name": "Old light"}, {"entity_id": "sensor.x", "name": ""}],
+              domains={"sensor": 40, "light": 3})
+    assert [(c.group, c.label, c.detail) for c in plugin.choices(sn)] == [
+        ("light", "Old light", "light.old"), ("sensor", "x", "")]
+    assert [(c.value, c.detail) for c in plugin.filters(sn)] == [("light", "(3)"), ("sensor", "(40)")]

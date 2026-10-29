@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime
 
 import httpx
@@ -13,12 +14,16 @@ CHECKS = [
     CheckDef("api", "HA reachable", "api", help="ERROR when homewatch can't read Home Assistant's API."),
     CheckDef("core", "Core", "api", help="WARNING when Home Assistant is starting, stopping or in safe / recovery mode."),
     CheckDef("unavailable", "Unavailable entities", "api", warn=1, error=10, editable=("warn", "error"),
-             help="Entities unavailable for 30 minutes or more, except the ones you chose to ignore."),
+             help="Entities unavailable for 30 minutes or more, except ignored ones and domains you don't watch."),
     CheckDef("updates", "Updates", "api", help="WARNING when updates are available (skipped versions don't count)."),
     CheckDef("backups", "Automatic backups", "api", unit="h", warn=26, error=50, editable=("warn", "error"),
              help="Age of the last successful automatic backup; ERROR when the last attempt failed."),
 ]
 SETTLE = 30 * 60  # an entity counts as unavailable after this long (restarts and blips stay quiet)
+
+
+def _domain(e) -> str:
+    return e["entity_id"].split(".", 1)[0]
 
 
 def _ts(value) -> float | None:
@@ -47,9 +52,12 @@ class HomeAssistantModule(ApiModule):
     ]
     secret_label = "Long-lived access token"
     secret_placeholder = "eyJ0eXAiOiJKV1Qi…"
+    filter_title = "Domains to watch"
+    filter_help = ("Unavailable entities are reported only in ticked domains (number of entities in brackets). "
+                   "New domains are watched.")
     choices_title = "Unavailable entities to ignore"
-    choices_help = ("These are unavailable now. Ticked ones are ignored (on purpose, or long gone). Entities that "
-                    "become unavailable later are reported; tick them here if that's expected.")
+    choices_help = ("These are unavailable now, grouped by domain. Ticked ones are ignored (on purpose, or long gone). "
+                    "Entities that become unavailable later are reported; tick them here if that's expected.")
 
     def validate(self, form, old):
         out, err = super().validate(form, old)
@@ -86,7 +94,8 @@ class HomeAssistantModule(ApiModule):
                 "backup": {e["entity_id"].removeprefix("sensor.backup_"): e.get("state") for e in states
                            if e["entity_id"] in ("sensor.backup_last_successful_automatic_backup",
                                                  "sensor.backup_last_attempted_automatic_backup")},
-                "entities": len(states)}
+                "entities": len(states),
+                "domains": dict(Counter(e["entity_id"].split(".", 1)[0] for e in states))}
         snap["_summary"] = f"Home Assistant {config.get('version', '?')}, {len(states)} entities"
         return snap
 
@@ -94,8 +103,18 @@ class HomeAssistantModule(ApiModule):
         return sorted(e["entity_id"] for e in snap["unavailable"])
 
     def choices(self, snap):
-        return [Choice(e["entity_id"], e["entity_id"], e.get("name") or "")
+        return [Choice(e["entity_id"], e.get("name") or e["entity_id"].split(".", 1)[1],
+                       e["entity_id"] if e.get("name") else "", group=_domain(e))
                 for e in sorted(snap["unavailable"], key=lambda e: e["entity_id"])]
+
+    def filters(self, snap):
+        return [Choice(d, d, f"({n})") for d, n in sorted((snap.get("domains") or {}).items())]
+
+    @staticmethod
+    def _reported(s, snap):
+        """Unavailable entities that count: not ignored and in a watched domain."""
+        ignored, skipped = set(s.get("chosen", [])), set(s.get("skipped", []))
+        return [e for e in snap["unavailable"] if e["entity_id"] not in ignored and _domain(e) not in skipped]
 
     def check(self, s, th, snap, now):
         out = []
@@ -112,13 +131,12 @@ class HomeAssistantModule(ApiModule):
         else:
             add("core", OK, f"{c.get('version')} running")
 
-        ignored = set(s.get("chosen", []))
-        new = [e for e in snap["unavailable"] if e["entity_id"] not in ignored
-               and (now - (_ts(e.get("last_changed")) or now)) >= SETTLE]
+        new = [e for e in self._reported(s, snap) if (now - (_ts(e.get("last_changed")) or now)) >= SETTLE]
         n = len(new)
         names = ", ".join((e.get("name") or e["entity_id"]) for e in new[:5]) + (f" (+{n - 5} more)" if n > 5 else "")
+        quiet = len(snap["unavailable"]) - len(self._reported(s, snap))
         add("unavailable", level(n, th["unavailable"]) if n else OK,
-            f"{n} unavailable: {names}" if n else f"none (ignoring {len(ignored)})", n)
+            f"{n} unavailable: {names}" if n else f"none (ignoring {quiet})", n)
 
         ups = [u for u in snap["updates"] if not u.get("skipped_version") or u["skipped_version"] != u.get("latest_version")]
         add("updates", WARNING if ups else OK,
@@ -139,13 +157,12 @@ class HomeAssistantModule(ApiModule):
         return out
 
     def tables(self, snap, s):
-        ignored = set(s.get("chosen", []))
         return [Table("Updates available", ["Update", "Installed", "Latest"],
                       [[u.get("title") or u["entity_id"], u.get("installed_version"), u.get("latest_version")]
                        for u in snap["updates"]]),
                 Table("Unavailable now, not ignored", ["Entity", "Name", "Since"],
                       [[e["entity_id"], e.get("name"), str(e.get("last_changed", ""))[:16].replace("T", " ")]
-                       for e in snap["unavailable"] if e["entity_id"] not in ignored])]
+                       for e in self._reported(s, snap)])]
 
 
 plugin = HomeAssistantModule()

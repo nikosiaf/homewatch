@@ -51,11 +51,31 @@
   <fieldset data-enable-target class="plain" {{ 'disabled' if not s.enabled }}>
     {{ fields_html(s) }}
     {% if module.choices_title %}
+    {% if module.filter_title %}
+    <h3>{{ module.filter_title }}</h3>
+    {% if module.filter_help %}<p class="quiet small">{{ module.filter_help }}</p>{% endif %}
+    <input type="hidden" name="_filters_shown" value="{{ filters_shown }}">
+    <div class="row">{% for c, on in filters %}
+      <label class="check"><input type="checkbox" name="keep.{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
+    {% else %}<span class="quiet">Appears after the first reading.</span>{% endfor %}</div>
+    {% endif %}
     <h3>{{ module.choices_title }}</h3>
     {% if module.choices_help %}<p class="quiet small">{{ module.choices_help }}</p>{% endif %}
+    {% if choices and choices[0][0].group %}
+    {% for g, items in choices | groupby('0.group') %}{% set n_on = items | selectattr('1') | list | length %}
+    <details class="choices" data-choice-group>
+      <summary><b>{{ g }}</b> <span class="quiet small"><span data-group-count>{{ n_on }}</span> of {{ items | length }} ticked{% if g in skipped %} · not watched{% endif %}</span></summary>
+      <label class="check all"><input type="checkbox" data-group-all {{ 'checked' if n_on == items | length }}> All {{ items | length }}</label>
+      <div class="row">{% for c, on in items %}
+        <label class="check" title="{{ c.detail }}"><input type="checkbox" name="choose.{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
+      {% endfor %}</div>
+    </details>
+    {% endfor %}
+    {% else %}
     <div class="row">{% for c, on in choices %}
       <label class="check" title="{{ c.detail }}"><input type="checkbox" name="choose.{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
     {% else %}<span class="quiet">Appears after the first reading.</span>{% endfor %}</div>
+    {% endif %}
     {% endif %}
   </fieldset>
   <p class="row" style="justify-content:space-between"><button data-save>Save</button>
