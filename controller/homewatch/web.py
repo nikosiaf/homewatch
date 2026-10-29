@@ -739,7 +739,50 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                     updates=rt.db.get("updates.check", True), latest=rt.db.get("updates.latest", ""),
                     roles=ROLES, tzname=rt.db.get("home.tz") or "UTC", zones=sorted(available_timezones()),
                     home_name=rt.db.get("home.name") or "Home", home_url=rt.db.get("home.url") or "",
-                    probe_age=_probe_age(rt), ookla=_ookla_version(rt), versions=version_rows)
+                    probe_age=_probe_age(rt), ookla=_ookla_version(rt), versions=version_rows,
+                    exports=_exports(rt))
+
+    @app.get("/system/export")
+    async def config_export(request: Request):
+        from . import versions
+        name = f"homewatch-config-{time.strftime('%Y-%m-%d')}.yaml"
+        return Response(versions.to_yaml(rt_of(request).db), media_type="application/yaml",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.get("/system/exports/{name}")
+    async def config_export_file(request: Request, name: str):
+        from . import versions
+        rt = rt_of(request)
+        path = os.path.join(rt.exports_dir, name)
+        if not versions.export_name_ok(name) or not os.path.isfile(path):
+            return RedirectResponse("/system#backup", status_code=303)
+        with open(path, encoding="utf-8") as f:
+            body = f.read()
+        return Response(body, media_type="application/yaml",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.post("/system/import")
+    async def config_import(request: Request):
+        from . import versions
+        rt = rt_of(request)
+        form = await form_of(request, request.state.user)
+        if form is None:
+            return back("/system", err="Form expired")
+        up = form.get("file")
+        if not hasattr(up, "read"):
+            return back("/system", err="Choose an export file first")
+        raw = await up.read(versions.MAX_IMPORT + 1)
+        if len(raw) > versions.MAX_IMPORT:
+            return back("/system", err="That file is too big for a homewatch export")
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return back("/system", err="That file is not a text (YAML) file")
+        err = rt.import_config(text, request.state.user.username)
+        if err:
+            return back("/system", err=f"Nothing imported: {err}")
+        return back("/system", msg="Imported. The previous settings are kept as a version. Enter passwords and "
+                                   "tokens on any module or channel that shows \"not set\".")
 
     @app.get("/system/versions/{vid}")
     async def version_view(request: Request, vid: int):
@@ -908,6 +951,15 @@ def _module_states(rt) -> dict[str, dict]:
         levels = [states.get(r.key, OK) for r in rt.results if r.key.startswith(m.id + ".")] if on else []
         out[m.id] = {"on": on, "checks": len(levels), "worst": max(levels, default=OK),
                      "problems": sum(1 for x in levels if x > OK)}
+    return out
+
+
+def _exports(rt) -> list[dict]:
+    from . import versions
+    out = []
+    for n in versions.list_exports(rt.exports_dir):
+        st = os.stat(os.path.join(rt.exports_dir, n))
+        out.append({"name": n, "ts": st.st_mtime, "kb": max(1, round(st.st_size / 1024))})
     return out
 
 

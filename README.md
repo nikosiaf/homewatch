@@ -252,6 +252,11 @@ Everything homewatch knows lives in two Docker volumes:
 - `homewatch_hw-data`: settings, users, history, encrypted tokens
 - `homewatch_vm-data`: metrics
 
+**Settings export:** System → Export and import downloads all settings as one YAML file (modules,
+thresholds, timing, channels, maintenance windows; no passwords, tokens or users). homewatch also
+writes one every night into the data volume (`exports/`, last 14 kept). Importing a file replaces
+the settings; the previous ones stay under Configuration versions, so an import can be undone.
+
 Keep a copy of `.env`. Without `HW_MASTER_KEY` the saved tokens can't be decrypted, so you would
 enter them again.
 

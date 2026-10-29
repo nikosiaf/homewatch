@@ -55,6 +55,28 @@
     <div><button>Add user</button></div>
   </form>
 </div>
+<h2>Export and import</h2>
+<div class="grid2" id="backup">
+  <div class="card">
+    {{ note("backup") }}
+    <b>Export</b>
+    <p class="quiet small">All settings as one YAML file: modules, thresholds, timing, channels and maintenance windows.
+      No passwords, tokens or users. homewatch also saves one every night and keeps the last 14.</p>
+    <p><a class="button" href="/system/export">Download export</a></p>
+    {% if exports %}<table>
+      {% for e in exports %}<tr><td><a href="/system/exports/{{ e.name }}">{{ e.name }}</a></td>
+        <td class="quiet small">{{ e.ts | ts('%d %b %H:%M') }} · {{ e.kb }} KB</td></tr>{% endfor %}
+    </table>{% else %}<p class="quiet small">The first nightly export appears within 5 minutes of starting.</p>{% endif %}
+  </div>
+  <form method="post" action="/system/import" enctype="multipart/form-data" class="card">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="backup">
+    <b>Import</b>
+    <p class="quiet small">Replaces all settings with the ones in an export file. The current settings are kept as a
+      version first, so you can go back under Configuration versions. Passwords, tokens and users stay as they are.</p>
+    <label for="imf">Export file (.yaml)</label><input id="imf" type="file" name="file" accept=".yaml,.yml,text/yaml" required>
+    <p><button class="secondary" data-confirm="Replace all settings with the ones in this file?">Import</button></p>
+  </form>
+</div>
 <h2>Configuration versions</h2>
 <div class="card scroll" id="versions">
   {{ note("versions") }}

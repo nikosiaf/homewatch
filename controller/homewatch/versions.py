@@ -8,7 +8,12 @@ leaves those as they are.
 from __future__ import annotations
 
 import json
+import os
+import re
 import time
+from datetime import datetime, timezone
+
+import yaml
 
 from .db import DB
 
@@ -16,6 +21,7 @@ KEEP = 200
 # settings keys that are configuration; the rest of the settings table is runtime state
 CONFIG_KEYS = ("engine.timing", "home.name", "home.tz", "home.url", "report.schedule", "updates.check")
 CONFIG_PREFIXES = ("module.",)
+CHECK_COLS = ("site", "check_key", "enabled", "warn", "error")
 CHANNEL_COLS = ("id", "kind", "name", "enabled", "levels", "quiet_start", "quiet_end", "weekly_report", "config")
 MAINT_COLS = ("id", "site", "name", "kind", "start_ts", "end_ts", "weekday", "start_min", "dur_min", "checks",
               "created_by", "created")
@@ -31,8 +37,7 @@ def snapshot(db: DB) -> dict:
     return {
         "settings": {r["key"]: json.loads(r["value"]) for r in db.all("SELECT key, value FROM settings ORDER BY key")
                      if is_config(r["key"])},
-        "checks": [dict(r) for r in db.all("SELECT site, check_key, enabled, warn, error FROM checks "
-                                           "ORDER BY site, check_key")],
+        "checks": [dict(r) for r in db.all(f"SELECT {', '.join(CHECK_COLS)} FROM checks ORDER BY site, check_key")],  # noqa: S608
         "channels": [dict(r) for r in db.all(f"SELECT {', '.join(CHANNEL_COLS)} FROM channels ORDER BY id")],  # noqa: S608
         "maintenance": [dict(r) for r in db.all(f"SELECT {', '.join(MAINT_COLS)} FROM maintenance ORDER BY id")],  # noqa: S608
     }
@@ -89,6 +94,12 @@ def restore(db: DB, vid: int) -> dict | None:
     if row is None:
         return None
     snap = json.loads(row["data"])
+    apply(db, snap)
+    return snap
+
+
+def apply(db: DB, snap: dict) -> None:
+    """Replace the configuration with a (validated) snapshot; secrets, users and history stay."""
     with db.tx() as t:
         for r in t.all("SELECT key FROM settings"):
             if is_config(r["key"]):
@@ -98,7 +109,7 @@ def restore(db: DB, vid: int) -> dict | None:
         t.run("DELETE FROM checks")
         for c in snap["checks"]:
             t.run("INSERT INTO checks(site, check_key, enabled, warn, error) VALUES(?,?,?,?,?)",
-                  (c["site"], c["check_key"], c["enabled"], c["warn"], c["error"]))
+                  tuple(c[k] for k in CHECK_COLS))
         t.run("DELETE FROM channels")
         for c in snap["channels"]:
             t.run(f"INSERT INTO channels({', '.join(CHANNEL_COLS)}) VALUES({', '.join('?' * len(CHANNEL_COLS))})",  # noqa: S608
@@ -108,4 +119,74 @@ def restore(db: DB, vid: int) -> dict | None:
         for m in snap["maintenance"]:
             t.run(f"INSERT INTO maintenance({', '.join(MAINT_COLS)}) VALUES({', '.join('?' * len(MAINT_COLS))})",  # noqa: S608
                   tuple(m[k] for k in MAINT_COLS))
-    return snap
+
+
+# ---- YAML export / import --------------------------------------------------------------------
+FORMAT = 1
+MAX_IMPORT = 1_000_000  # bytes
+EXPORTS_KEPT = 14
+_EXPORT_NAME = re.compile(r"^homewatch-config-\d{4}-\d{2}-\d{2}\.yaml$")
+
+
+def to_yaml(db: DB) -> str:
+    from . import __version__
+
+    body = {"format": FORMAT, "homewatch": __version__, "exported": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            **snapshot(db)}
+    return ("# homewatch configuration export. It holds no passwords, tokens or users:\n"
+            "# after importing it elsewhere, enter those again on the module and notification pages.\n"
+            + yaml.safe_dump(body, sort_keys=False, allow_unicode=True))
+
+
+def from_yaml(text: str) -> tuple[dict | None, str]:
+    """Parse and check an export. Returns (snapshot, "") or (None, what is wrong)."""
+    try:
+        doc = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        return None, f"not valid YAML ({str(e).splitlines()[0]})"
+    if not isinstance(doc, dict) or doc.get("format") != FORMAT:
+        return None, "not a homewatch configuration export (format 1)"
+    settings = doc.get("settings") or {}
+    if not isinstance(settings, dict):
+        return None, "settings: must be a mapping"
+    unknown = [k for k in settings if not is_config(str(k))]
+    if unknown:
+        return None, f"settings: unknown keys {', '.join(map(str, unknown[:5]))}"
+    snap = {"settings": settings}
+    for part, cols in (("checks", CHECK_COLS), ("channels", CHANNEL_COLS), ("maintenance", MAINT_COLS)):
+        rows = doc.get(part) or []
+        if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+            return None, f"{part}: must be a list of entries"
+        for i, r in enumerate(rows, 1):
+            missing = [c for c in cols if c not in r]
+            if missing:
+                return None, f"{part} entry {i}: missing {', '.join(missing)}"
+            bad = [c for c in cols if r[c] is not None and not isinstance(r[c], (str, int, float))]
+            if bad:
+                return None, f"{part} entry {i}: {', '.join(bad)} must be a plain value"
+        snap[part] = [{c: r[c] for c in cols} for r in rows]
+    return snap, ""
+
+
+def write_export(db: DB, folder: str, today: str) -> str:
+    """The nightly export: one file per day, the last EXPORTS_KEPT kept. Returns its path."""
+    os.makedirs(folder, exist_ok=True)
+    path = os.path.join(folder, f"homewatch-config-{today}.yaml")
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        f.write(to_yaml(db))
+    os.replace(path + ".tmp", path)
+    for old in list_exports(folder)[EXPORTS_KEPT:]:
+        os.remove(os.path.join(folder, old))
+    return path
+
+
+def list_exports(folder: str) -> list[str]:
+    """Export file names, newest first."""
+    try:
+        return sorted((n for n in os.listdir(folder) if _EXPORT_NAME.match(n)), reverse=True)
+    except FileNotFoundError:
+        return []
+
+
+def export_name_ok(name: str) -> bool:
+    return bool(_EXPORT_NAME.match(name))

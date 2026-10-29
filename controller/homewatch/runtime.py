@@ -204,13 +204,37 @@ class Runtime:
         """Put an earlier configuration back and make every part of homewatch use it."""
         if versions.restore(self.db, vid) is None:
             return False
+        self._config_replaced(username, "config.restore", f"version {vid}")
+        return True
+
+    def import_config(self, text: str, username: str) -> str:
+        """Replace the configuration with an uploaded export; returns an error or ''."""
+        snap, err = versions.from_yaml(text)
+        if err:
+            return err
+        versions.record(self.db, username, "config.before-import")  # so the import can be undone
+        versions.apply(self.db, snap)
+        self._config_replaced(username, "config.import", f"{len(snap['settings'])} settings, "
+                              f"{len(snap['checks'])} thresholds, {len(snap['channels'])} channels")
+        return ""
+
+    def _config_replaced(self, username: str, action: str, detail: str) -> None:
         for m in MODULES.values():
             if hasattr(m, "snap"):
-                m.snap, m.error = None, ""  # the next run reads with the restored settings
+                m.snap, m.error = None, ""  # the next run reads with the new settings
         self.sync_telegraf()
-        audit(self.db, username, "config.restore", f"version {vid}")
+        audit(self.db, username, action, detail)
         self.wake.set()
-        return True
+
+    @property
+    def exports_dir(self) -> str:
+        return os.path.join(self.cfg.data_dir, "exports")
+
+    def nightly_export(self, now: float) -> None:
+        today = time.strftime("%Y-%m-%d", time.localtime(now))
+        if self.db.get("export.last") != today:
+            versions.write_export(self.db, self.exports_dir, today)
+            self.db.set("export.last", today)
 
     async def run_speedtest(self, already_marked: bool = False) -> speedtest.Result:
         if self.speed_running and not already_marked:
@@ -250,10 +274,11 @@ class Runtime:
             await asyncio.sleep(15)
 
     async def daily_loop(self) -> None:
-        """Weekly report slot and the once-a-day update check, looked at every 5 minutes."""
+        """Weekly report slot, the daily configuration export and update check, looked at every 5 minutes."""
         while True:
             now = time.time()
             try:
+                self.nightly_export(now)
                 if report.due(self.db, now):
                     await self.send_report(now)
                 if self.db.get("updates.check", True) and now - self.db.get("updates.checked", 0) > 86400:
