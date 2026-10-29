@@ -7,9 +7,9 @@
 
 A small, self-hosted monitor for your home network, configured from a plain web page.
 homewatch watches **your internet line**, **your provider's DSL modem**, **your Proxmox VE host**,
-**your OPNsense firewall** and **Home Assistant**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
+**your OPNsense firewall**, **Home Assistant** and **your Synology NAS**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
 down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy. Later versions add
-one module per release (Synology, MikroTik, UniFi, …).
+one module per release (MikroTik, UniFi, Proxmox Backup Server, UPS).
 
 - Runs as a Docker Compose stack on any Linux host (amd64 or arm64)
 - LAN / Tailscale only: it never needs a port open to the internet
@@ -108,6 +108,20 @@ Reads Home Assistant with the long-lived token of a dedicated **non-admin** user
 
 Entities that are unavailable when you connect are ignored (you can change the list), so only
 entities that *become* unavailable are reported.
+
+### Synology NAS module (optional)
+
+Reads DSM through its Web API every 10 minutes (log in, read, log out). DSM has no read-only
+administrator role, so the setup asks for a separate `homewatch` administrator with no access to
+shared folders or applications.
+
+| Check | WARNING | ERROR |
+|---|---|---|
+| System | ≥ 60 °C, or DSM's temperature warning | ≥ 70 °C, or a crashed system |
+| CPU / memory | ≥ 85 / 90 % | ≥ 95 % |
+| Disks | hottest ≥ 50 °C | ≥ 60 °C, a disk not normal, SMART failing or bad sectors |
+| Pools and volumes | fullest volume ≥ 85 %, or repairing / scrubbing | ≥ 95 %, degraded or crashed |
+| DSM updates | update available | |
 
 ### Alerts and notifications
 
