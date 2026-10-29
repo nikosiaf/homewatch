@@ -452,6 +452,25 @@ def test_grouped_choices_watch_list_save_and_refresh(client, monkeypatch):
     plugin.snap = None
 
 
+def test_add_email_and_webhook_channels(client):
+    tok = setup_admin(client)
+    page = client.get("/notifications").text
+    assert "coming soon" not in page and ">Email<" in page and ">Webhook<" in page
+    r = client.post("/notifications/add", data={"csrf": tok, "kind": "webhook"})
+    assert "enter the webhook url" in r.text
+    r = client.post("/notifications/add", data={"csrf": tok, "kind": "webhook", "webhook.secret": "not-a-url"})
+    assert "full address" in r.text
+    client.post("/notifications/add", data={"csrf": tok, "kind": "webhook", "webhook.secret": "https://hooks.example/t"})
+    ch = client.rt.db.one("SELECT * FROM channels WHERE kind='webhook'")
+    assert json.loads(ch["config"]) == {}  # the URL is a secret: not in exports or versions
+    assert client.rt.secrets.get(f"channel.{ch['id']}") == "https://hooks.example/t"
+    client.post("/notifications/add", data={"csrf": tok, "kind": "email", "email.server": "smtp.example.com:465",
+                                            "email.sender": "hw@example.com", "email.to": "me@example.com",
+                                            "email.username": "", "email.secret": ""})
+    ch = client.rt.db.one("SELECT * FROM channels WHERE kind='email'")
+    assert json.loads(ch["config"])["server"] == "smtp.example.com:465"
+
+
 def test_every_module_page_renders(client):
     setup_admin(client)
     from homewatch.modules import CATALOG

@@ -19,14 +19,14 @@ from ..db import DB
 from ..engine import Event, tz
 from ..modules import ERROR, LEVEL_WORD, OK, WARNING
 from ..secrets import Secrets
-from . import healthchecks, ntfy, telegram
+from . import healthchecks, mail, ntfy, telegram, webhook
 
 log = logging.getLogger("homewatch.notify")
 
 ICON = {OK: "✅", WARNING: "🟡", ERROR: "🔴"}
-KINDS = {"telegram": telegram, "ntfy": ntfy}  # channels that receive messages
+KINDS = {"telegram": telegram, "ntfy": ntfy, "email": mail, "webhook": webhook}  # channels that receive messages
 PROVIDERS = {**KINDS, "healthchecks": healthchecks}  # everything that can be added on the Notifications page
-COMING_SOON = ("Email", "Webhook")
+COMING_SOON: tuple[str, ...] = ()
 RETRY_MAX = 120
 
 

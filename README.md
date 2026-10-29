@@ -176,8 +176,9 @@ Reading needs no login; the NUT server must listen on the network.
 
 ### Alerts and notifications
 
-Notification providers: **Telegram**, **ntfy** (one topic URL) and the **healthchecks.io
-heartbeat**. Email and webhook are coming.
+Notification providers: **Telegram**, **ntfy** (one topic URL), **email** (any SMTP server; port
+465 = TLS, other ports STARTTLS, a password is never sent unencrypted), **webhook** and the
+**healthchecks.io heartbeat**.
 
 Alerting works like this:
 - **Confirmation:** a change must hold for 2 runs (about 4 minutes) before it's sent.
@@ -194,6 +195,20 @@ Alerting works like this:
 or maintenance windows is kept as a version (last 200), showing who changed what. Each can be viewed
 and restored; a restore is itself a version, so it can be undone. Passwords, tokens and users are
 never part of a version.
+
+### Webhook
+
+The webhook channel POSTs every message as JSON to the URL you enter. The URL is stored encrypted
+like a password (webhook URLs usually contain a token) and is never part of an export:
+
+```json
+{"text": "🔴 Home: ERROR\n\n…", "content": "🔴 Home: ERROR\n\n…", "title": "🔴 Home: ERROR",
+ "body": "…", "level": 2, "level_name": "ERROR", "sent": 1793260000}
+```
+
+`text` makes it work as-is with Slack, Mattermost and Rocket.Chat incoming webhooks, `content` with
+Discord (cut to 2000 characters). For Home Assistant, Node-RED or n8n use `level` / `level_name`,
+`title` and `body`.
 
 There are two account roles: **admin**, who can change everything, and **viewer**, who can only see
 status and history.

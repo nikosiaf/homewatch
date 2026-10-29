@@ -681,6 +681,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             config, err = mod.normalize(config)
             if err:
                 return back("/notifications", err=err)
+        if form.get("secret", "").strip() and hasattr(mod, "check_secret"):
+            err = mod.check_secret(form["secret"])
+            if err:
+                return back("/notifications", err=err)
         levels = [lv for lv in (1, 2) if form.get(f"level{lv}") == "on"]
         qs, qe = form.get("quiet_start", ""), form.get("quiet_end", "")
         if bool(qs) != bool(qe):
@@ -1020,6 +1024,12 @@ def _save_section(request: Request, section: str, form: dict, user: User) -> str
         secret = form.get(f"{kind}.secret", "").strip()
         if kind == "telegram" and not (config["chat_id"] and secret):
             return "Telegram needs a bot token and a chat ID"
+        if getattr(mod, "SECRET_REQUIRED", False) and not secret:
+            return f"{mod.TITLE}: enter the {mod.SECRET_LABEL.lower()}"
+        if secret and hasattr(mod, "check_secret"):
+            err = mod.check_secret(secret)
+            if err:
+                return err
         if hasattr(mod, "normalize"):
             config, err = mod.normalize(config)
             if err:

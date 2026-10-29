@@ -106,3 +106,80 @@ def test_ntfy_topic_url_forms():
     assert normalize({"server": "https://ntfy.example", "topic": "old"})[0]["url"] == "https://ntfy.example/old"
     assert normalize({"url": "https://ntfy.sh"})[1]  # no topic
     assert normalize({"url": "ftp://x/t"})[1]
+
+
+def test_email_settings_checked():
+    from homewatch.notify import mail
+    cfg, err = mail.normalize({"server": "smtp.example.com", "username": "", "sender": "hw@example.com",
+                               "to": "a@example.com; b@example.com"})
+    assert not err and cfg["server"] == "smtp.example.com:587" and cfg["to"] == "a@example.com, b@example.com"
+    assert "From" in mail.normalize(cfg | {"sender": "nope"})[1]
+    assert "To" in mail.normalize(cfg | {"to": ""})[1]
+    assert "host:port" in mail.normalize(cfg | {"server": "smtp.example.com:99999"})[1]
+    msg = mail.build(cfg, "🔴 Home: ERROR", "body")
+    assert msg["Subject"] == "🔴 Home: ERROR" and msg["To"] == "a@example.com, b@example.com"
+
+
+class FakeSMTP:
+    sent: list = []
+
+    def __init__(self, host, port, timeout=None, context=None, starttls=True):
+        self.host, self.port, self.tls, self.login_as = host, port, port == 465, None
+        self._starttls = starttls
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def ehlo(self):
+        pass
+
+    def has_extn(self, name):
+        return self._starttls
+
+    def starttls(self, context=None):
+        self.tls = True
+
+    def login(self, user, pw):
+        assert self.tls, "password over plain text"
+        self.login_as = (user, pw)
+
+    def send_message(self, msg):
+        FakeSMTP.sent.append((self, msg))
+
+
+async def test_email_send_uses_tls_and_refuses_plain_password(monkeypatch):
+    import smtplib
+
+    import pytest
+
+    from homewatch.notify import mail
+    cfg = {"server": "smtp.example.com:587", "username": "me", "sender": "hw@example.com", "to": "a@example.com"}
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    FakeSMTP.sent = []
+    await mail.send(None, cfg, "pw", ERROR, "t", "b")
+    conn, msg = FakeSMTP.sent[0]
+    assert conn.tls and conn.login_as == ("me", "pw") and msg["Subject"] == "t"
+    monkeypatch.setattr(smtplib, "SMTP", lambda *a, **k: FakeSMTP(*a, starttls=False, **k))
+    with pytest.raises(RuntimeError, match="unencrypted"):
+        await mail.send(None, cfg, "pw", ERROR, "t", "b")
+    await mail.send(None, cfg | {"username": ""}, "", OK, "t", "b")  # a local relay without login may be plain
+
+
+@respx.mock
+async def test_webhook_payload_and_errors(db):
+    import pytest
+
+    from homewatch.notify import webhook
+    route = respx.post("https://hooks.example/abc").mock(return_value=httpx.Response(204))
+    async with httpx.AsyncClient() as http:
+        await webhook.send(http, {}, "https://hooks.example/abc", WARNING, "🟡 Home: WARNING", "line")
+        body = json.loads(route.calls.last.request.content)
+        assert body["text"] == body["content"] == "🟡 Home: WARNING\n\nline" and body["level_name"] == "WARNING"
+        respx.post("https://hooks.example/bad").mock(return_value=httpx.Response(404))
+        with pytest.raises(RuntimeError, match="HTTP 404") as e:
+            await webhook.send(http, {}, "https://hooks.example/bad", ERROR, "t", "b")
+        assert "hooks.example" not in str(e.value)  # the URL may hold a token
+    assert webhook.check_secret("hooks.example/x") and not webhook.check_secret("https://hooks.example/x")

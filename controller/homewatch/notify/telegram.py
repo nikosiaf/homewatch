@@ -10,6 +10,7 @@ DESCRIPTION = ("Messages from your own Telegram bot. Create a bot with @BotFathe
 LINK = "https://core.telegram.org/bots#how-do-i-create-a-bot"
 FIELDS = [("chat_id", "Chat ID", "Your chat or group ID, e.g. 123456789 or -100…")]
 SECRET_LABEL = "Bot token"
+SECRET_REQUIRED = True
 MAX = 4000
 
 
