@@ -190,6 +190,11 @@ Alerting works like this:
   alerts you when the pings stop (host, power or internet down).
 - **History** is a timeline of every problem and its return to OK.
 
+**Configuration versions** (System page): every saved change to modules, thresholds, timing, channels
+or maintenance windows is kept as a version (last 200), showing who changed what. Each can be viewed
+and restored; a restore is itself a version, so it can be undone. Passwords, tokens and users are
+never part of a version.
+
 There are two account roles: **admin**, who can change everything, and **viewer**, who can only see
 status and history.
 

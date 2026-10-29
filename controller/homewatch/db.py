@@ -57,6 +57,12 @@ MIGRATIONS: list[str] = [
         down REAL, up REAL, latency REAL, ok INTEGER NOT NULL, error TEXT NOT NULL DEFAULT '');
     CREATE INDEX speedtests_ts ON speedtests (site, ts);
     """,
+    # 2: configuration versions
+    """
+    CREATE TABLE config_versions (
+        id INTEGER PRIMARY KEY, ts REAL NOT NULL, username TEXT NOT NULL, action TEXT NOT NULL,
+        summary TEXT NOT NULL DEFAULT '', data TEXT NOT NULL);
+    """,
 ]
 
 

@@ -55,6 +55,24 @@
     <div><button>Add user</button></div>
   </form>
 </div>
+<h2>Configuration versions</h2>
+<div class="card scroll" id="versions">
+  {{ note("versions") }}
+  <p class="quiet small">homewatch keeps the last 200 versions of its settings: modules, thresholds, timing, home,
+    weekly report, channels and maintenance windows. Restoring one is saved as a new version, so it can be undone.
+    Passwords, tokens and users are not part of a version and stay as they are.</p>
+  <table>
+    <tr><th>#</th><th>When</th><th>Who</th><th>What changed</th><th></th></tr>
+    {% for v in versions %}<tr><td>{{ v.id }}</td><td>{{ v.ts | ts('%d %b %H:%M') }}</td><td>{{ v.username }}</td>
+      <td class="small">{{ v.summary }}{% if v.action == 'config.restore' %} <span class="quiet">(restore)</span>{% endif %}</td>
+      <td class="row" style="flex-wrap:nowrap;gap:6px"><a class="small" href="/system/versions/{{ v.id }}" target="_blank">View</a>
+        {% if not loop.first %}<form class="inline" method="post" action="/system/versions/{{ v.id }}/restore">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="versions">
+          <button class="secondary" data-confirm="Put back the settings of version {{ v.id }} ({{ v.ts | ts('%d %b %H:%M') }})? The current settings are kept as a version too.">Restore</button></form>
+        {% else %}<span class="quiet small">current</span>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="5" class="quiet">Nothing yet.</td></tr>{% endfor %}
+  </table>
+</div>
 <h2>Danger zone</h2>
 <div id="danger">{{ note("danger") }}</div>
 <div class="grid2">

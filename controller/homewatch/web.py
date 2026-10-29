@@ -732,13 +732,34 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt = rt_of(request)
         users = rt.db.all("SELECT id, username, role, created FROM users ORDER BY username")
         log_rows = rt.db.all("SELECT * FROM audit ORDER BY id DESC LIMIT 100")
+        version_rows = rt.db.all("SELECT id, ts, username, action, summary FROM config_versions ORDER BY id DESC LIMIT 50")
         vm_ok = await rt.metrics.healthy()
         return page(request, "system.html", request.state.user, users=users, log=log_rows, vm_ok=vm_ok,
                     last_run=rt.last_run, last_error=rt.last_error, csrf=request.state.user.csrf,
                     updates=rt.db.get("updates.check", True), latest=rt.db.get("updates.latest", ""),
                     roles=ROLES, tzname=rt.db.get("home.tz") or "UTC", zones=sorted(available_timezones()),
                     home_name=rt.db.get("home.name") or "Home", home_url=rt.db.get("home.url") or "",
-                    probe_age=_probe_age(rt), ookla=_ookla_version(rt))
+                    probe_age=_probe_age(rt), ookla=_ookla_version(rt), versions=version_rows)
+
+    @app.get("/system/versions/{vid}")
+    async def version_view(request: Request, vid: int):
+        row = rt_of(request).db.one("SELECT * FROM config_versions WHERE id=?", (vid,))
+        if row is None:
+            return RedirectResponse("/system#versions", status_code=303)
+        body = json.dumps({"version": row["id"], "saved": _fmt_ts(row["ts"]), "by": row["username"],
+                           "change": row["summary"], **json.loads(row["data"])}, indent=2)
+        return Response(body, media_type="application/json",
+                        headers={"Content-Disposition": f'inline; filename="homewatch-config-v{vid}.json"'})
+
+    @app.post("/system/versions/{vid}/restore")
+    async def version_restore(request: Request, vid: int):
+        rt = rt_of(request)
+        form = await form_of(request, request.state.user)
+        if form is None:
+            return back("/system", err="Form expired")
+        if not rt.restore_version(vid, request.state.user.username):
+            return back("/system", err=f"Version {vid} no longer exists")
+        return back("/system", msg=f"Version {vid} restored. Passwords and tokens were left as they are.")
 
     @app.post("/system/home")
     async def system_home(request: Request):

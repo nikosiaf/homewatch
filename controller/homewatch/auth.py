@@ -113,3 +113,6 @@ class Auth:
 
 def audit(db: DB, username: str, action: str, detail: str = "") -> None:
     db.run("INSERT INTO audit(ts,username,action,detail) VALUES(?,?,?,?)", (time.time(), username, action, detail))
+    from .versions import record  # every audited change may have changed the configuration
+
+    record(db, username, action)

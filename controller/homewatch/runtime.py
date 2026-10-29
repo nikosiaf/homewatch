@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from . import __version__, report
+from . import __version__, report, versions
+from .auth import audit
 from .config import Config
 from .db import DB
 from .engine import Engine, thresholds, timing
@@ -28,7 +29,8 @@ log = logging.getLogger("homewatch.runtime")
 HC_SECRET = "healthchecks.url"
 SPEED_RETRY = 15 * 60  # after a failed speed test, try again this soon instead of waiting a full interval
 HISTORY_TABLES = ("issues", "speedtests", "check_state", "outbox", "snoozes")
-CONFIG_TABLES = ("settings", "checks", "secrets", "maintenance", "channels", "sessions", "users", "audit")
+CONFIG_TABLES = ("settings", "checks", "secrets", "maintenance", "channels", "sessions", "users", "audit",
+                 "config_versions")
 RELEASES = "https://api.github.com/repos/nikosiaf/homewatch/releases/latest"
 
 
@@ -54,6 +56,7 @@ class Runtime:
         os.makedirs(cfg.ookla_dir, exist_ok=True)
         db = DB(cfg.db_path)
         secrets = Secrets(db, cfg.master_key)
+        versions.record(db, "system", "startup")  # also catches changes made while homewatch was stopped
         return cls(cfg, db, secrets, Metrics(cfg.vm_url), Notifier(db, secrets), Engine(db, cfg.site))
 
     # ---- settings helpers ----------------------------------------------------------------
@@ -196,6 +199,18 @@ class Runtime:
             self.sync_telegraf()
         self.wake.set()
         return warning
+
+    def restore_version(self, vid: int, username: str) -> bool:
+        """Put an earlier configuration back and make every part of homewatch use it."""
+        if versions.restore(self.db, vid) is None:
+            return False
+        for m in MODULES.values():
+            if hasattr(m, "snap"):
+                m.snap, m.error = None, ""  # the next run reads with the restored settings
+        self.sync_telegraf()
+        audit(self.db, username, "config.restore", f"version {vid}")
+        self.wake.set()
+        return True
 
     async def run_speedtest(self, already_marked: bool = False) -> speedtest.Result:
         if self.speed_running and not already_marked:
