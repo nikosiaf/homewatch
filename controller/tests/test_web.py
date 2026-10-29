@@ -410,3 +410,14 @@ def test_api_module_connect_choose_switch_off_remove(client, monkeypatch):
     assert "Removed" in r.text and client.rt.db.get("module.opnsense") is None
     assert client.rt.secrets.get("module.opnsense.secret") is None
     plugin.snap = None
+
+
+def test_every_module_page_renders(client):
+    setup_admin(client)
+    from homewatch.modules import CATALOG
+    from homewatch.modules.registry import MODULES
+
+    assert {m for m, _, ready in CATALOG if ready} == set(MODULES)
+    for mid in MODULES:
+        r = client.get(f"/modules/{mid}")
+        assert r.status_code == 200 and "Traceback" not in r.text, mid
