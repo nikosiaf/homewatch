@@ -13,7 +13,7 @@ CATALOG = [
     ("speedport", "ISP modem", True),
     ("proxmox", "Proxmox VE", True),
     ("opnsense", "OPNsense", True),
-    ("homeassistant", "Home Assistant", False),
+    ("homeassistant", "Home Assistant", True),
     ("pbs", "Proxmox Backup Server", False),
     ("synology", "Synology NAS", False),
     ("mikrotik", "MikroTik", False),

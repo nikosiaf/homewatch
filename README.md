@@ -6,10 +6,10 @@
 </h1>
 
 A small, self-hosted monitor for your home network, configured from a plain web page.
-homewatch watches **your internet line**, **your provider's DSL modem**, **your Proxmox VE host**
-and **your OPNsense firewall**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
+homewatch watches **your internet line**, **your provider's DSL modem**, **your Proxmox VE host**,
+**your OPNsense firewall** and **Home Assistant**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
 down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy. Later versions add
-one module per release (Home Assistant, Synology, MikroTik, …).
+one module per release (Synology, MikroTik, UniFi, …).
 
 - Runs as a Docker Compose stack on any Linux host (amd64 or arm64)
 - LAN / Tailscale only: it never needs a port open to the internet
@@ -94,6 +94,20 @@ Reads an OPNsense firewall through the API key of a user that has only the statu
 | HAProxy servers | | a health-checked server down |
 | Certificates in use | expires in < 20 days | < 7 days, or expired |
 | Firmware | updates found at the last check, or reboot needed | |
+
+### Home Assistant module (optional)
+
+Reads Home Assistant with the long-lived token of a dedicated **non-admin** user.
+
+| Check | WARNING | ERROR |
+|---|---|---|
+| Core | starting, stopping, or safe / recovery mode | |
+| Unavailable entities (30 min or longer, not ignored) | ≥ 1 | ≥ 10 |
+| Updates (skipped versions don't count) | updates available | |
+| Automatic backups | last success > 26 h ago | > 50 h ago, or the last attempt failed |
+
+Entities that are unavailable when you connect are ignored (you can change the list), so only
+entities that *become* unavailable are reported.
 
 ### Alerts and notifications
 
