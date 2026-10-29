@@ -131,6 +131,9 @@ def test_modules_link_and_page(client):
     assert '<a href="/modules"' in r.text and "<details" not in r.text
     r = client.get("/modules")
     assert 'href="/modules/internet"' in r.text and "ISP modem" in r.text and "UPS (NUT)" in r.text
+    # modules not set up are grey and say Off; none of them claims to be OK
+    assert 'class="tile off" href="/modules/ups"' in r.text and 'class="tile off" href="/modules/pbs"' in r.text
+    assert "checks OK" not in r.text
 
 
 def test_check_now_reports_read_failure(client):

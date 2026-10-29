@@ -35,6 +35,7 @@ h2 { font-size: 17px; margin: 24px 0 10px; }
 .tile { background: var(--card); border: 1px solid var(--line); border-left: 5px solid var(--ok); border-radius: 10px; padding: 12px; }
 .tile.s1 { border-left-color: var(--warn); } .tile.s2 { border-left-color: var(--err); }
 .tile.sup { border-left-color: var(--line); opacity: .75; }
+.tile.off { border-left-color: var(--line); }
 .tile .name { font-weight: 600; } .tile .detail { color: var(--quiet); font-size: 13px; margin-top: 4px; }
 .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; color: #fff; }
 .badge.s0 { background: var(--ok); } .badge.s1 { background: var(--warn); } .badge.s2 { background: var(--err); }

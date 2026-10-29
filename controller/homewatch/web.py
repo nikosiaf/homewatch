@@ -354,7 +354,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
 
     @app.get("/modules")
     async def modules_page(request: Request):
-        return page(request, "modules.html", request.state.user)
+        return page(request, "modules.html", request.state.user, mod_state=_module_states(rt_of(request)))
 
     @app.get("/modules/{mid}")
     async def module_page(request: Request, mid: str):
@@ -860,6 +860,19 @@ async def _ookla_ready(rt, form: dict, user) -> str:
     audit(rt.db, user.username, "ookla", f"installed {OOKLA_VERSION}")
     rt.db.set("ookla.version", OOKLA_VERSION)
     return ""
+
+
+def _module_states(rt) -> dict[str, dict]:
+    """Per module: on/off and, when on, its worst confirmed check status (as on the status page)."""
+    states = {r["check_key"]: r["status"] for r in rt.db.all("SELECT check_key, status FROM check_state WHERE site=?",
+                                                               (rt.cfg.site,))}
+    out = {}
+    for m in MODULES.values():
+        on = m.enabled(m.load(rt))
+        levels = [states.get(r.key, OK) for r in rt.results if r.key.startswith(m.id + ".")] if on else []
+        out[m.id] = {"on": on, "checks": len(levels), "worst": max(levels, default=OK),
+                     "problems": sum(1 for x in levels if x > OK)}
+    return out
 
 
 def _status_ctx(request: Request) -> dict:

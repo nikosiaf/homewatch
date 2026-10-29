@@ -5,8 +5,13 @@
 <p class="quiet">Each module watches one kind of system. Open one to connect it; modules you do not use stay off.</p>
 <div class="tiles">
 {% for id, name, ready in CATALOG %}
-  {% if ready %}<a class="tile" href="/modules/{{ id }}" style="text-decoration:none;color:inherit">
-    <div class="name">{{ name }}</div><div class="detail">Available · configure</div></a>
+  {% set st = mod_state.get(id) %}
+  {% if ready and st %}<a class="tile {{ ('s' ~ st.worst) if st.on else 'off' }}" href="/modules/{{ id }}" style="text-decoration:none;color:inherit">
+    <div class="name">{{ name }}</div>
+    <div class="detail">{% if not st.on %}Off · configure
+      {% elif not st.checks %}On · waiting for the first checks
+      {% elif st.problems %}On · {{ LEVEL_WORD[st.worst] }} · {{ st.problems }} of {{ st.checks }} checks
+      {% else %}On · {{ st.checks }} checks OK{% endif %}</div></a>
   {% else %}<div class="tile sup"><div class="name">{{ name }}</div><div class="detail">Coming soon</div></div>{% endif %}
 {% endfor %}
 </div>
