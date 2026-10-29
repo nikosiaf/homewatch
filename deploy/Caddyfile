@@ -1,6 +1,11 @@
 {
 	admin off
 	auto_https off
+	servers {
+		# behind a reverse proxy on the LAN (e.g. HAProxy): keep the visitor's address, so a login
+		# lockout hits that visitor and not everyone coming through the proxy
+		trusted_proxies static private_ranges
+	}
 }
 
 :80 {
