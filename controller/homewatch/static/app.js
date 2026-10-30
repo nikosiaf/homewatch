@@ -93,12 +93,15 @@ document.querySelectorAll("[data-engine-select]").forEach(function (sel) {
   show();
 });
 
-// Status page: the server remembers which module tiles are open, per user. A click, not the toggle
-// event: that one also fires when a refresh renders a tile open.
+// Status page: one module tile open at a time, and the server remembers it per user. A click, not the
+// toggle event: that one also fires when a refresh renders a tile open.
 document.addEventListener("click", function (e) {
   const summary = e.target.closest ? e.target.closest("details[data-module] > summary") : null;
   if (!summary) return;
   const d = summary.parentElement;
+  d.closest("[data-csrf]").querySelectorAll("details[data-module][open]").forEach(function (other) {
+    if (other !== d) other.open = false;
+  });
   fetch("/status/open", {
     method: "POST", credentials: "same-origin", keepalive: true,
     headers: { "X-CSRF-Token": d.closest("[data-csrf]").dataset.csrf },

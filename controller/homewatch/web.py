@@ -926,7 +926,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
 
     @app.post("/status/open")
     async def status_open(request: Request):
-        """Remember which module tiles this user has open, on any device."""
+        """Remember which module tile this user has open, on any device; one at a time."""
         rt = rt_of(request)
         user = request.state.user
         form = await form_of(request, user)
@@ -935,9 +935,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         mid = form.get("module", "")
         if mid in MODULES:
             key = f"status.open.{user.id}"
-            opened = set(rt.db.get(key) or [])
-            (opened.add if form.get("open") == "1" else opened.discard)(mid)
-            rt.db.set(key, sorted(opened))
+            rt.db.set(key, [mid] if form.get("open") == "1" else [])
         return JSONResponse({"ok": True})
 
     @app.post("/system/updates")
@@ -1031,7 +1029,7 @@ def _status_ctx(request: Request) -> dict:
     errors, warnings = rt.engine.counts()
     sp = MODULES["speedport"]
     user = getattr(request.state, "user", None)
-    return dict(tiles=tiles, tile_groups=groups, open_modules=rt.db.get(f"status.open.{user.id}") or [] if user else [], dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
+    return dict(tiles=tiles, tile_groups=groups, open_modules=(rt.db.get(f"status.open.{user.id}") or [])[:1] if user else [], dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
                 last_run=rt.last_run, last_error=rt.last_error, errors=errors, warnings=warnings,
                 setup_done=rt.db.get("setup.done", False))
 

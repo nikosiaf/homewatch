@@ -685,6 +685,13 @@ def test_status_tiles_stay_open_per_user(client):
     client.post("/status/open", data={"csrf": tok, "module": "ups", "open": "1"}, headers={})
     assert 'data-module="ups" open>' in client.get("/partials/status").text
     assert 'data-module="ups" open>' in client.get("/").text
+    rt.results.append(CheckResult("pbs.api", "PBS", 0, "fine"))
+    client.post("/status/open", data={"csrf": tok, "module": "pbs", "open": "1"})
+    body = client.get("/").text
+    assert 'data-module="pbs" open>' in body and 'data-module="ups" >' in body  # one at a time
+    rt.db.set(f"status.open.{client.rt.db.one('SELECT id FROM users')['id']}", ["pbs", "ups"])  # saved by an older version
+    assert client.get("/").text.count(" open>") == 1
+    client.post("/status/open", data={"csrf": tok, "module": "ups", "open": "1"})
     client.post("/status/open", data={"csrf": tok, "module": "ups", "open": "0"})
     assert 'data-module="ups" >' in client.get("/partials/status").text
     rt.results = []
