@@ -36,7 +36,7 @@ less install.sh          # please read it first; it's short
 
 <h2 id="modules">Modules</h2>
 <p class="quiet">Every module only reads, and all but Internet line start off. Open one for its setup steps and what it checks. The limits shown are the
-  defaults{% if user.is_admin %}; change them under <a href="/checks">Checks</a>{% endif %}.</p>
+  defaults{% if user.is_admin %}; change them on the module's page{% endif %}.</p>
 {% for m in modules %}
 <details class="choices" id="module-{{ m.id }}">
   <summary><b>{{ m.name }}</b></summary>
@@ -61,9 +61,9 @@ less install.sh          # please read it first; it's short
 <div class="card">
   <ul style="margin:0">
     <li><b>Confirmation:</b> a change must hold for 2 runs (about 4 minutes) before it's sent, so short blips stay quiet.</li>
-    <li><b>Reminders:</b> open problems are repeated every 12 hours.</li>
+    <li><b>Reminders:</b> open problems are repeated every 12 hours. Change this, the confirmation and how often checks run under Timing on the Notifications page.</li>
     <li><b>Offline queue:</b> messages that can't be sent while the line is down go out when it's back, with the outage times.</li>
-    <li><b>Snooze:</b> holds one check's notifications for a while, from the Checks page. The history is still recorded.</li>
+    <li><b>Snooze:</b> holds one check's notifications for a while, from Maintenance or next to the problem on Status. The history is still recorded.</li>
     <li><b>Maintenance windows:</b> hold notifications for chosen checks, once or every week.</li>
     <li><b>History:</b> a timeline of every problem and its return to OK, by module, level and period.</li>
   </ul>
@@ -128,6 +128,6 @@ less install.sh          # please read it first; it's short
   <tr><td>"Probe data fresh" is in error</td><td>Check that the Telegraf container is running. If the host's clock jumps at boot, Telegraf stalls: on a Proxmox VM, set "Use local time for RTC" to No.</td></tr>
   <tr><td>The internet checks show nothing</td><td>Check that the Internet line module is enabled and at least one probe is ticked.</td></tr>
   <tr><td>Home Assistant doesn't report an entity</td><td>Only essential entities are read by default. Turn on "Watch every entity" to include the rest; network RX/TX sensors are never reported.</td></tr>
-  <tr><td>A device's check is often down on purpose</td><td>Untick it in the module's lists, or switch the check off under Checks.</td></tr>
+  <tr><td>A device's check is often down on purpose</td><td>Untick it in the module's lists, or switch the check off under Checks and limits on the module's page.</td></tr>
 </table></div>
 {% endblock %}

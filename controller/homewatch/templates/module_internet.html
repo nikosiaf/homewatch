@@ -17,4 +17,5 @@
 </form>
 <h2>Speed tests</h2>
 {% include "_speedtests.html" %}
+{% if configured is not defined or configured %}{% include "_thresholds.html" %}{% endif %}
 {% endblock %}

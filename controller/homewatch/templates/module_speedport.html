@@ -66,4 +66,5 @@ line uptime and resyncs. Values are only read, never changed.</p>
 </form>
 {% if s.enabled %}{% include "_speedport_reading.html" %}{% endif %}
 {% endif %}
+{% if configured is not defined or configured %}{% include "_thresholds.html" %}{% endif %}
 {% endblock %}

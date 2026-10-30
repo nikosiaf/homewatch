@@ -67,4 +67,17 @@
   <p class="row"><button data-save>Save</button>
     <button class="secondary" name="send_now" value="1">Save and send it now</button></p>
 </form>
+<h2>Timing</h2>
+<form method="post" action="/notifications/timing" class="card" id="timing">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="timing">
+  {{ note("timing") }}
+  <div class="row">
+    <div><label for="ti">Run checks every (s)</label><input class="num" id="ti" type="number" name="timing.interval" value="{{ timing.interval | int }}"></div>
+    <div><label for="tc">Confirm after (runs)</label><input class="num" id="tc" type="number" name="timing.confirm" value="{{ timing.confirm | int }}"></div>
+    <div><label for="tr">Remind every (h, 0 = off)</label><input class="num" id="tr" type="number" step="any" name="timing.remind_h" value="{{ timing.remind_h }}"></div>
+    <div><label for="tf">Alert about itself after (failed runs)</label><input class="num" id="tf" type="number" name="timing.fail_alert" value="{{ timing.fail_alert | int }}"></div>
+  </div>
+  <p class="quiet small">Defaults: {{ default_timing.interval }} s · {{ default_timing.confirm }} runs · {{ default_timing.remind_h }} h · {{ default_timing.fail_alert }} runs</p>
+  <button data-save>Save timing</button>
+</form>
 {% endblock %}

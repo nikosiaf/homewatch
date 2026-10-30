@@ -378,7 +378,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return RedirectResponse("/modules", status_code=303)
         template = getattr(m, "template", None) or f"module_{mid}.html"
         return page(request, template, request.state.user, s=m.load(rt), csrf=request.state.user.csrf,
-                    module=m, **m.page_ctx(rt))
+                    module=m, th_rows=thresholds(rt.db, rt.cfg.site, m.id, m.checks),
+                    th_current={r.key: r for r in rt.results}, **m.page_ctx(rt))
 
     @app.post("/modules/{mid}")
     async def module_save(request: Request, mid: str):
@@ -469,57 +470,64 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return speedtests_partial(request)
         return back("/modules/internet", msg="Speed test started; reload in about 20 seconds")
 
-    # -- checks, thresholds, snooze -------------------------------------------------------------
+    # -- checks, limits, timing, snooze ----------------------------------------------------------
     @app.get("/checks")
-    async def checks_page(request: Request):
-        rt = rt_of(request)
-        groups = [(m, thresholds(rt.db, rt.cfg.site, m.id, m.checks)) for m in MODULES.values()
-                  if m.enabled(m.load(rt))]
-        current_vals = {r.key: r for r in rt.results}
-        snoozes = {r["check_key"]: r for r in rt.db.all(
-            "SELECT * FROM snoozes WHERE site=? AND until>? ORDER BY until", (rt.cfg.site, time.time()))}
-        return page(request, "checks.html", request.state.user, groups=groups, current=current_vals, snoozes=snoozes,
-                    csrf=request.state.user.csrf, timing=timing(rt.db), default_timing=DEFAULT_TIMING)
+    async def checks_moved():  # limits are on each module's page now; old bookmarks land on the list
+        return RedirectResponse("/modules", status_code=303)
 
-    @app.post("/checks")
-    async def checks_save(request: Request):
+    @app.post("/modules/{mid}/thresholds")
+    async def thresholds_save(request: Request, mid: str):
+        rt = rt_of(request)
+        user = request.state.user
+        m = MODULES.get(mid)
+        if m is None:
+            return RedirectResponse("/modules", status_code=303)
+        form = await form_of(request, user)
+        here = f"/modules/{mid}"
+        if form is None:
+            return back(here, err="Form expired")
+        changes, rows = [], []
+        old = thresholds(rt.db, rt.cfg.site, m.id, m.checks)
+        for d in m.checks:
+            key = f"{m.id}.{d.id}"
+            enabled = form.get(f"{key}.enabled") == "on"
+            warn = _float(form.get(f"{key}.warn")) if "warn" in d.editable else d.warn
+            error = _float(form.get(f"{key}.error")) if "error" in d.editable else d.error
+            if warn is not None and error is not None and (error > warn if d.lower_is_worse else warn > error):
+                return back(here, err=f"{d.name}: the WARNING level must come before the ERROR level")
+            o = old[d.id]
+            if (o.warn, o.error, o.enabled) != (warn, error, enabled):
+                changes.append(f"{key}: warn {o.warn}→{warn}, error {o.error}→{error}, "
+                               f"enabled {o.enabled}→{enabled}")
+            rows.append((rt.cfg.site, key, int(enabled), warn, error))
+        for row in rows:
+            rt.db.run("INSERT INTO checks(site,check_key,enabled,warn,error) VALUES(?,?,?,?,?) "
+                      "ON CONFLICT(site,check_key) DO UPDATE SET enabled=excluded.enabled, "
+                      "warn=excluded.warn, error=excluded.error", row)
+        if changes:
+            audit(rt.db, user.username, "checks", "; ".join(changes))
+        rt.wake.set()
+        return back(here, msg="Saved")
+
+    @app.post("/notifications/timing")
+    async def timing_save(request: Request):
         rt = rt_of(request)
         user = request.state.user
         form = await form_of(request, user)
         if form is None:
-            return back("/checks", err="Form expired")
-        changes = []
-        for m in MODULES.values():
-            if f"{m.id}.present" not in form:
-                continue  # a module not shown on the page (switched off) keeps its thresholds
-            old = thresholds(rt.db, rt.cfg.site, m.id, m.checks)
-            for d in m.checks:
-                key = f"{m.id}.{d.id}"
-                enabled = form.get(f"{key}.enabled") == "on"
-                warn = _float(form.get(f"{key}.warn")) if "warn" in d.editable else d.warn
-                error = _float(form.get(f"{key}.error")) if "error" in d.editable else d.error
-                if warn is not None and error is not None and (error > warn if d.lower_is_worse else warn > error):
-                    return back("/checks", err=f"{d.name}: the WARNING level must come before the ERROR level")
-                o = old[d.id]
-                if (o.warn, o.error, o.enabled) != (warn, error, enabled):
-                    changes.append(f"{key}: warn {o.warn}→{warn}, error {o.error}→{error}, "
-                                   f"enabled {o.enabled}→{enabled}")
-                rt.db.run("INSERT INTO checks(site,check_key,enabled,warn,error) VALUES(?,?,?,?,?) "
-                          "ON CONFLICT(site,check_key) DO UPDATE SET enabled=excluded.enabled, "
-                          "warn=excluded.warn, error=excluded.error", (rt.cfg.site, key, int(enabled), warn, error))
+            return back("/notifications", err="Form expired")
         t = {}
         for k, lo, hi in (("interval", 30, 3600), ("confirm", 1, 10), ("remind_h", 0, 168), ("fail_alert", 1, 100)):
             v = _float(form.get(f"timing.{k}"))
             if v is None or not lo <= v <= hi:
-                return back("/checks", err=f"{k} must be between {lo} and {hi}")
+                return back("/notifications", err=f"{k} must be between {lo} and {hi}")
             t[k] = v
         if t != timing(rt.db):
-            changes.append(f"timing {timing(rt.db)} → {t}")
+            old = timing(rt.db)
             rt.db.set("engine.timing", t)
-        if changes:
-            audit(rt.db, user.username, "checks", "; ".join(changes))
+            audit(rt.db, user.username, "checks", f"timing {old} → {t}")
         rt.wake.set()
-        return back("/checks", msg="Saved")
+        return back("/notifications", msg="Saved")
 
     @app.post("/checks/run")
     async def checks_run(request: Request):
@@ -532,16 +540,17 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         return back("/", msg=f"Checks ran at {_fmt_ts(rt.last_run, '%H:%M:%S')}. A change still needs "
                              f"{int(timing(rt.db)['confirm'])} runs in a row before it is sent.")
 
-    @app.post("/checks/snooze")
+    @app.post("/maintenance/snooze")
     async def snooze(request: Request):
         rt = rt_of(request)
         user = request.state.user
         form = await form_of(request, user)
+        here = "/" if form and form.get("_from") == "status" else "/maintenance"
         if form is None:
-            return back("/checks", err="Form expired")
+            return back(here, err="Form expired")
         key = form.get("check", "")
         if key not in rt.names():
-            return back("/checks", err="Unknown check")
+            return back(here, err="Unknown check")
         choice = form.get("for", "")
         now = time.time()
         if choice in SNOOZE_CHOICES:
@@ -550,37 +559,39 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             try:
                 until = datetime.fromisoformat(form.get("until", "")).replace(tzinfo=tz(rt.db)).timestamp()
             except ValueError:
-                return back("/checks", err="Pick a duration or a valid time")
+                return back(here, err="Pick a duration or a valid time")
         if until <= now:
-            return back("/checks", err="That time is in the past")
+            return back(here, err="That time is in the past")
         reason = form.get("reason", "")[:200]
         rt.db.run("INSERT INTO snoozes(site,check_key,until,reason,created_by,created) VALUES(?,?,?,?,?,?)",
                   (rt.cfg.site, key, until, reason, user.username, now))
         audit(rt.db, user.username, "snooze", f"{key} until {_fmt_ts(until)} ({reason})")
-        return back("/checks", msg="Snoozed")
+        rt.wake.set()
+        return back(here, msg="Snoozed")
 
-    @app.post("/checks/unsnooze")
+    @app.post("/maintenance/unsnooze")
     async def unsnooze(request: Request):
         rt = rt_of(request)
         user = request.state.user
         form = await form_of(request, user)
         if form is None:
-            return back("/checks", err="Form expired")
+            return back("/maintenance", err="Form expired")
         rt.db.run("UPDATE snoozes SET until=? WHERE site=? AND check_key=? AND until>?",
                   (time.time(), rt.cfg.site, form.get("check", ""), time.time()))
         audit(rt.db, user.username, "unsnooze", form.get("check", ""))
         rt.wake.set()
-        return back("/checks", msg="Snooze ended")
+        return back("/maintenance", msg="Snooze ended")
 
     # -- maintenance -----------------------------------------------------------------------------
     @app.get("/maintenance")
     async def maintenance_page(request: Request):
         rt = rt_of(request)
         rows = rt.db.all("SELECT * FROM maintenance WHERE site=? ORDER BY id DESC", (rt.cfg.site,))
-        # checks to pick from, folded per module like the Checks page (modules in use only)
+        # checks to pick from, folded per module (modules in use only)
         check_groups = [(m.name, [(f"{m.id}.{c.id}", c.name) for c in m.checks]) for m in MODULES.values()
                         if m.enabled(m.load(rt))]
-        return page(request, "maintenance.html", request.state.user, rows=rows, names=rt.names(),
+        snoozes = rt.db.all("SELECT * FROM snoozes WHERE site=? AND until>? ORDER BY until", (rt.cfg.site, time.time()))
+        return page(request, "maintenance.html", request.state.user, rows=rows, names=rt.names(), snoozes=snoozes,
                     check_groups=check_groups, csrf=request.state.user.csrf, now=time.time(), json=json)
 
     @app.post("/maintenance")
@@ -645,6 +656,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                                     "last_ping": rt.db.get(f"heartbeat.{c['id']}.last_ok", 0)})
         queued = rt.db.all("SELECT channel_id, COUNT(*) n, MAX(last_error) e FROM outbox GROUP BY channel_id")
         return page(request, "notifications.html", request.state.user, chans=chans, providers=PROVIDERS,
+                    timing=timing(rt.db), default_timing=DEFAULT_TIMING,
                     coming=COMING_SOON, csrf=request.state.user.csrf,
                     schedule=rt.db.get("report.schedule") or {"weekday": 0, "time": "08:00"},
                     queued={q["channel_id"]: q for q in queued})

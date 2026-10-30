@@ -93,4 +93,5 @@ disk health and backups. Nothing on Proxmox is changed.</p>
 </div>
 {% endif %}
 {% endif %}
+{% if configured is not defined or configured %}{% include "_thresholds.html" %}{% endif %}
 {% endblock %}

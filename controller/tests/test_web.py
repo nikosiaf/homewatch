@@ -62,9 +62,9 @@ def test_first_run_wizard(client):
 
 def test_csrf_required(client):
     tok = setup_admin(client)
-    r = client.post("/checks", data={"csrf": "wrong"})
+    r = client.post("/modules/internet/thresholds", data={"csrf": "wrong"})
     assert "Form expired" in r.text
-    r = client.post("/checks/snooze", data={"check": "internet.loss", "for": "1h"})
+    r = client.post("/maintenance/snooze", data={"check": "internet.loss", "for": "1h"})
     assert "Form expired" in r.text
     assert tok
 
@@ -90,14 +90,13 @@ def test_login_required(client):
 
 def test_thresholds_saved_and_audited(client):
     tok = setup_admin(client)
-    data = {"csrf": tok, "internet.present": "1", "timing.interval": "120", "timing.confirm": "2",
-            "timing.remind_h": "12", "timing.fail_alert": "5"}
+    data = {"csrf": tok}
     for cid in ("fresh", "gateway", "reachable", "loss", "latency", "jitter", "dns", "speed"):
         data[f"internet.{cid}.enabled"] = "on"
     data.update({"internet.loss.warn": "5", "internet.loss.error": "20", "internet.latency.warn": "80",
                  "internet.jitter.warn": "15", "internet.jitter.error": "30", "internet.dns.warn": "500",
                  "internet.speed.warn": "70", "internet.fresh.error": "180"})
-    r = client.post("/checks", data=data)
+    r = client.post("/modules/internet/thresholds", data=data)
     assert "Saved" in r.text
     row = client.rt.db.one("SELECT warn FROM checks WHERE check_key='internet.loss'")
     assert row["warn"] == 5
@@ -115,8 +114,7 @@ def test_speedport_module_settings(client):
     assert "Saved" in r.text
     assert client.rt.secrets.get("module.speedport.password") == "s3cret"
     assert "s3cret" not in client.get("/modules/speedport").text
-    r = client.get("/checks")
-    assert "ISP modem" in r.text and "speedport.snr.warn" in r.text
+    assert "speedport.snr.warn" in client.get("/modules/speedport").text
     assert "DSL sync" in client.get("/").text
 
 
@@ -333,10 +331,33 @@ def test_modem_model_none_removes_it(client):
     assert client.rt.secrets.get("module.speedport.password") is None
 
 
-def test_checks_page_order(client):
-    setup_admin(client)
-    page = client.get("/checks").text
-    assert page.index("<h2>Snooze</h2>") < page.index("<h2>Timing</h2>") < page.index("<h2>Thresholds</h2>")
+def test_checks_menu_is_gone_and_its_parts_moved(client):
+    tok = setup_admin(client)
+    assert 'href="/checks"' not in client.get("/").text
+    assert client.get("/checks").url.path == "/modules"
+    assert 'action="/modules/internet/thresholds"' in client.get("/modules/internet").text
+    assert "/thresholds" not in client.get("/modules/ups").text  # not connected yet: nothing to set
+    r = client.post("/modules/internet/thresholds", data={"csrf": tok, "internet.loss.warn": "60", "internet.loss.error": "50",
+                                                         "internet.loss.enabled": "on"})
+    assert "must come before" in r.text
+    assert 'action="/notifications/timing"' in client.get("/notifications").text
+    r = client.post("/notifications/timing", data={"csrf": tok, "timing.interval": "300", "timing.confirm": "3",
+                                                  "timing.remind_h": "6", "timing.fail_alert": "5"})
+    assert "Saved" in r.text and client.rt.db.get("engine.timing")["interval"] == 300
+    assert "must be between" in client.post("/notifications/timing", data={"csrf": tok, "timing.interval": "1"}).text
+    assert 'action="/maintenance/snooze"' in client.get("/maintenance").text
+    r = client.post("/maintenance/snooze", data={"csrf": tok, "check": "internet.loss", "for": "1h"})
+    assert r.url.path == "/maintenance" and "Snoozed" in r.text and "Packet loss" in r.text
+    r = client.post("/maintenance/unsnooze", data={"csrf": tok, "check": "internet.loss"})
+    assert "Snooze ended" in r.text and "Nothing is snoozed" in r.text
+
+
+def test_snooze_from_a_problem_on_the_status_page(client):
+    tok = setup_admin(client)
+    client.rt.db.run("INSERT INTO issues(site,check_key,level,worst,started,detail) VALUES('home','internet.loss',1,1,1,'x')")
+    assert 'action="/maintenance/snooze"' in client.get("/partials/status").text
+    r = client.post("/maintenance/snooze", data={"csrf": tok, "check": "internet.loss", "for": "4h", "_from": "status"})
+    assert r.url.path == "/" and "Snoozed" in r.text
 
 
 def test_system_health_lists_probes_and_ookla(client):
