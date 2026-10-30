@@ -88,16 +88,24 @@ def record(db: DB, username: str, action: str) -> int | None:
     return vid
 
 
-def restore(db: DB, vid: int, before=None) -> dict | None:
-    """Put version vid's configuration back. Returns its snapshot, or None when it doesn't exist.
-
-    before(snapshot), when given, runs first, may change the snapshot, and returns what to run in its transaction.
-    """
+def load(db: DB, vid: int) -> dict | None:
+    """Version vid's snapshot, without secret fields older versions may hold."""
     row = db.one("SELECT data FROM config_versions WHERE id=?", (vid,))
     if row is None:
         return None
     snap = json.loads(row["data"])
     strip_secret_fields(snap)
+    return snap
+
+
+def restore(db: DB, vid: int, before=None) -> dict | None:
+    """Put version vid's configuration back. Returns its snapshot, or None when it doesn't exist.
+
+    before(snapshot), when given, runs first, may change the snapshot, and returns what to run in its transaction.
+    """
+    snap = load(db, vid)
+    if snap is None:
+        return None
     apply(db, snap, before(snap) if before else None)
     return snap
 
@@ -299,13 +307,17 @@ def clean_import(snap: dict) -> str:
     return ""
 
 
-def same_destination(module, old: dict | None, new: dict | None) -> bool:
-    """Would the module's retained credentials still go to the same place, at least as safely?"""
+def destination_change(module, old: dict | None, new: dict | None) -> str:
+    """Why the module's retained credentials would no longer go to the same place as safely; '' when they would."""
     if old is None or new is None:
-        return old is new
-    if any(old.get(k) != new.get(k) for k in module.destination_keys):
-        return False
-    return not any(old.get(k) and not new.get(k) for k in module.transport_keys)
+        return "" if old is new else ("removed" if new is None else "newly added")
+    for k in module.destination_keys:
+        if old.get(k) != new.get(k):
+            return f"{k} changes from {old.get(k)} to {new.get(k)}"
+    for k in module.transport_keys:
+        if old.get(k) and not new.get(k):
+            return f"{k} is turned off"
+    return ""
 
 
 def write_export(db: DB, folder: str, today: str) -> str:

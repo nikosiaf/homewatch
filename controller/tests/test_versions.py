@@ -2,6 +2,8 @@
 
 import json
 import base64
+import html
+import re
 import time
 
 import pytest
@@ -46,7 +48,7 @@ def test_restore_through_the_system_page(client):  # noqa: F811
     view = client.get(f"/system/versions/{old}")
     assert view.json()["settings"]["home.name"] == "Old name" and "secret" not in view.text.lower()
 
-    r = client.post(f"/system/versions/{old}/restore", data={"csrf": tok})
+    r = client.post(f"/system/versions/{old}/restore", data={"csrf": tok, "current": "a-long-password"})
     assert f"Version {old} restored" in r.text
     db = client.rt.db
     assert db.get("home.name") == "Old name" and db.get("home.tz") == "Europe/Athens"
@@ -54,7 +56,7 @@ def test_restore_through_the_system_page(client):  # noqa: F811
     assert db.one("SELECT username FROM users")["username"] == "admin"
     last = versions.latest(db)
     assert last["action"] == "config.restore" and last["id"] > old  # the restore itself can be undone
-    r = client.post("/system/versions/99999/restore", data={"csrf": tok})
+    r = client.post("/system/versions/99999/restore", data={"csrf": tok, "current": "a-long-password"})
     assert "no longer exists" in r.text
 
 
@@ -95,11 +97,11 @@ def test_export_and_import_through_the_system_page(client):  # noqa: F811
 
     r = client.post("/system/import", data={"csrf": tok}, files={"file": ("x.yaml", b"format: 7", "text/yaml")})
     assert "Nothing imported" in r.text and client.rt.db.get("home.name") == "Changed"
-    r = client.post("/system/import", data={"csrf": tok}, files={"file": ("x.yaml", exported.encode(), "text/yaml")})
+    r = _import(client, tok, exported.encode())
     assert "Imported" in r.text and client.rt.db.get("home.name") == "Exported"
     assert client.rt.db.one("SELECT username FROM users")["username"] == "admin"
     # the settings from before the import are a version that can be restored
-    client.post(f"/system/versions/{before}/restore", data={"csrf": tok})
+    client.post(f"/system/versions/{before}/restore", data={"csrf": tok, "current": "a-long-password"})
     assert client.rt.db.get("home.name") == "Changed"
 
     client.rt.nightly_export(time.time())
@@ -156,7 +158,12 @@ def _export_with(client, change):
 
 
 def _import(client, tok, raw):
-    return client.post("/system/import", data={"csrf": tok}, files={"file": ("x.yaml", raw, "text/yaml")})
+    """Upload, then confirm the preview."""
+    r = client.post("/system/import", data={"csrf": tok}, files={"file": ("x.yaml", raw, "text/yaml")})
+    m = re.search(r'<textarea name="text" hidden>(.*?)</textarea>', r.text, re.S)
+    if not m:
+        return r
+    return client.post("/system/import/apply", data={"csrf": tok, "text": html.unescape(m.group(1)), "current": "a-long-password"})
 
 
 def test_import_to_another_destination_drops_the_credentials(client):  # noqa: F811
@@ -199,7 +206,7 @@ def test_restore_to_another_destination_drops_the_credentials(client):  # noqa: 
     rt.db.set("module.synology", {"enabled": True, "url": "https://new.test:5001", "username": "u", "verify": True})
     versions.record(rt.db, "t", "y")
     rt.secrets.put("module.synology.secret", "pw")
-    client.post(f"/system/versions/{old}/restore", data={"csrf": tok})
+    client.post(f"/system/versions/{old}/restore", data={"csrf": tok, "current": "a-long-password"})
     assert not rt.secrets.has("module.synology.secret")
 
 
@@ -264,6 +271,45 @@ def test_restore_message_tells_what_happened(client):  # noqa: F811
     rt.db.set("module.synology", {"enabled": True, "url": "https://new.test:5001", "username": "u", "verify": True})
     versions.record(rt.db, "t", "y")
     rt.secrets.put("module.synology.secret", "pw")
-    r = client.post(f"/system/versions/{old}/restore", data={"csrf": tok})
+    r = client.post(f"/system/versions/{old}/restore", data={"csrf": tok, "current": "a-long-password"})
     assert "credentials were deleted" in r.text and "left as they are" not in r.text
+
+
+def test_import_preview_changes_nothing_and_says_what_goes(client):  # noqa: F811
+    tok = setup_admin(client)
+    rt = client.rt
+    rt.db.set("module.synology", {"enabled": True, "url": "https://nas.test:5001", "username": "u", "verify": True})
+    rt.secrets.put("module.synology.secret", "pw")
+    raw = _export_with(client, lambda d: d["settings"]["module.synology"].update(url="https://evil.test:5001", verify=False))
+    r = client.post("/system/import", data={"csrf": tok}, files={"file": ("x.yaml", raw, "text/yaml")})
+    assert "Credentials that will be deleted" in r.text and "evil.test" in r.text and "Synology" in r.text
+    assert rt.secrets.has("module.synology.secret") and rt.db.get("module.synology")["url"] == "https://nas.test:5001"
+    text = html.unescape(re.search(r'<textarea name="text" hidden>(.*?)</textarea>', r.text, re.S).group(1))
+    r = client.post("/system/import/apply", data={"csrf": tok, "text": text, "current": "nope"})
+    assert "current password is wrong" in r.text and rt.secrets.has("module.synology.secret")
+    r = client.post("/system/import/apply", data={"csrf": tok, "text": text, "current": "a-long-password"})
+    assert "Imported" in r.text and not rt.secrets.has("module.synology.secret")
+
+
+def test_import_of_the_same_settings_affects_no_credentials(client):  # noqa: F811
+    tok = setup_admin(client)
+    rt = client.rt
+    rt.db.set("module.synology", {"enabled": True, "url": "https://nas.test:5001", "username": "u", "verify": True})
+    rt.secrets.put("module.synology.secret", "pw")
+    r = client.post("/system/import", data={"csrf": tok}, files={"file": ("x.yaml", client.get("/system/export").content, "text/yaml")})
+    assert "No passwords or tokens are affected" in r.text
+
+
+def test_restore_preview_comes_first(client):  # noqa: F811
+    tok = setup_admin(client)
+    rt = client.rt
+    rt.db.set("module.synology", {"enabled": True, "url": "https://old.test:5001", "username": "u", "verify": True})
+    old = versions.record(rt.db, "t", "x")
+    rt.db.set("module.synology", {"enabled": True, "url": "https://new.test:5001", "username": "u", "verify": True})
+    versions.record(rt.db, "t", "y")
+    rt.secrets.put("module.synology.secret", "pw")
+    page = client.get(f"/system/versions/{old}/restore").text
+    assert "old.test" in page and "Credentials that will be deleted" in page and rt.secrets.has("module.synology.secret")
+    r = client.post(f"/system/versions/{old}/restore", data={"csrf": tok})
+    assert "current password is wrong" in r.text and rt.db.get("module.synology")["url"] == "https://new.test:5001"
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -48,6 +49,7 @@ class Runtime:
     last_error: str = ""
     speed_running: bool = False
     dropped: list[str] = field(default_factory=list)  # what the last import or restore cut off from its credentials
+    drop_why: list[str] = field(default_factory=list)
     speed_started: float = 0
     wake: asyncio.Event = field(default_factory=asyncio.Event)
     tasks: list[asyncio.Task] = field(default_factory=list)
@@ -239,13 +241,15 @@ class Runtime:
         """Credentials stay only with the destination they were entered for: when a snapshot changes where one
         goes, or weakens how, switch that module or channel off in the snapshot and return what deletes the
         credential. Run that in the transaction that applies the snapshot, so a failure loses neither."""
-        self.dropped = []
+        self.dropped, self.drop_why = [], []
         forget = []
         for m in MODULES.values():
             key = f"module.{m.id}"
             old, new = self.db.get(key), snap["settings"].get(key)
-            if versions.same_destination(m, old, new) or not any(self.secrets.has(k) for k in m.secret_keys()):
+            why = versions.destination_change(m, old, new)
+            if not why or not any(self.secrets.has(k) for k in m.secret_keys()):
                 continue
+            self.drop_why.append(f"{m.name}: {why}")
             forget.append(lambda m=m: m.forget_credentials(self))
             if new is not None:
                 new["enabled"] = False
@@ -259,10 +263,27 @@ class Runtime:
                 continue
             had = self.secrets.has(channel_secret(cid)) or self.secrets.has(channel_private(cid))
             forget.append(lambda cid=cid: forget_channel(self.secrets, cid))
+            if had:
+                self.drop_why.append(f"{row['name']}: " + ("removed" if c is None else "its server or type changes"))
             if c is not None and had:
                 c["enabled"] = 0
                 self.dropped.append(c["name"])
         return lambda: [f() for f in forget]
+
+    def preview(self, snap: dict) -> dict:
+        """What applying this snapshot would do; changes nothing."""
+        trial = copy.deepcopy(snap)
+        self.guard_credentials(trial)
+        return {"changes": versions.changes(versions.snapshot(self.db), trial), "cleared": list(self.drop_why)}
+
+    def preview_import(self, text: str) -> tuple[dict | None, str]:
+        snap, err = versions.from_yaml(text)
+        err = err or versions.clean_import(snap)
+        return (None, err) if err else (self.preview(snap), "")
+
+    def preview_restore(self, vid: int) -> dict | None:
+        snap = versions.load(self.db, vid)
+        return self.preview(snap) if snap else None
 
     def restore_version(self, vid: int, username: str) -> bool:
         """Put an earlier configuration back and make every part of homewatch use it."""

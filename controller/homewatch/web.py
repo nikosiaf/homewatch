@@ -902,7 +902,27 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
             return back("/system", err="That file is not a text (YAML) file")
-        err = rt.import_config(text, request.state.user.username)
+        plan, err = rt.preview_import(text)
+        if err:
+            return back("/system", err=f"Nothing imported: {err}")
+        return page(request, "config_preview.html", request.state.user, title="Import settings", action="/system/import/apply",
+                    box="backup", text=text, button="Import", csrf=request.state.user.csrf, **plan)
+
+    @app.post("/system/import/apply")
+    async def config_import_apply(request: Request):
+        from . import versions
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/system", err="Form expired")
+        text = str(form.get("text", ""))
+        if len(text.encode()) > versions.MAX_IMPORT:
+            return back("/system", err="That file is too big for a homewatch export")
+        problem = await password_problem(request, user, form)
+        if problem:
+            return back("/system", err=f"Nothing imported: {problem}")
+        err = rt.import_config(text, user.username)
         if err:
             return back("/system", err=f"Nothing imported: {err}")
         return back("/system", msg="Imported. The previous settings are kept as a version. Enter passwords and "
@@ -918,12 +938,25 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         return Response(body, media_type="application/json",
                         headers={"Content-Disposition": f'inline; filename="homewatch-config-v{vid}.json"'})
 
+    @app.get("/system/versions/{vid}/restore")
+    async def version_restore_preview(request: Request, vid: int):
+        rt = rt_of(request)
+        plan = rt.preview_restore(vid)
+        if plan is None:
+            return back("/system", err=f"Version {vid} no longer exists")
+        return page(request, "config_preview.html", request.state.user, title=f"Restore version {vid}",
+                    action=f"/system/versions/{vid}/restore", box="versions", text="", button="Restore",
+                    csrf=request.state.user.csrf, **plan)
+
     @app.post("/system/versions/{vid}/restore")
     async def version_restore(request: Request, vid: int):
         rt = rt_of(request)
         form = await form_of(request, request.state.user)
         if form is None:
             return back("/system", err="Form expired")
+        problem = await password_problem(request, request.state.user, form)
+        if problem:
+            return back("/system", err=problem)
         if not rt.restore_version(vid, request.state.user.username):
             return back("/system", err=f"Version {vid} no longer exists")
         return back("/system", msg=f"Version {vid} restored." + (_dropped_note(rt) or " Passwords and tokens were left as they are."))

@@ -301,7 +301,8 @@ password manager. `HW_MASTER_KEY` decrypts every stored password and token. With
 opens, but modules show `WrongMasterKey` until you enter each credential again.
 
 Run these in the folder that holds `docker-compose.yml`. The backup is encrypted with a passphrase of
-your choice, because it holds users, history and the encrypted secrets:
+your choice, because it holds users, history and the encrypted secrets. It needs `gpg`
+(`sudo apt install gnupg` on Debian):
 
 ```
 docker compose stop controller

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1><a href="/system" class="quiet" style="text-decoration:none">System</a> › {{ title }}</h1>
+<form method="post" action="{{ action }}" class="card narrow">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="{{ box }}">
+  {% if text %}<textarea name="text" hidden>{{ text }}</textarea>{% endif %}
+  <h2 style="margin-top:0">What changes</h2>
+  {% if changes %}<ul>{% for c in changes %}<li>{{ c }}</li>{% endfor %}</ul>
+  {% else %}<p class="quiet">Nothing differs from the current settings.</p>{% endif %}
+  {% if cleared %}
+  <h2 style="color:var(--err)">Credentials that will be deleted</h2>
+  <p>These would otherwise go somewhere new or less safely. Each is deleted and its module or channel switched off, until you enter it again. A later restore doesn't bring them back.</p>
+  <ul>{% for c in cleared %}<li>{{ c }}</li>{% endfor %}</ul>
+  {% else %}<p>No passwords or tokens are affected.</p>{% endif %}
+  <p class="quiet small">The current settings are kept as a version first, so the settings themselves can be put back.</p>
+  <label for="cur">Your current password</label><input id="cur" type="password" name="current" autocomplete="current-password" required>
+  <p class="row"><button class="{{ 'danger' if cleared }}">{{ button }}</button> <a href="/system#{{ box }}">Cancel</a></p>
+</form>
+{% endblock %}
