@@ -671,27 +671,13 @@ def test_help_page_has_every_modules_instructions(client, cfg):
     assert seen.status_code == 200 and "www-ssl" in seen.text and 'href="/modules/ups"' not in seen.text
 
 
-def test_status_tiles_stay_open_per_user(client):
+def test_status_tiles_start_closed(client):
     from homewatch.modules import CheckResult
 
-    tok = setup_admin(client)
+    setup_admin(client)
     rt = client.rt
     rt.results = [CheckResult("ups.load", "Load", 0, "fine")]
     body = client.get("/partials/status").text
-    assert "module-grid" in body and 'data-module="ups" >' in body
+    assert "module-grid" in body and 'data-module="ups">' in body and " open>" not in body
     assert "Show modules as tiles" not in client.get("/system").text
-    assert client.post("/status/open", data={"csrf": "wrong", "module": "ups", "open": "1"}).status_code == 403
-    assert client.post("/status/open", data={"csrf": tok, "module": "nope", "open": "1"}).status_code == 200
-    client.post("/status/open", data={"csrf": tok, "module": "ups", "open": "1"}, headers={})
-    assert 'data-module="ups" open>' in client.get("/partials/status").text
-    assert 'data-module="ups" open>' in client.get("/").text
-    rt.results.append(CheckResult("pbs.api", "PBS", 0, "fine"))
-    client.post("/status/open", data={"csrf": tok, "module": "pbs", "open": "1"})
-    body = client.get("/").text
-    assert 'data-module="pbs" open>' in body and 'data-module="ups" >' in body  # one at a time
-    rt.db.set(f"status.open.{client.rt.db.one('SELECT id FROM users')['id']}", ["pbs", "ups"])  # saved by an older version
-    assert client.get("/").text.count(" open>") == 1
-    client.post("/status/open", data={"csrf": tok, "module": "ups", "open": "1"})
-    client.post("/status/open", data={"csrf": tok, "module": "ups", "open": "0"})
-    assert 'data-module="ups" >' in client.get("/partials/status").text
     rt.results = []

@@ -180,7 +180,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if user is None:
             return RedirectResponse("/login", status_code=303)
         request.state.user = user
-        viewer_ok = path in ("/", "/history", "/help", "/partials/status", "/status/open", "/api/series", "/logout", "/password")
+        viewer_ok = path in ("/", "/history", "/help", "/partials/status", "/api/series", "/logout", "/password")
         if not user.is_admin and not viewer_ok:
             return HTMLResponse("Admins only", status_code=403)
         resp = await call_next(request)
@@ -924,20 +924,6 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/system", err=f"History deleted, but metrics could not be: {warning}")
         return back("/system", msg="History and metrics deleted")
 
-    @app.post("/status/open")
-    async def status_open(request: Request):
-        """Remember which module tile this user has open, on any device; one at a time."""
-        rt = rt_of(request)
-        user = request.state.user
-        form = await form_of(request, user)
-        if form is None:
-            return JSONResponse({"error": "form expired"}, status_code=403)
-        mid = form.get("module", "")
-        if mid in MODULES:
-            key = f"status.open.{user.id}"
-            rt.db.set(key, [mid] if form.get("open") == "1" else [])
-        return JSONResponse({"ok": True})
-
     @app.post("/system/updates")
     async def updates_toggle(request: Request):
         rt = rt_of(request)
@@ -1028,8 +1014,7 @@ def _status_ctx(request: Request) -> dict:
             groups.append((m.id, m.name, mine))
     errors, warnings = rt.engine.counts()
     sp = MODULES["speedport"]
-    user = getattr(request.state, "user", None)
-    return dict(tiles=tiles, tile_groups=groups, open_modules=(rt.db.get(f"status.open.{user.id}") or [])[:1] if user else [], dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
+    return dict(tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
                 last_run=rt.last_run, last_error=rt.last_error, errors=errors, warnings=warnings,
                 setup_done=rt.db.get("setup.done", False))
 

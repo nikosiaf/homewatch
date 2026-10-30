@@ -25,11 +25,11 @@
       <button class="secondary">Snooze</button></form></td>{% endif %}</tr>{% endfor %}
 </table></div>
 {% endif %}
-<div class="module-grid" data-csrf="{{ user.csrf }}">
+<div class="module-grid">
 {% for mod_id, mod_name, mod_tiles in tile_groups %}
 {% set worst = mod_tiles | map(attribute='status') | max %}
 {% set probs = mod_tiles | selectattr('status', 'gt', 0) | list %}
-<details class="module s{{ worst }}" data-module="{{ mod_id }}" {{ 'open' if mod_id in open_modules }}>
+<details class="module s{{ worst }}" data-module="{{ mod_id }}">
   <summary>
     <span class="badge s{{ worst }}">{{ LEVEL_WORD[worst] }}</span>
     <b>{{ mod_name }}</b>

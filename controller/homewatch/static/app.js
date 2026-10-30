@@ -93,21 +93,22 @@ document.querySelectorAll("[data-engine-select]").forEach(function (sel) {
   show();
 });
 
-// Status page: one module tile open at a time, and the server remembers it per user. A click, not the
-// toggle event: that one also fires when a refresh renders a tile open.
-document.addEventListener("click", function (e) {
-  const summary = e.target.closest ? e.target.closest("details[data-module] > summary") : null;
-  if (!summary) return;
-  const d = summary.parentElement;
-  d.closest("[data-csrf]").querySelectorAll("details[data-module][open]").forEach(function (other) {
-    if (other !== d) other.open = false;
+// Status page: one module tile open at a time. It survives the 30 s refresh; loading the page closes it.
+(function () {
+  let openModule = null;
+  document.addEventListener("click", function (e) {
+    const summary = e.target.closest ? e.target.closest("details[data-module] > summary") : null;
+    if (!summary) return;
+    const d = summary.parentElement;
+    document.querySelectorAll("details[data-module][open]").forEach(function (other) {
+      if (other !== d) other.open = false;
+    });
+    openModule = d.open ? null : d.dataset.module;  // the click is about to toggle it
   });
-  fetch("/status/open", {
-    method: "POST", credentials: "same-origin", keepalive: true,
-    headers: { "X-CSRF-Token": d.closest("[data-csrf]").dataset.csrf },
-    body: new URLSearchParams({ module: d.dataset.module, open: d.open ? "0" : "1" }),
+  document.body.addEventListener("htmx:afterSwap", function (e) {
+    e.target.querySelectorAll("details[data-module]").forEach(function (d) { d.open = d.dataset.module === openModule; });
   });
-});
+})();
 
 // Grouped choice lists: the "All" box ticks / unticks its group and follows the group's boxes.
 document.querySelectorAll("[data-choice-group]").forEach(function (d) {
