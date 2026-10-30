@@ -95,6 +95,10 @@ class Module:
     def load(self, rt) -> dict:
         raise NotImplementedError
 
+    def transport(self, rt) -> tuple[str, bool] | None:
+        """How the connection to the device is protected and whether that is good enough; None: it has no device."""
+        return None
+
     def is_set_up(self, rt) -> bool:
         return self.configured(rt) if hasattr(self, "configured") else True
 

@@ -7,6 +7,7 @@ import re
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
 CHECKS = [
@@ -67,7 +68,7 @@ class UniFiModule(ApiModule):
         return out | {"url": url}, ""
 
     async def fetch(self, s, secret, now):
-        async with httpx.AsyncClient(verify=bool(s.get("verify")), timeout=20) as http:  # noqa: S501
+        async with httpx.AsyncClient(verify=verify_for(s, s["url"]), timeout=20) as http:  # noqa: S501
             try:
                 r = await http.post(f"{s['url']}/api/auth/login",
                                     json={"username": s["username"], "password": secret, "rememberMe": False})

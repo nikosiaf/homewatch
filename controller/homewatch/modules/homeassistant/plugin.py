@@ -9,6 +9,7 @@ from datetime import datetime
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
 CHECKS = [
@@ -107,7 +108,7 @@ class HomeAssistantModule(ApiModule):
         return ""
 
     async def fetch(self, s, secret, now):
-        async with httpx.AsyncClient(verify=bool(s.get("verify")), timeout=20,  # noqa: S501
+        async with httpx.AsyncClient(verify=verify_for(s, s["url"]), timeout=20,  # noqa: S501
                                      headers={"Authorization": f"Bearer {secret}"}) as http:
             async def get(path, missing_ok=False):
                 try:

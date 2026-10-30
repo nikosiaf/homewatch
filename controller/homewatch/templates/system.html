@@ -17,6 +17,9 @@
       <tr><td>Ookla Speedtest CLI</td><td>{% if ookla %}<span class="badge s0">installed</span> <span class="quiet small">{{ ookla }}</span>
         {% else %}<span class="quiet">not installed (only needed for the Ookla engine)</span>{% endif %}</td></tr>
     </table>
+    {% if connections %}<h3>Connections to devices</h3>
+    <table>{% for name, how, good in connections %}<tr><td>{{ name }}</td>
+      <td>{% if good %}{{ how }}{% else %}<span style="color:var(--err)">{{ how }}</span>{% endif %}</td></tr>{% endfor %}</table>{% endif %}
     {% if update %}<p>To update: set <code>HW_VERSION={{ update }}</code> in <code>.env</code>, then
       <code>docker compose pull && docker compose up -d</code>.</p>{% endif %}
     <form method="post" action="/system/updates">

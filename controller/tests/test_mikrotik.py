@@ -91,12 +91,13 @@ def test_https_with_certificate_check_is_the_default(monkeypatch):
     assert defaults["https"] is True and defaults["verify"] is True
     seen = _client_kwargs(monkeypatch)
     s = {"devices": "192.0.2.1", "username": "u", "https": True, "verify": True}
-    for over, verify in (({}, True), ({"verify": False}, False), ({"https": False}, False)):
+    for over, checked in (({}, True), ({"verify": False}, False)):
         try:
             asyncio.run(m.fetch(s | over, "p", 0))
         except ApiError:
             pass
-        assert seen["verify"] is verify
+        assert (seen["verify"] is True) is checked
+        assert seen["verify"] is not False  # never an unchecked connection: unticked means pinned
     assert "unencrypted" in m.notice({"https": False}) and m.notice({"https": True}) == ""
 
 

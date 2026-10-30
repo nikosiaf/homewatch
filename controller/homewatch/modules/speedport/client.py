@@ -13,16 +13,16 @@ self-signed and can't be checked any other way. Redirects are refused, so the lo
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import re
-import ssl
 import time
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
 import httpx
+
+from ..pinning import fetch_certificate, fingerprint, pinned_context  # noqa: F401 - the module uses these through client
 
 LINE, CHAN = "Device.DSL.Line.1.", "Device.DSL.Channel.1."
 # TR-181 parameter -> (field, scale). Rates in kbit/s; margins, attenuation and power in 0.1 dB(m).
@@ -81,25 +81,6 @@ def parse(results: dict) -> Reading:
     return r
 
 
-async def fetch_certificate(host: str, timeout: float = 10) -> str:
-    """The certificate the modem presents now, as PEM. Unverified, and no login is sent."""
-    return await asyncio.to_thread(ssl.get_server_certificate, (host, 443), timeout=timeout)
-
-
-def fingerprint(pem: str) -> str:
-    digest = hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest().upper()
-    return ":".join(digest[i:i + 2] for i in range(0, len(digest), 2))
-
-
-def _pinned(pem: str) -> ssl.SSLContext:
-    """Trust this one certificate and nothing else. Its name is not checked: modems share a generic one."""
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.check_hostname = False
-    ctx.verify_flags |= ssl.VERIFY_X509_PARTIAL_CHAIN
-    ctx.load_verify_locations(cadata=pem)
-    return ctx
-
-
 async def _refuse_redirect(response: httpx.Response) -> None:
     if response.is_redirect:
         raise RedirectRefused(f"the modem answered {response.url.path} with a redirect")
@@ -117,7 +98,7 @@ async def read(host: str, user: str, password: str, cert: str, timeout: float = 
 
 async def _read(host: str, user: str, password: str, cert: str, timeout: float) -> Reading:
     base = f"https://{host}/"
-    async with httpx.AsyncClient(verify=_pinned(cert), timeout=timeout, follow_redirects=False,
+    async with httpx.AsyncClient(verify=pinned_context(cert), timeout=timeout, follow_redirects=False,
                                  event_hooks={"response": [_refuse_redirect]},
                                  headers={"User-Agent": "homewatch", "Referer": base + "login.html"}) as http:
         tok = _csrf((await http.get(base + "login.html")).text)

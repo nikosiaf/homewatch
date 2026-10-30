@@ -82,6 +82,12 @@ class UPSModule(ApiModule):
         Field("ups", "UPS name", "leave empty for the first one", default=""),
     ]
 
+    def tls_hosts(self, settings):
+        return []
+
+    def transport(self, rt):
+        return "NUT, unencrypted; only reads, with no login", True
+
     def validate(self, form, old):
         out, err = super().validate(form, old)
         if err:

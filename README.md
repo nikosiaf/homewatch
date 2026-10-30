@@ -296,8 +296,29 @@ thresholds, timing, channels, maintenance windows; no passwords, tokens or users
 writes one every night into the data volume (`exports/`, last 14 kept). Importing a file replaces
 the settings; the previous ones stay under Configuration versions, so an import can be undone.
 
-Keep a copy of `.env`. Without `HW_MASTER_KEY` the saved tokens can't be decrypted, so you would
-enter them again.
+**Full backup and recovery:** keep a copy of `.env` somewhere other than this host, such as a
+password manager. `HW_MASTER_KEY` decrypts every stored password and token. Without it the data still
+opens, but modules show `WrongMasterKey` until you enter each credential again.
+
+Run these in the folder that holds `docker-compose.yml`. The backup is encrypted with a passphrase of
+your choice, because it holds users, history and the encrypted secrets:
+
+```
+docker compose stop controller
+docker run --rm -v homewatch_hw-data:/data:ro alpine tar czf - -C /data . | gpg -c -o homewatch-data.tar.gz.gpg
+docker compose start controller
+```
+
+To restore, on the same or a new host, with the original `.env` in place:
+
+```
+docker compose create
+gpg -d homewatch-data.tar.gz.gpg | docker run --rm -i -v homewatch_hw-data:/data alpine tar xzf - -C /data
+docker compose up -d
+```
+
+Metrics (`homewatch_vm-data`) can be copied the same way, with `victoriametrics` stopped. Without them,
+charts start empty but settings and history are intact.
 
 ## Ookla speed test (optional)
 
@@ -318,7 +339,12 @@ allow redistribution. **System → Health** shows the installed version.
 - **Secrets:** tokens and URLs are encrypted at rest (AES-GCM, key from `.env`) and never shown
   again after saving.
 - **Logins:** passwords are hashed with Argon2. Sessions use HttpOnly, Secure, SameSite=Strict
-  cookies. Every form is CSRF-protected, and logins lock for 5 minutes after 5 failures.
+  cookies, and the database holds only hashes of session tokens. Every form is CSRF-protected, and
+  logins lock for 5 minutes after 5 failures from one address or 20 on one account.
+- **Device certificates:** with "Check the HTTPS certificate" unticked, homewatch pins the certificate
+  it sees first and logs in only to that one. That first connection can't tell an impostor from the
+  device, so compare the fingerprint on the module's page with the device. System lists how each
+  device connection is protected.
 - **Containers:** image versions are pinned, and the controller runs as a non-root user on a
   read-only filesystem.
 

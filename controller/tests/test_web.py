@@ -400,6 +400,83 @@ def test_sessions_are_stored_as_hashes(client):
     assert stored != token and client.app.state.auth.session(token) and not client.app.state.auth.session(stored)
 
 
+async def test_module_pins_first_certificate_and_refuses_a_change(client, tmp_path):
+    from homewatch.modules.apibase import why
+    from homewatch.modules.pinning import fingerprint, verify_for
+    import httpx
+
+    from .test_speedport import CERT_A, CERT_B, FakeModem, KEY_A
+
+    setup_admin(client)
+    rt, m = client.rt, MODULES["synology"]
+    ok = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    async with FakeModem(tmp_path, ok, CERT_A, KEY_A) as dev:
+        url = f"https://127.0.0.1:{dev.port}"
+        s = await m.pin_settings(rt, {"url": url, "verify": False})
+        hp = f"127.0.0.1:{dev.port}"
+        assert fingerprint(m.pins(rt)[hp]["cert"]) == fingerprint(CERT_A)
+        assert rt.db.one("SELECT 1 FROM audit WHERE detail LIKE 'trusting the certificate%'")
+        async with httpx.AsyncClient(verify=verify_for(s, url)) as http:
+            assert (await http.get(url)).status_code == 200
+        # the device now shows another certificate: refused before anything is sent
+        pins = m.pins(rt)
+        pins[hp]["cert"] = CERT_B
+        rt.db.set(f"tls.{m.id}", pins)
+        s = await m.pin_settings(rt, {"url": url, "verify": False})
+        dev.received = b""
+        async with httpx.AsyncClient(verify=verify_for(s, url)) as http:
+            with pytest.raises(httpx.ConnectError) as e:
+                await http.get(url)
+        assert dev.received == b"" and "changed since" in why(e.value)
+        await m.note_changes(rt, {"url": url}, why(e.value))
+        row = m.cert_rows(rt)[0]
+        assert row["new_fp"] == fingerprint(CERT_A)
+        assert m.trust_certificate(rt, hp, "AA", type("U", (), {"username": "a"})())
+        assert not m.trust_certificate(rt, hp, row["new_fp"], type("U", (), {"username": "a"})())
+        assert m.pins(rt)[hp] == {"cert": CERT_A}
+
+
+def test_trust_button_and_connections_list(client):
+    from homewatch.modules.pinning import fingerprint
+
+    from .test_speedport import CERT_A, CERT_B
+
+    tok = setup_admin(client)
+    rt = client.rt
+    rt.db.set("module.synology", {"enabled": True, "url": "https://nas.test:5001", "username": "u", "verify": False})
+    rt.db.set("module.homeassistant", {"enabled": True, "url": "http://ha.test:8123", "verify": False})
+    rt.db.set("tls.synology", {"nas.test:5001": {"cert": CERT_A, "new": CERT_B}})
+    page = client.get("/modules/synology").text
+    assert fingerprint(CERT_B) in page and "Trust the new certificate" in page
+    r = client.post("/modules/synology/trust-certificate", data={"csrf": tok, "host": "nas.test:5001", "fingerprint": fingerprint(CERT_B)})
+    assert "New certificate trusted" in r.text and rt.db.get("tls.synology")["nas.test:5001"] == {"cert": CERT_B}
+    page = client.get("/system").text
+    assert "HTTPS, certificate pinned" in page and "Plain HTTP" in page
+
+
+def test_changed_destination_forgets_the_pin_and_pins_stay_out_of_exports(client):
+    from homewatch import versions
+
+    from .test_speedport import CERT_A
+
+    setup_admin(client)
+    rt = client.rt
+    rt.db.set("tls.synology", {"nas.test:5001": {"cert": CERT_A}})
+    assert "tls.synology" not in versions.snapshot(rt.db)["settings"]
+    MODULES["synology"].forget_credentials(rt)
+    assert rt.db.get("tls.synology") is None
+
+
+def test_wrong_master_key_is_named(db):
+    import os as _os
+
+    from homewatch.secrets import Secrets, WrongMasterKey
+
+    Secrets(db, _os.urandom(32)).put("x", "y")
+    with pytest.raises(WrongMasterKey):
+        Secrets(db, _os.urandom(32)).get("x")
+
+
 def test_message_lands_in_its_box(client):
     tok = setup_admin(client)
     r = client.post("/system/home", data={"csrf": tok, "_box": "home", "name": "H", "tz": "UTC"},

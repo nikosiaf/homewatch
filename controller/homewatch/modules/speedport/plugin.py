@@ -58,6 +58,11 @@ class SpeedportModule(Module):
     def is_set_up(self, rt) -> bool:
         return rt.db.get(KEY) is not None
 
+    def transport(self, rt):
+        if self.state(rt).get("cert"):
+            return "HTTPS, certificate pinned", True
+        return "HTTPS, certificate not pinned yet", False
+
     def reading_ts(self, rt) -> float | None:
         return self.state(rt).get("last_ok")
 

@@ -109,6 +109,15 @@ less install.sh          # please read it first; it's short
     and tokens can't be decrypted and you would enter them again.</p>
 </div>
 
+<h2 id="recovery">Backup and recovery</h2>
+<div class="card">
+  <ul style="margin:0">
+    <li><code>HW_MASTER_KEY</code> in <code>.env</code> decrypts every stored password and token. Keep a copy somewhere other than this host, such as a password manager.</li>
+    <li>Without that key the data still opens, but no stored credential can be read: modules show "WrongMasterKey" until you enter each credential again.</li>
+    <li>The README has the commands to back up and restore.</li>
+  </ul>
+</div>
+
 <h2 id="numbers">How to read the numbers</h2>
 <div class="card">
   <ul style="margin:0">
@@ -123,8 +132,9 @@ less install.sh          # please read it first; it's short
   <ul style="margin:0">
     <li>Don't forward homewatch to the internet. Use it on your LAN or over a VPN such as Tailscale.</li>
     <li>Give each module a dedicated read-only account, as its setup steps describe.</li>
-    <li>Keep "Check the HTTPS certificate" on when the device has a trusted certificate. Without it, someone on your network could
-      pose as the device and capture its login.</li>
+    <li>Keep "Check the HTTPS certificate" on when the device has a trusted certificate. For a self-signed one, untick it: homewatch trusts
+      the certificate it sees at the first connection and logs in only to that one. Check the fingerprint on the module's page against the device.
+      System lists how every device connection is protected.</li>
     <li>Secrets, including ntfy topic and healthchecks.io ping addresses, are encrypted at rest, never shown again after saving and
       left out of exports. Passwords are hashed with Argon2. Logins lock for 5 minutes after 5 failures from one address, or 20 on one account.</li>
     <li>Adding or removing a user and deleting data ask for your password again. Sessions are stored only as hashes, so a copy of the database can't be used to log in.</li>

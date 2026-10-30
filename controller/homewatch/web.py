@@ -520,6 +520,15 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         err = MODULES["speedport"].trust_new_certificate(rt_of(request), str(form.get("fingerprint", "")), request.state.user)
         return back("/modules/speedport", err=err) if err else back("/modules/speedport", msg="New certificate trusted")
 
+    @app.post("/modules/{mid}/trust-certificate")
+    async def module_trust_certificate(request: Request, mid: str):
+        m = MODULES.get(mid)
+        form = await form_of(request, request.state.user)
+        if form is None or not hasattr(m, "trust_certificate"):
+            return back(f"/modules/{mid}" if m else "/modules", err="Form expired, please try again")
+        err = m.trust_certificate(rt_of(request), str(form.get("host", "")), str(form.get("fingerprint", "")), request.state.user)
+        return back(f"/modules/{mid}", err=err) if err else back(f"/modules/{mid}", msg="New certificate trusted")
+
     def speedtests_partial(request: Request, note: str = "", note_err: bool = False):
         rt = rt_of(request)
         m = MODULES["internet"]
@@ -854,7 +863,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                     roles=ROLES, tzname=rt.db.get("home.tz") or "UTC", zones=sorted(available_timezones()),
                     home_name=rt.db.get("home.name") or "Home", home_url=rt.db.get("home.url") or "",
                     probe_age=_probe_age(rt), ookla=_ookla_version(rt), versions=version_rows,
-                    exports=_exports(rt))
+                    exports=_exports(rt), connections=[(m.name, *t) for m in MODULES.values()
+                                                       if m.is_set_up(rt) and (t := m.transport(rt))])
 
     @app.get("/system/export")
     async def config_export(request: Request):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Field, Table, https_url
 
 CHECKS = [
@@ -63,7 +64,7 @@ class SynologyModule(ApiModule):
 
     async def fetch(self, s, secret, now):
         entry = f"{s['url']}/webapi/entry.cgi"
-        async with httpx.AsyncClient(verify=bool(s.get("verify")), timeout=20) as http:  # noqa: S501
+        async with httpx.AsyncClient(verify=verify_for(s, s["url"]), timeout=20) as http:  # noqa: S501
             async def call(api: str, method: str, version: int, sid: str | None = None, optional=False, **params):
                 p = {"api": api, "method": method, "version": version, **params}
                 if sid:

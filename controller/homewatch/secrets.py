@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import os
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .db import DB
+
+
+class WrongMasterKey(Exception):
+    """A secret can't be decrypted: HW_MASTER_KEY is not the key it was saved with."""
 
 
 class Secrets:
@@ -31,7 +36,10 @@ class Secrets:
         if row is None:
             return None
         blob = bytes(row["value"])
-        return self.aes.decrypt(blob[:12], blob[12:], name.encode()).decode()
+        try:
+            return self.aes.decrypt(blob[:12], blob[12:], name.encode()).decode()
+        except InvalidTag:
+            raise WrongMasterKey(f"{name} can't be decrypted: is HW_MASTER_KEY the original one?") from None
 
     def has(self, name: str) -> bool:
         return self.db.one("SELECT 1 FROM secrets WHERE name=?", (name,)) is not None

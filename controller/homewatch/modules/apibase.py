@@ -20,18 +20,21 @@ from urllib.parse import urlsplit
 
 from ..auth import audit
 from . import ERROR, OK, CheckDef, CheckResult, Module, Thresholds
+from .pinning import CHANGED, PinnedTLS
 
 
 class ApiError(Exception):
     pass
 
 
-SELF_SIGNED = ("Untick only for a self-signed certificate: homewatch then can't tell the real device from an impostor "
-               "on your network, and would send it the login.")
+SELF_SIGNED = ("Untick for a self-signed certificate: homewatch then trusts the certificate it sees now and logs in only "
+               "to that one. If it ever changes, homewatch stops logging in until you accept the new one.")
 
 
 def why(e: Exception) -> str:
     """A connection failure in words; a rejected certificate is one the admin can act on."""
+    if CHANGED in str(e):
+        return "its certificate changed since homewatch first trusted it; accept the new one on the module's page if you expected that"
     if "CERTIFICATE_VERIFY_FAILED" in str(e):
         return "its HTTPS certificate isn't trusted; install a trusted one, or untick \"Check the HTTPS certificate\""
     return type(e).__name__
@@ -75,7 +78,7 @@ def https_url(value: str, default_port: int | None = None, allow_http: bool = Fa
     return f"{p.scheme}://{p.hostname}" + (f":{port}" if port else "")
 
 
-class ApiModule(Module):
+class ApiModule(PinnedTLS, Module):
     fields: list[Field] = []
     secret_label = ""  # empty: no secret
     secret_placeholder = ""
@@ -110,6 +113,10 @@ class ApiModule(Module):
 
     def enabled(self, settings: dict) -> bool:
         return bool(settings.get("_configured", True)) and bool(settings.get("enabled"))
+
+    def forget_credentials(self, rt) -> None:
+        super().forget_credentials(rt)
+        self.forget_pins(rt)
 
     def secret_keys(self) -> list[str]:
         return [self.secret_key] + [self.field_secret_key(f) for f in self.fields if f.secret]
@@ -189,10 +196,13 @@ class ApiModule(Module):
     async def readings(self, rt, settings, now):
         if self.snap is None or now - self.snap_ts >= self.every:
             try:
-                self.snap = await self.fetch(self.with_secret_fields(rt, settings), rt.secrets.get(self.secret_key) or "", now)
+                full = await self.pin_settings(rt, self.with_secret_fields(rt, settings))
+                self.snap = await self.fetch(full, rt.secrets.get(self.secret_key) or "", now)
                 self.snap_ts, self.error = now, ""
+                await self.note_changes(rt, settings, " ".join(map(str, self.snap.get("errors", {}).values())))
             except ApiError as e:
                 self.snap, self.error = None, str(e)
+                await self.note_changes(rt, settings, str(e))
         return (settings, self.snap, self.error, now)
 
     def evaluate(self, settings, th, readings):
@@ -236,8 +246,9 @@ class ApiModule(Module):
         turning_off = self.configured(rt) and "enabled" not in form
         if not turning_off:
             try:
-                snap = await self.fetch(full, secret, time.time())
+                snap = await self.fetch(await self.pin_settings(rt, full), secret, time.time())
             except ApiError as e:
+                await self.note_changes(rt, full, str(e))
                 return f"Nothing saved: {e}"
             self.snap, self.snap_ts, self.error = snap, time.time(), ""
             form["_default_chosen"] = json.dumps(self.default_chosen(snap))
@@ -247,6 +258,7 @@ class ApiModule(Module):
     def save(self, rt, form: dict, user) -> str:
         if form.get("remove"):
             rt.db.run("DELETE FROM settings WHERE key=?", (self.key,))
+            self.forget_pins(rt)
             rt.secrets.delete(self.secret_key)
             for f in self.fields:
                 if f.secret:
@@ -296,7 +308,7 @@ class ApiModule(Module):
         snap = self.snap
         chosen, skipped = set(s.get("chosen", [])), set(s.get("skipped", []))
         filters = self.filters(snap) if snap and self.filter_title else []
-        return {"filters": [(c, c.value not in skipped and f"group:{c.group}" not in skipped) for c in filters],
+        return {"cert_rows": self.cert_rows(rt), "filters": [(c, c.value not in skipped and f"group:{c.group}" not in skipped) for c in filters],
                 "skipped": skipped, "read_every": f"{every / 60:.0f} min" if every >= 60 else f"{every:.0f} s",
                 "filters_shown": json.dumps([c.value for c in filters]),"configured": self.configured(rt), "has_secret": rt.secrets.has(self.secret_key), "notice": self.notice(s) if self.configured(rt) else "",
                 "secret_fields_set": {f.key: rt.secrets.has(self.field_secret_key(f)) for f in self.fields if f.secret},

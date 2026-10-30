@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
 from homewatch.modules import ERROR, OK, WARNING, Thresholds
+from homewatch.modules.pinning import pinned_context
 from homewatch.modules.speedport import client
 from homewatch.modules.speedport.checks import CHECKS, State, evaluate
 
@@ -29,10 +30,10 @@ RESULTS = {
 }
 
 
-def self_signed():
+def self_signed(age_days=0):
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "modem")])
-    now = datetime.datetime.now(datetime.UTC)
+    now = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=age_days)
     cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
             .serial_number(x509.random_serial_number()).not_valid_before(now - datetime.timedelta(days=1))
             .not_valid_after(now + datetime.timedelta(days=1))
@@ -43,15 +44,16 @@ def self_signed():
 
 
 CERT_A, KEY_A = self_signed()
+EXPIRED_CERT, EXPIRED_KEY = self_signed(age_days=30)
 CERT_B, _ = self_signed()
 
 
 class FakeModem:
     """A real TLS listener on 127.0.0.1 presenting CERT_A; records everything it receives."""
 
-    def __init__(self, tmp_path, answer):
+    def __init__(self, tmp_path, answer, cert=CERT_A, key=KEY_A):
         self.answer, self.received, self.path = answer, b"", tmp_path / "modem.pem"
-        self.path.write_text(CERT_A + KEY_A)
+        self.path.write_text(cert + key)
 
     async def handle(self, reader, writer):
         self.received += await reader.readuntil(b"\r\n\r\n")
@@ -98,6 +100,16 @@ async def test_redirect_at_login_is_not_followed():
     with pytest.raises(client.RedirectRefused):
         await client.read("modem.test", "admin", "pw", CERT_A)
     assert not elsewhere.called
+
+
+async def test_pinned_expired_certificate_keeps_working(tmp_path):
+    ok = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    async with FakeModem(tmp_path, ok, EXPIRED_CERT, EXPIRED_KEY) as modem:
+        async with httpx.AsyncClient(verify=pinned_context(EXPIRED_CERT)) as http:
+            assert (await http.get(f"https://127.0.0.1:{modem.port}/")).status_code == 200
+        async with httpx.AsyncClient(verify=pinned_context(None)) as http:  # no pin: refused
+            with pytest.raises(httpx.ConnectError):
+                await http.get(f"https://127.0.0.1:{modem.port}/")
 
 
 def test_fingerprint_format():

@@ -7,6 +7,7 @@ import re
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, level
+from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
 CHECKS = [
@@ -81,7 +82,7 @@ class OPNsenseModule(ApiModule):
         return out | {"url": url}, ""
 
     async def fetch(self, s, secret, now):
-        async with httpx.AsyncClient(verify=bool(s.get("verify")), timeout=15,  # noqa: S501 - self-signed GUI
+        async with httpx.AsyncClient(verify=verify_for(s, s["url"]), timeout=15,  # noqa: S501 - self-signed GUI
                                      auth=(s["api_key"], secret)) as http:
             async def get(path: str, optional: bool = False):
                 try:

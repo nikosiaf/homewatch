@@ -7,6 +7,7 @@ import re
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
 CHECKS = [
@@ -64,7 +65,7 @@ class PBSModule(ApiModule):
 
     async def fetch(self, s, secret, now):
         headers = {"Authorization": f"PBSAPIToken={s['token_id']}:{secret}"}
-        async with httpx.AsyncClient(verify=bool(s.get("verify")), timeout=20, headers=headers) as http:  # noqa: S501
+        async with httpx.AsyncClient(verify=verify_for(s, s["url"]), timeout=20, headers=headers) as http:  # noqa: S501
             async def get(path, optional=False, **params):
                 try:
                     r = await http.get(f"{s['url']}/api2/json/{path}", params=params or None)

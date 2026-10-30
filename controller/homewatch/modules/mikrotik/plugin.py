@@ -7,6 +7,7 @@ import re
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from ..pinning import host_port, verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table
 
 ERROR_WINDOW = 3600  # port errors are counted over the last hour
@@ -86,12 +87,14 @@ class MikroTikModule(ApiModule):
             return "Plain HTTP: the password crosses your network unencrypted at every read. Enable www-ssl and tick Use HTTPS."
         return ""
 
+    def tls_hosts(self, settings):
+        return [host_port(h) for h in hosts(settings.get("devices", ""))] if settings.get("https") else []
+
     async def fetch(self, s, secret, now):
         scheme = "https" if s.get("https") else "http"
         devices, errors = [], {}
-        async with httpx.AsyncClient(verify=bool(s.get("https") and s.get("verify")), timeout=10,  # noqa: S501
-                                     auth=(s["username"], secret)) as http:
-            for host in hosts(s["devices"]):
+        for host in hosts(s["devices"]):  # one connection each: every device has its own certificate
+            async with httpx.AsyncClient(verify=verify_for(s, host), timeout=10, auth=(s["username"], secret)) as http:
                 try:
                     devices.append(await self._device(http, f"{scheme}://{host}/rest", host))
                 except ApiError as e:

@@ -48,7 +48,7 @@ def parse_vzdump_log(lines: list[str]) -> dict[int, str]:
 
 
 class Client:
-    def __init__(self, url: str, token_id: str, secret: str, verify: bool = False, timeout: float = 15):
+    def __init__(self, url: str, token_id: str, secret: str, verify=False, timeout: float = 15):
         self.base = url.rstrip("/") + "/api2/json"
         self.http = httpx.AsyncClient(verify=verify, timeout=timeout,  # noqa: S501 - self-signed is the norm
                                       headers={"Authorization": f"PVEAPIToken={token_id}={secret}"})

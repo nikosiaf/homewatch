@@ -6,6 +6,7 @@ import time
 from urllib.parse import urlsplit
 
 from ...auth import audit
+from ..pinning import PinnedTLS, host_port, verify_for
 from .. import Module
 from . import checks
 from .client import ApiError, Client, Snapshot
@@ -32,7 +33,7 @@ def normalize_url(url: str) -> str:
     return f"https://{parts.hostname}:{port}"
 
 
-class ProxmoxModule(Module):
+class ProxmoxModule(PinnedTLS, Module):
     id = checks.MODULE
     name = "Proxmox VE"
     description = ("Watches a Proxmox VE host or cluster through a read-only API token: nodes, guests, storage, disk "
@@ -62,17 +63,19 @@ class ProxmoxModule(Module):
     def enabled(self, settings: dict) -> bool:
         return bool(settings.get("url")) and settings.get("enabled", True)
 
-    def _client(self, rt, s) -> Client:
+    async def _client(self, rt, s) -> Client:
         secret = rt.secrets.get(SECRET) or ""
-        key = (s["url"], s["token_id"], secret, s["verify"])
+        full = await self.pin_settings(rt, s)
+        pin = self.pins(rt).get(host_port(s["url"]), {}).get("cert")
+        key = (s["url"], s["token_id"], secret, s["verify"], pin)
         if self.client is None or self.client_key != key:
-            self.client, self.client_key = Client(s["url"], s["token_id"], secret, s["verify"]), key
+            self.client, self.client_key = Client(s["url"], s["token_id"], secret, verify_for(full, s["url"])), key
         return self.client
 
     async def read(self, rt, s, now: float) -> None:
         try:
             with_disks = now - self.disks_ts >= DISK_EVERY
-            snap = await self._client(rt, s).snapshot(with_disks=with_disks, now=now)
+            snap = await (await self._client(rt, s)).snapshot(with_disks=with_disks, now=now)
             if with_disks:
                 self.disks_ts = now
             elif self.snap:
@@ -80,6 +83,7 @@ class ProxmoxModule(Module):
             self.snap, self.snap_ts, self.error = snap, now, ""
         except ApiError as e:
             self.snap, self.error = None, str(e)
+            await self.note_changes(rt, s, str(e))
 
     async def readings(self, rt, settings, now):
         await self.read(rt, settings, now)
@@ -88,8 +92,9 @@ class ProxmoxModule(Module):
     def evaluate(self, settings, thresholds, readings):
         return checks.evaluate(settings, thresholds, readings)
 
-    async def test(self, url: str, token_id: str, secret: str, verify: bool) -> tuple[Snapshot | None, str]:
-        c = Client(url, token_id, secret, verify)
+    async def test(self, rt, url: str, token_id: str, secret: str, verify: bool) -> tuple[Snapshot | None, str]:
+        s = await self.pin_settings(rt, {"url": url, "verify": verify})
+        c = Client(url, token_id, secret, verify_for(s, url))
         try:
             return await c.snapshot(with_disks=False), ""
         except ApiError as e:
@@ -112,14 +117,19 @@ class ProxmoxModule(Module):
         if not secret:
             return "Enter the token secret"
         if "enabled" in form or not self.configured(rt):
-            snap, err = await self.test(url, token_id, secret, form.get("verify") == "on")
+            snap, err = await self.test(rt, url, token_id, secret, form.get("verify") == "on")
             if err:
+                await self.note_changes(rt, {"url": url}, err)
                 return f"Nothing saved: {err}"
             self.snap, self.snap_ts, self.error = snap, time.time(), ""
         return ""
 
     def secret_keys(self) -> list[str]:
         return [SECRET]
+
+    def forget_credentials(self, rt) -> None:
+        super().forget_credentials(rt)
+        self.forget_pins(rt)
 
     def imported(self, settings: dict) -> tuple[dict, str]:
         url = settings.get("url")
@@ -135,6 +145,7 @@ class ProxmoxModule(Module):
     def save(self, rt, form: dict, user) -> str:
         if form.get("remove"):
             rt.db.run("DELETE FROM settings WHERE key=?", (KEY,))
+            self.forget_pins(rt)
             rt.secrets.delete(SECRET)
             self.client = self.snap = None
             audit(rt.db, user.username, "proxmox", "host removed")
@@ -172,7 +183,7 @@ class ProxmoxModule(Module):
                                "backup_ok": b.get("ok"), "backup_failed": b.get("failed")
                                if (b.get("failed") or 0) > (b.get("ok") or 0) else None,
                                "backup_error": b.get("error", "")})
-        return {"configured": self.configured(rt), "has_secret": rt.secrets.has(SECRET), "snap": snap,
+        return {"cert_rows": self.cert_rows(rt), "configured": self.configured(rt), "has_secret": rt.secrets.has(SECRET), "snap": snap,
                 "snap_ts": self.snap_ts, "pve_error": self.error, "guests": guests,
                 "setup_commands": SETUP_COMMANDS}
 
