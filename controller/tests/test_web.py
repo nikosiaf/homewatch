@@ -573,3 +573,57 @@ def test_history_filters_and_groups_by_module(client):
     assert '<option value="ups"' in every and 'value="ups.load"' not in every
     one = client.get("/history?module=ups").text
     assert "ups-event" in one and "line-event" not in one
+
+
+def test_opnsense_key_is_encrypted_and_kept_out_of_versions_and_exports(client, monkeypatch):
+    from homewatch import versions
+
+    tok = setup_admin(client)
+    rt, m = client.rt, MODULES["opnsense"]
+    seen = {}
+
+    async def fetch(s, secret, now):
+        seen.update(key=s["api_key"], secret=secret)
+        return {"_summary": "ok"}
+
+    monkeypatch.setattr(m, "fetch", fetch)
+    for part in ("tables", "choices", "filters"):  # the fake reading has nothing to show
+        monkeypatch.setattr(m, part, lambda *a: [])
+    r = client.post("/modules/opnsense", data={"csrf": tok, "url": "192.168.1.1", "secret": "s"})
+    assert "Enter the API key" in r.text
+    client.post("/modules/opnsense", data={"csrf": tok, "url": "192.168.1.1", "api_key": "the-key", "secret": "s"})
+    assert seen == {"key": "the-key", "secret": "s"}
+    assert "api_key" not in rt.db.get("module.opnsense") and rt.secrets.get("module.opnsense.api_key") == "the-key"
+    # kept when left empty, and still used
+    seen.clear()
+    client.post("/modules/opnsense", data={"csrf": tok, "enabled": "on", "url": "192.168.1.1"})
+    assert seen["key"] == "the-key"
+    assert "the-key" not in client.get("/modules/opnsense").text
+    assert "the-key" not in versions.to_yaml(rt.db)
+    assert all("the-key" not in r["data"] for r in rt.db.all("SELECT data FROM config_versions"))
+    assert all("the-key" not in r["detail"] for r in rt.db.all("SELECT detail FROM audit"))
+    m.snap = None
+
+
+def test_old_plain_key_moves_to_secrets_everywhere(client, tmp_path):
+    from homewatch import versions
+
+    setup_admin(client)
+    rt = client.rt
+    rt.db.set("module.opnsense", {"enabled": True, "url": "https://fw", "api_key": "old-key"})
+    versions.record(rt.db, "t", "t")
+    assert any("old-key" in r["data"] for r in rt.db.all("SELECT data FROM config_versions"))
+    export = tmp_path / "homewatch-config-2026-10-30.yaml"
+    export.write_text("settings:\n  module.opnsense:\n    api_key: old-key\n    url: https://fw\n")
+    assert versions.move_secret_fields(rt.db, rt.secrets)
+    versions.scrub_exports(str(tmp_path))
+    assert rt.secrets.get("module.opnsense.api_key") == "old-key"
+    assert rt.db.get("module.opnsense") == {"enabled": True, "url": "https://fw"}
+    assert all("old-key" not in r["data"] for r in rt.db.all("SELECT data FROM config_versions"))
+    assert "old-key" not in export.read_text() and "url: https://fw" in export.read_text()
+    assert not versions.move_secret_fields(rt.db, rt.secrets)
+    # an old export imported later can't bring it back
+    snap = versions.snapshot(rt.db)
+    snap["settings"]["module.opnsense"]["api_key"] = "from-import"
+    versions.apply(rt.db, snap)
+    assert "api_key" not in rt.db.get("module.opnsense")

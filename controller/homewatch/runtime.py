@@ -56,6 +56,12 @@ class Runtime:
         os.makedirs(cfg.ookla_dir, exist_ok=True)
         db = DB(cfg.db_path)
         secrets = Secrets(db, cfg.master_key)
+        if versions.move_secret_fields(db, secrets):
+            scrub_audit(db)
+            with db.lock:  # the old values must not linger in free pages or the write-ahead log
+                db.conn.execute("VACUUM")
+                db.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        versions.scrub_exports(os.path.join(cfg.data_dir, "exports"))
         versions.record(db, "system", "startup")  # also catches changes made while homewatch was stopped
         return cls(cfg, db, secrets, Metrics(cfg.vm_url), Notifier(db, secrets), Engine(db, cfg.site))
 

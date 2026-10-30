@@ -8,9 +8,14 @@
 {% macro fields_html(s) %}
   <div class="row">
   {% for f in module.fields if f.kind != 'check' %}
+    {% if f.secret %}
+    <div><label for="f-{{ f.key }}">{{ f.label }} · {{ 'set' if secret_fields_set[f.key] else 'not set' }}</label>
+      <input id="f-{{ f.key }}" type="password" name="{{ f.key }}" placeholder="{{ 'leave empty to keep' if secret_fields_set[f.key] else f.placeholder }}" autocomplete="new-password"></div>
+    {% else %}
     <div><label for="f-{{ f.key }}">{{ f.label }}</label>
       <input id="f-{{ f.key }}" type="{{ 'number' if f.kind == 'number' else 'text' }}" {{ 'step=any' if f.kind == 'number' }}
              name="{{ f.key }}" value="{{ s[f.key] if s[f.key] is not none }}" placeholder="{{ f.placeholder }}" autocomplete="off"></div>
+    {% endif %}
   {% endfor %}
   {% if module.secret_label %}
     <div><label for="f-secret">{{ module.secret_label }} · {{ 'set' if has_secret else 'not set' }}</label>

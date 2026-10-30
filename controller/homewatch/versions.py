@@ -98,8 +98,65 @@ def restore(db: DB, vid: int) -> dict | None:
     return snap
 
 
+def _secret_fields() -> dict[str, list[str]]:
+    """Settings key -> fields of that module which only ever live in the encrypted secrets."""
+    from .modules.registry import MODULES
+
+    return {f"module.{m.id}": [f.key for f in getattr(m, "fields", []) if getattr(f, "secret", False)]
+            for m in MODULES.values()}
+
+
+def strip_secret_fields(snap: dict) -> bool:
+    """Drop secret fields from a snapshot's settings; True when any was there."""
+    found = False
+    for key, names in _secret_fields().items():
+        for name in names:
+            if name in snap.get("settings", {}).get(key, {}):
+                del snap["settings"][key][name]
+                found = True
+    return found
+
+
+def move_secret_fields(db: DB, secrets) -> bool:
+    """Older versions kept these fields in plain settings: encrypt them and clean every stored copy."""
+    moved = False
+    for key, names in _secret_fields().items():
+        saved = db.get(key)
+        if isinstance(saved, dict) and any(n in saved for n in names):
+            for n in names:
+                value = saved.pop(n, "")
+                if value:
+                    secrets.put(f"{key}.{n}", value)
+            db.set(key, saved)
+            moved = True
+    for row in db.all("SELECT id, data FROM config_versions"):
+        snap = json.loads(row["data"])
+        if strip_secret_fields(snap):
+            db.run("UPDATE config_versions SET data=? WHERE id=?", (json.dumps(snap, sort_keys=True), row["id"]))
+            moved = True
+    return moved
+
+
+def scrub_exports(path_dir: str) -> None:
+    """Remove secret fields from export files written by older versions."""
+    names = [n for ns in _secret_fields().values() for n in ns]
+    if not names or not os.path.isdir(path_dir):
+        return
+    line = re.compile(rf"^\s+({'|'.join(names)}):.*\n", re.M)
+    for name in os.listdir(path_dir):
+        if _EXPORT_NAME.match(name):
+            path = os.path.join(path_dir, name)
+            with open(path) as f:
+                text = f.read()
+            clean = line.sub("", text)
+            if clean != text:
+                with open(path, "w") as f:
+                    f.write(clean)
+
+
 def apply(db: DB, snap: dict) -> None:
     """Replace the configuration with a (validated) snapshot; secrets, users and history stay."""
+    strip_secret_fields(snap)  # an export from an older version may still hold them
     with db.tx() as t:
         for r in t.all("SELECT key FROM settings"):
             if is_config(r["key"]):

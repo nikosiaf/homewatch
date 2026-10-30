@@ -33,6 +33,7 @@ class Field:
     kind: str = "text"  # text | number | check | url
     default: Any = ""
     help: str = ""
+    secret: bool = False  # kept encrypted with the module's secret, never in settings, versions or exports
 
 
 @dataclass
@@ -91,7 +92,7 @@ class ApiModule(Module):
 
     def load(self, rt) -> dict:
         saved = rt.db.get(self.key)
-        base = {"enabled": True, "chosen": [], "skipped": []} | {f.key: f.default for f in self.fields}
+        base = {"enabled": True, "chosen": [], "skipped": []} | {f.key: f.default for f in self.fields if not f.secret}
         return base | (saved or {}) | {"_configured": saved is not None}
 
     def configured(self, rt) -> bool:
@@ -104,6 +105,8 @@ class ApiModule(Module):
         """Turn the form into settings; override to normalize addresses. Returns (settings, error)."""
         out = {}
         for f in self.fields:
+            if f.secret:
+                continue
             raw = form.get(f.key, old.get(f.key, f.default))
             if f.kind == "check":
                 out[f.key] = form.get(f.key) == "on" if f.key in form or "enabled" in form or "_new" in form else bool(raw)
@@ -115,6 +118,14 @@ class ApiModule(Module):
             else:
                 out[f.key] = str(raw).strip()
         return out, ""
+
+    def field_secret_key(self, f: Field) -> str:
+        return f"{self.key}.{f.key}"
+
+    def with_secret_fields(self, rt, settings: dict, form: dict | None = None) -> dict:
+        """The settings plus the encrypted fields, for talking to the device; never store the result."""
+        return settings | {f.key: (form or {}).get(f.key, "").strip() or rt.secrets.get(self.field_secret_key(f)) or ""
+                           for f in self.fields if f.secret}
 
     # ---- reading ---------------------------------------------------------------------------
     async def fetch(self, settings: dict, secret: str, now: float) -> dict:
@@ -138,7 +149,7 @@ class ApiModule(Module):
     async def readings(self, rt, settings, now):
         if self.snap is None or now - self.snap_ts >= self.every:
             try:
-                self.snap = await self.fetch(settings, rt.secrets.get(self.secret_key) or "", now)
+                self.snap = await self.fetch(self.with_secret_fields(rt, settings), rt.secrets.get(self.secret_key) or "", now)
                 self.snap_ts, self.error = now, ""
             except ApiError as e:
                 self.snap, self.error = None, str(e)
@@ -177,10 +188,14 @@ class ApiModule(Module):
         secret = form.get("secret", "").strip() or rt.secrets.get(self.secret_key) or ""
         if self.secret_label and not secret:
             return f"Enter the {self.secret_label.lower()}"
+        full = self.with_secret_fields(rt, old | new, form)
+        for f in self.fields:
+            if f.secret and not full[f.key]:
+                return f"Enter the {f.label}"
         turning_off = self.configured(rt) and "enabled" not in form
         if not turning_off:
             try:
-                snap = await self.fetch(old | new, secret, time.time())
+                snap = await self.fetch(full, secret, time.time())
             except ApiError as e:
                 return f"Nothing saved: {e}"
             self.snap, self.snap_ts, self.error = snap, time.time(), ""
@@ -192,6 +207,9 @@ class ApiModule(Module):
         if form.get("remove"):
             rt.db.run("DELETE FROM settings WHERE key=?", (self.key,))
             rt.secrets.delete(self.secret_key)
+            for f in self.fields:
+                if f.secret:
+                    rt.secrets.delete(self.field_secret_key(f))
             self.snap, self.error = None, ""
             audit(rt.db, user.username, self.id, "removed")
             rt.wake.set()
@@ -222,6 +240,9 @@ class ApiModule(Module):
         rt.db.set(self.key, settings)
         if form.get("secret", "").strip():
             rt.secrets.put(self.secret_key, form["secret"].strip())
+        for f in self.fields:
+            if f.secret and form.get(f.key, "").strip():
+                rt.secrets.put(self.field_secret_key(f), form[f.key].strip())
         shown = {k: v for k, v in settings.items() if k not in ("chosen", "skipped")}
         audit(rt.db, user.username, self.id, json.dumps(shown) + (" secret=replaced" if form.get("secret") else ""))
         rt.wake.set()
@@ -237,6 +258,7 @@ class ApiModule(Module):
         return {"filters": [(c, c.value not in skipped and f"group:{c.group}" not in skipped) for c in filters],
                 "skipped": skipped, "read_every": f"{every / 60:.0f} min" if every >= 60 else f"{every:.0f} s",
                 "filters_shown": json.dumps([c.value for c in filters]),"configured": self.configured(rt), "has_secret": rt.secrets.has(self.secret_key),
+                "secret_fields_set": {f.key: rt.secrets.has(self.field_secret_key(f)) for f in self.fields if f.secret},
                 "snap": snap, "snap_ts": self.snap_ts, "api_error": self.error,
                 "tables": self.tables(snap, s) if snap else [],
                 "choices": [(c, c.value in chosen) for c in self.choices(snap)] if snap and self.choices_title else []}

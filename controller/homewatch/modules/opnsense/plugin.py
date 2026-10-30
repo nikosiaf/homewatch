@@ -55,7 +55,7 @@ class OPNsenseModule(ApiModule):
     ]
     fields = [
         Field("url", "OPNsense address", "https://192.168.1.1", default=""),
-        Field("api_key", "API key", "the key= line of the downloaded file"),
+        Field("api_key", "API key", "the key= line of the downloaded file", secret=True),
         Field("verify", "Check the HTTPS certificate", kind="check", default=False,
               help="Leave off when the web GUI uses OPNsense's own self-signed certificate."),
     ]
@@ -78,8 +78,6 @@ class OPNsenseModule(ApiModule):
         url = https_url(out["url"])
         if not url:
             return out, "OPNsense address: e.g. https://192.168.1.1 (add :port when the GUI uses another one)"
-        if not out["api_key"]:
-            return out, "Enter the API key"
         return out | {"url": url}, ""
 
     async def fetch(self, s, secret, now):
