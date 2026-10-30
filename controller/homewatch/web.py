@@ -334,8 +334,9 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         events = []
         for i in rows:
             events.append({"ts": i["started"], "kind": "problem", "level": i["worst"], "key": i["check_key"],
-                           "detail": i["detail"], "open_for": None if i["resolved"] else now - i["started"]})
-            if i["resolved"]:
+                           "detail": i["detail"], "open_for": None if i["resolved"] else now - i["started"],
+                           "after": i["resolved"] - i["started"] if i["resolved"] else None})
+            if i["resolved"] and level not in ("1", "2"):  # filtering by level: the problems only
                 off = i["resolved_detail"] == "check switched off"
                 events.append({"ts": i["resolved"], "kind": "off" if off else "ok", "level": OK,
                                "key": i["check_key"], "detail": i["resolved_detail"],

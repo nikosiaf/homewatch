@@ -545,3 +545,17 @@ def test_check_now_button_says_running(client):
     setup_admin(client)
     client.post("/setup/home", data={})
     assert 'data-busy="Running…"' in client.get("/partials/status").text
+
+
+def test_history_level_filter_lists_only_that_level(client):
+    setup_admin(client)
+    db, now = client.rt.db, time.time()
+    add = "INSERT INTO issues(site,check_key,level,worst,started,resolved,detail,resolved_detail) VALUES('home',?,?,?,?,?,?,?)"
+    db.run(add, ("internet.loss", 1, 1, now - 7200, now - 3600, "a-warning", "warning-over"))
+    db.run(add, ("internet.reachable", 2, 2, now - 7200, now - 3600, "an-error", "error-over"))
+    warn = client.get("/history?level=1").text
+    assert "a-warning" in warn and "lasted" in warn and "warning-over" not in warn and "an-error" not in warn
+    err = client.get("/history?level=2").text
+    assert "an-error" in err and "error-over" not in err and "a-warning" not in err
+    every = client.get("/history").text
+    assert "warning-over" in every and "error-over" in every
