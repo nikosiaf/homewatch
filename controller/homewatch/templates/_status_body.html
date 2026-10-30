@@ -1,8 +1,9 @@
 {% if not setup_done and user.is_admin %}<div class="flash ok">Finish the <a href="/setup/home">setup steps</a> to start monitoring.</div>{% endif %}
-<div class="banner s{{ overall }}" id="status">
-  <span class="badge s{{ overall }}">{{ LEVEL_WORD[overall] }}</span>
+{% set blind = overall == 0 and last_run and (last_error or not tiles) %}
+<div class="banner {{ 'mute' if blind else 's' ~ overall }}" id="status">
+  {% if blind %}<span class="badge mute">UNKNOWN</span>{% else %}<span class="badge s{{ overall }}">{{ LEVEL_WORD[overall] }}</span>{% endif %}
   <div>
-    <div class="big">{% if overall == 0 and unknown %}No problems found, but {{ unknown | join(', ') }} not read{% elif overall == 0 %}All checks OK{% else %}{{ errors }} error{{ 's' if errors != 1 }}, {{ warnings }} warning{{ 's' if warnings != 1 }}{% endif %}</div>
+    <div class="big">{% if blind and last_error %}Status unknown: monitoring data can't be read{% elif blind %}Nothing is being checked yet{% elif overall == 0 and unknown %}No problems found, but {{ unknown | join(', ') }} not read{% elif overall == 0 %}All checks OK{% else %}{{ errors }} error{{ 's' if errors != 1 }}, {{ warnings }} warning{{ 's' if warnings != 1 }}{% endif %}</div>
     <div class="quiet small">{% if last_run %}Last run {{ last_run | ts('%H:%M:%S') }}{% else %}Waiting for the first run…{% endif %}
       {% if last_error %} · <span style="color:var(--err)">{{ last_error }}</span>{% endif %}</div>
   </div>

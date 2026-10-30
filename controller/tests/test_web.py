@@ -552,6 +552,17 @@ def test_setup_headings_fit_the_module(client):
     assert "Before you connect" in ups and "read-only account" not in ups
 
 
+def test_status_isnt_green_when_it_cant_tell(client):
+    setup_admin(client)
+    rt = client.rt
+    rt.last_run, rt.last_error = time.time(), "VictoriaMetrics unreachable"
+    page = client.get("/").text
+    assert "Status unknown" in page and "All checks OK" not in page
+    rt.last_error = ""
+    page = client.get("/").text
+    assert "Nothing is being checked yet" in page and "All checks OK" not in page
+
+
 def test_message_lands_in_its_box(client):
     tok = setup_admin(client)
     r = client.post("/system/home", data={"csrf": tok, "_box": "home", "name": "H", "tz": "UTC"},
