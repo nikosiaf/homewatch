@@ -144,6 +144,9 @@ header .menu { order: 2; }
   box-shadow: 0 0 0 1px var(--glow), 0 0 16px 3px color-mix(in srgb, var(--glow) 55%, transparent); }
 .module-grid details.module.s1[open] { --glow: var(--warn); }
 .module-grid details.module.s2[open] { --glow: var(--err); }
+.module-grid details.module[open] { background: color-mix(in srgb, var(--glow) 12%, var(--card)); }
+.module-grid:has(details.module[open]) details.module:not([open]) { opacity: .55; transition: opacity .15s; }
+.module-grid:has(details.module[open]) details.module:not([open]):hover { opacity: 1; }
 .module-grid details.module > summary { height: 112px; box-sizing: border-box; align-content: flex-start; overflow: hidden; }
 .module-grid details.module > summary > .quiet { flex-basis: 100%; order: 3; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .module-grid details.module[open] > summary { height: auto; }
