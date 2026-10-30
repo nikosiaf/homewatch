@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
-from ..apibase import ApiError, ApiModule, Field, Table, https_url
+from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Field, Table, https_url
 
 CHECKS = [
     CheckDef("api", "DSM reachable", "api", help="ERROR when homewatch can't log in to DSM or read it."),
@@ -45,8 +45,8 @@ class SynologyModule(ApiModule):
     fields = [
         Field("url", "NAS address", "https://192.168.1.20:5001"),
         Field("username", "User name", "homewatch", default="homewatch"),
-        Field("verify", "Check the HTTPS certificate", kind="check", default=False,
-              help="Leave off for DSM's own self-signed certificate."),
+        Field("verify", "Check the HTTPS certificate", kind="check", default=True,
+              help=SELF_SIGNED),
     ]
     secret_label = "Password"
 
@@ -71,7 +71,7 @@ class SynologyModule(ApiModule):
                 try:
                     r = await http.get(entry, params=p)
                 except httpx.HTTPError as e:
-                    raise ApiError(f"can't reach DSM ({type(e).__name__})") from None
+                    raise ApiError(f"can't reach DSM ({why(e)})") from None
                 body = r.json() if r.status_code == 200 else {}
                 if not body.get("success"):
                     code = (body.get("error") or {}).get("code")

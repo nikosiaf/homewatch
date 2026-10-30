@@ -7,7 +7,7 @@ import re
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, level
-from ..apibase import ApiError, ApiModule, Choice, Field, Table, https_url
+from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
 CHECKS = [
     CheckDef("api", "API reachable", "api", help="ERROR when homewatch can't read the OPNsense API."),
@@ -56,8 +56,8 @@ class OPNsenseModule(ApiModule):
     fields = [
         Field("url", "OPNsense address", "https://192.168.1.1", default=""),
         Field("api_key", "API key", "the key= line of the downloaded file", secret=True),
-        Field("verify", "Check the HTTPS certificate", kind="check", default=False,
-              help="Leave off when the web GUI uses OPNsense's own self-signed certificate."),
+        Field("verify", "Check the HTTPS certificate", kind="check", default=True,
+              help=SELF_SIGNED),
     ]
     secret_label = "API secret"
     secret_placeholder = "the secret= line of the downloaded file"
@@ -87,7 +87,7 @@ class OPNsenseModule(ApiModule):
                 try:
                     r = await http.get(f"{s['url']}/api/{path}")
                 except httpx.HTTPError as e:
-                    raise ApiError(f"can't reach OPNsense ({type(e).__name__})") from None
+                    raise ApiError(f"can't reach OPNsense ({why(e)})") from None
                 if r.status_code == 401:
                     raise ApiError("OPNsense rejected the API key")
                 if r.status_code in (403, 404) and optional:

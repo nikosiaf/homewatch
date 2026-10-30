@@ -13,7 +13,7 @@ disk health and backups. Nothing on Proxmox is changed.</p>
     <div><label for="ps">Token secret · {{ 'set' if has_secret else 'not set' }}</label>
       <input id="ps" type="password" name="secret" placeholder="{{ 'leave empty to keep' if has_secret else 'xxxxxxxx-xxxx-…' }}" autocomplete="new-password"></div>
   </div>
-  <label class="check"><input type="checkbox" name="verify" {{ 'checked' if s.verify }}> Check the HTTPS certificate (leave off for Proxmox's own self-signed certificate)</label>
+  <label class="check"><input type="checkbox" name="verify" {{ 'checked' if s.verify }}> Check the HTTPS certificate (untick only for a self-signed one: homewatch then can't tell the real host from an impostor on your network)</label>
 {% endmacro %}
 
 {% if not configured %}

@@ -9,7 +9,7 @@ from datetime import datetime
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
-from ..apibase import ApiError, ApiModule, Choice, Field, Table, https_url
+from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
 CHECKS = [
     CheckDef("api", "HA reachable", "api", help="ERROR when homewatch can't read Home Assistant's API."),
@@ -69,8 +69,8 @@ class HomeAssistantModule(ApiModule):
     ]
     fields = [
         Field("url", "Home Assistant address", "http://homeassistant.local:8123"),
-        Field("verify", "Check the HTTPS certificate", kind="check", default=False,
-              help="Only matters for https addresses; leave off for self-signed certificates."),
+        Field("verify", "Check the HTTPS certificate", kind="check", default=True,
+              help=SELF_SIGNED),
         Field("watch_all", "Watch every entity", kind="check", default=False,
               help="Off: only the essential entities above are read. On: all of them are read at every check and "
                    "listed below, so any one that becomes unavailable can be reported (network traffic RX/TX "
@@ -101,6 +101,11 @@ class HomeAssistantModule(ApiModule):
             return out, "Home Assistant address: e.g. http://homeassistant.local:8123"
         return out | {"url": url}, ""
 
+    def notice(self, settings):
+        if settings.get("url", "").startswith("http://"):
+            return "Plain HTTP: the access token crosses your network unencrypted at every read. Use an https address if you can."
+        return ""
+
     async def fetch(self, s, secret, now):
         async with httpx.AsyncClient(verify=bool(s.get("verify")), timeout=20,  # noqa: S501
                                      headers={"Authorization": f"Bearer {secret}"}) as http:
@@ -108,7 +113,7 @@ class HomeAssistantModule(ApiModule):
                 try:
                     r = await http.get(f"{s['url']}/api/{path}")
                 except httpx.HTTPError as e:
-                    raise ApiError(f"can't reach Home Assistant ({type(e).__name__})") from None
+                    raise ApiError(f"can't reach Home Assistant ({why(e)})") from None
                 if r.status_code == 401:
                     raise ApiError("Home Assistant rejected the token")
                 if missing_ok and r.status_code == 404:

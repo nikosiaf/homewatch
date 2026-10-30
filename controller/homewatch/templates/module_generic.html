@@ -71,6 +71,7 @@
   </div>
   {{ note("settings") }}
   {% if api_error %}<p class="flash err">{{ api_error }}</p>{% endif %}
+  {% if notice %}<p class="flash err">{{ notice }}</p>{% endif %}
   <fieldset data-enable-target class="plain" {{ 'disabled' if not s.enabled }}>
     {{ fields_html(s) }}
     {% if snap and (module.choices_title or module.filter_title) %}

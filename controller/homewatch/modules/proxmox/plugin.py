@@ -13,7 +13,7 @@ from .client import ApiError, Client, Snapshot
 KEY = "module.proxmox"
 SECRET = "module.proxmox.token"
 DISK_EVERY = 3600  # SMART data changes slowly; reading it calls smartctl on the host
-DEFAULTS = {"enabled": True, "url": "", "token_id": "homewatch@pve!monitor", "verify": False, "watched": []}
+DEFAULTS = {"enabled": True, "url": "", "token_id": "homewatch@pve!monitor", "verify": True, "watched": []}
 SETUP_COMMANDS = [
     'pveum user add homewatch@pve --comment "homewatch, read-only"',
     "pveum acl modify / --users homewatch@pve --roles PVEAuditor",

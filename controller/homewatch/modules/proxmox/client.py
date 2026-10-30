@@ -9,6 +9,8 @@ from urllib.parse import quote
 
 import httpx
 
+from ..apibase import why
+
 
 class ApiError(Exception):
     pass
@@ -56,7 +58,7 @@ class Client:
         try:
             r = await self.http.get(self.base + path, params=params or None)
         except httpx.HTTPError as e:
-            raise ApiError(f"can't reach Proxmox ({type(e).__name__})") from None
+            raise ApiError(f"can't reach Proxmox ({why(e)})") from None
         if r.status_code == 401:
             raise ApiError("Proxmox rejected the API token")
         if r.status_code == 403:

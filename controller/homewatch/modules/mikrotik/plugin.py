@@ -7,7 +7,7 @@ import re
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
-from ..apibase import ApiError, ApiModule, Choice, Field, Table
+from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table
 
 ERROR_WINDOW = 3600  # port errors are counted over the last hour
 CHECKS = [
@@ -46,16 +46,20 @@ class MikroTikModule(ApiModule):
         ("text", "On every device (WinBox → New Terminal), create a read-only user and allow this homewatch host "
                  "to reach the web service the REST API runs on:"),
         ("code", "/user add name=homewatch group=read password=\"a-long-password\"\n"
-                 "/ip service print   # check that www (or www-ssl) is enabled\n"
-                 "# if www has an 'available-from' list, add this homewatch host's address to it:\n"
-                 "/ip service set www available-from=<existing list>,<homewatch ip>/32"),
+                 "# HTTPS for the REST API, with the device's own self-signed certificate:\n"
+                 "/certificate add name=www common-name=<device address> key-usage=key-cert-sign,tls-server\n"
+                 "/certificate sign www\n"
+                 "/ip service set www-ssl certificate=www disabled=no\n"
+                 "# if www-ssl has an 'available-from' list, add this homewatch host's address to it:\n"
+                 "/ip service set www-ssl available-from=<existing list>,<homewatch ip>/32"),
         ("text", "Use the same user and password on every device, then list their addresses below."),
     ]
     fields = [
         Field("devices", "Device addresses", "192.168.88.1, 192.168.88.2"),
         Field("username", "User name", "homewatch", default="homewatch"),
-        Field("https", "Use HTTPS (www-ssl)", kind="check", default=False,
-              help="Plain HTTP sends the password unencrypted on your LAN; use www-ssl if the device has a certificate."),
+        Field("https", "Use HTTPS (www-ssl)", kind="check", default=True,
+              help="Without it the password crosses your network unencrypted at every read."),
+        Field("verify", "Check the HTTPS certificate", kind="check", default=True, help=SELF_SIGNED),
     ]
     secret_label = "Password"
     choices_title = "Ports that should be up"
@@ -76,10 +80,16 @@ class MikroTikModule(ApiModule):
             return out, "Enter the user name"
         return out | {"devices": ", ".join(hs)}, ""
 
+    def notice(self, settings):
+        if not settings.get("https"):
+            return "Plain HTTP: the password crosses your network unencrypted at every read. Enable www-ssl and tick Use HTTPS."
+        return ""
+
     async def fetch(self, s, secret, now):
         scheme = "https" if s.get("https") else "http"
         devices, errors = [], {}
-        async with httpx.AsyncClient(verify=False, timeout=10, auth=(s["username"], secret)) as http:  # noqa: S501
+        async with httpx.AsyncClient(verify=bool(s.get("https") and s.get("verify")), timeout=10,  # noqa: S501
+                                     auth=(s["username"], secret)) as http:
             for host in hosts(s["devices"]):
                 try:
                     devices.append(await self._device(http, f"{scheme}://{host}/rest", host))
@@ -95,7 +105,7 @@ class MikroTikModule(ApiModule):
             try:
                 r = await http.get(f"{base}/{path}")
             except httpx.HTTPError as e:
-                raise ApiError(f"can't reach the REST API ({type(e).__name__}); is www enabled and this host "
+                raise ApiError(f"can't reach the REST API ({why(e)}); is the web service enabled and this host "
                                "in its available-from list?") from None
             if r.status_code == 401:
                 raise ApiError("user name or password rejected")

@@ -25,6 +25,17 @@ class ApiError(Exception):
     pass
 
 
+SELF_SIGNED = ("Untick only for a self-signed certificate: homewatch then can't tell the real device from an impostor "
+               "on your network, and would send it the login.")
+
+
+def why(e: Exception) -> str:
+    """A connection failure in words; a rejected certificate is one the admin can act on."""
+    if "CERTIFICATE_VERIFY_FAILED" in str(e):
+        return "its HTTPS certificate isn't trusted; install a trusted one, or untick \"Check the HTTPS certificate\""
+    return type(e).__name__
+
+
 @dataclass
 class Field:
     key: str
@@ -133,6 +144,10 @@ class ApiModule(Module):
 
     def check(self, settings: dict, th: dict[str, Thresholds], snap: dict, now: float) -> list[CheckResult]:
         raise NotImplementedError
+
+    def notice(self, settings: dict) -> str:
+        """A warning about the settings, shown at the top of the module's page."""
+        return ""
 
     def tables(self, snap: dict, settings: dict) -> list[Table]:
         return []
@@ -257,7 +272,7 @@ class ApiModule(Module):
         filters = self.filters(snap) if snap and self.filter_title else []
         return {"filters": [(c, c.value not in skipped and f"group:{c.group}" not in skipped) for c in filters],
                 "skipped": skipped, "read_every": f"{every / 60:.0f} min" if every >= 60 else f"{every:.0f} s",
-                "filters_shown": json.dumps([c.value for c in filters]),"configured": self.configured(rt), "has_secret": rt.secrets.has(self.secret_key),
+                "filters_shown": json.dumps([c.value for c in filters]),"configured": self.configured(rt), "has_secret": rt.secrets.has(self.secret_key), "notice": self.notice(s) if self.configured(rt) else "",
                 "secret_fields_set": {f.key: rt.secrets.has(self.field_secret_key(f)) for f in self.fields if f.secret},
                 "snap": snap, "snap_ts": self.snap_ts, "api_error": self.error,
                 "tables": self.tables(snap, s) if snap else [],

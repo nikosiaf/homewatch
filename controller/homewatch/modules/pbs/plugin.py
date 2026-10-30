@@ -7,7 +7,7 @@ import re
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
-from ..apibase import ApiError, ApiModule, Choice, Field, Table, https_url
+from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
 CHECKS = [
     CheckDef("api", "PBS reachable", "api", help="ERROR when homewatch can't read the PBS API."),
@@ -42,8 +42,8 @@ class PBSModule(ApiModule):
     fields = [
         Field("url", "PBS address", "https://192.168.1.30:8007"),
         Field("token_id", "Token ID", "homewatch@pbs!monitor", default="homewatch@pbs!monitor"),
-        Field("verify", "Check the HTTPS certificate", kind="check", default=False,
-              help="Leave off for PBS's own self-signed certificate."),
+        Field("verify", "Check the HTTPS certificate", kind="check", default=True,
+              help=SELF_SIGNED),
     ]
     secret_label = "Token secret"
     secret_placeholder = "xxxxxxxx-xxxx-…"
@@ -69,7 +69,7 @@ class PBSModule(ApiModule):
                 try:
                     r = await http.get(f"{s['url']}/api2/json/{path}", params=params or None)
                 except httpx.HTTPError as e:
-                    raise ApiError(f"can't reach PBS ({type(e).__name__})") from None
+                    raise ApiError(f"can't reach PBS ({why(e)})") from None
                 if r.status_code == 401:
                     raise ApiError("PBS rejected the API token")
                 if r.status_code in (403, 404, 501) and optional:

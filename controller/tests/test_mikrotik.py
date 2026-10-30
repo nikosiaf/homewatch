@@ -64,3 +64,55 @@ def test_port_errors_count_the_last_hour():
     assert at(3700, 103).value == 3  # the baseline is still the reading at or before the hour's start
     assert at(5000, 103).value == 0  # an hour without new errors
     assert at(5100, 2).value == 0  # counters restarted (reboot)
+
+
+def _client_kwargs(monkeypatch):
+    import httpx
+
+    seen = {}
+    real = httpx.AsyncClient
+
+    def make(**kw):
+        seen.update(kw)
+        return real(transport=httpx.MockTransport(lambda r: httpx.Response(401)), **kw)
+
+    monkeypatch.setattr(httpx, "AsyncClient", make)
+    return seen
+
+
+def test_https_with_certificate_check_is_the_default(monkeypatch):
+    import asyncio
+
+    from homewatch.modules.apibase import ApiError
+    from homewatch.modules.mikrotik.plugin import MikroTikModule
+
+    m = MikroTikModule()
+    defaults = {f.key: f.default for f in m.fields}
+    assert defaults["https"] is True and defaults["verify"] is True
+    seen = _client_kwargs(monkeypatch)
+    s = {"devices": "192.0.2.1", "username": "u", "https": True, "verify": True}
+    for over, verify in (({}, True), ({"verify": False}, False), ({"https": False}, False)):
+        try:
+            asyncio.run(m.fetch(s | over, "p", 0))
+        except ApiError:
+            pass
+        assert seen["verify"] is verify
+    assert "unencrypted" in m.notice({"https": False}) and m.notice({"https": True}) == ""
+
+
+def test_every_module_checks_certificates_by_default():
+    from homewatch.modules.proxmox.plugin import DEFAULTS
+    from homewatch.modules.registry import MODULES
+
+    for m in MODULES.values():
+        for f in getattr(m, "fields", []):
+            if f.key == "verify":
+                assert f.default is True, m.id
+    assert DEFAULTS["verify"] is True
+
+
+def test_rejected_certificate_is_explained():
+    from homewatch.modules.apibase import why
+
+    assert "isn't trusted" in why(Exception("[SSL: CERTIFICATE_VERIFY_FAILED] self-signed certificate"))
+    assert why(ValueError("x")) == "ValueError"

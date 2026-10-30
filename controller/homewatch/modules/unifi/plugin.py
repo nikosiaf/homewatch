@@ -7,7 +7,7 @@ import re
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
-from ..apibase import ApiError, ApiModule, Choice, Field, Table, https_url
+from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
 CHECKS = [
     CheckDef("api", "Controller reachable", "api", help="ERROR when homewatch can't log in to UniFi or read it."),
@@ -46,8 +46,8 @@ class UniFiModule(ApiModule):
         Field("url", "UniFi address", "https://192.168.1.10:11443"),
         Field("site", "Site", "default", default="default"),
         Field("username", "User name", "homewatch", default="homewatch"),
-        Field("verify", "Check the HTTPS certificate", kind="check", default=False,
-              help="Leave off for UniFi's own self-signed certificate."),
+        Field("verify", "Check the HTTPS certificate", kind="check", default=True,
+              help=SELF_SIGNED),
     ]
     secret_label = "Password"
     choices_title = "Devices to watch"
@@ -72,7 +72,7 @@ class UniFiModule(ApiModule):
                 r = await http.post(f"{s['url']}/api/auth/login",
                                     json={"username": s["username"], "password": secret, "rememberMe": False})
             except httpx.HTTPError as e:
-                raise ApiError(f"can't reach UniFi ({type(e).__name__})") from None
+                raise ApiError(f"can't reach UniFi ({why(e)})") from None
             if r.status_code in (400, 401, 403):
                 raise ApiError("UniFi rejected the user name or password")
             if r.status_code >= 300:
@@ -105,7 +105,7 @@ class UniFiModule(ApiModule):
         try:
             r = await http.get(url, headers=headers)
         except httpx.HTTPError as e:
-            raise ApiError(f"can't read UniFi ({type(e).__name__})") from None
+            raise ApiError(f"can't read UniFi ({why(e)})") from None
         if r.status_code == 401:
             raise ApiError("UniFi session not accepted")
         if r.status_code == 404:
