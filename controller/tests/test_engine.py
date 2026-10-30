@@ -144,3 +144,19 @@ def test_partial_results_keep_the_other_checks(db):
     e.apply("x", [CheckResult("x.a", "A", ERROR, "bad")], 2.0, partial=True)
     assert db.one("SELECT 1 FROM check_state WHERE check_key='x.b'")
 
+
+def test_silences_read_once_and_answer_like_one_by_one(db):
+    e = Engine(db, "home")
+    db.run("INSERT INTO snoozes(site,check_key,until,reason,created_by,created) VALUES('home','x.a',500,'short','a',0)")
+    db.run("INSERT INTO snoozes(site,check_key,until,reason,created_by,created) VALUES('home','x.a',900,'long','a',0)")
+    db.run("INSERT INTO snoozes(site,check_key,until,reason,created_by,created) VALUES('home','x.gone',50,'over','a',0)")
+    db.run("INSERT INTO maintenance(site,name,kind,start_ts,end_ts,checks,created_by,created) VALUES('home','all','once',0,1000,NULL,'a',0)")
+    db.run("INSERT INTO maintenance(site,name,kind,start_ts,end_ts,checks,created_by,created) VALUES('home','later','once',800,1000,'[\"x.b\"]','a',0)")
+    queries = []
+    why = e.silences(100.0)
+    db.conn.set_trace_callback(queries.append)
+    assert why("x.a") == "snoozed: long"  # longest snooze first
+    assert why("x.gone") == "maintenance: all" and why("x.other") == "maintenance: all"
+    db.conn.set_trace_callback(None)
+    assert queries == []  # nothing more is read per check
+

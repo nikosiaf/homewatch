@@ -71,20 +71,26 @@ class Engine:
         self.site = site
 
     # ---- silences -------------------------------------------------------------------------
+    def silences(self, now: float):
+        """Read what is silenced right now once; returns key -> why it is silenced, or None."""
+        snoozed: dict[str, str] = {}
+        for s in self.db.all("SELECT check_key, reason FROM snoozes WHERE site=? AND until>? ORDER BY until",
+                             (self.site, now)):  # the snooze that lasts longest wins
+            snoozed[s["check_key"]] = f"snoozed{': ' + s['reason'] if s['reason'] else ''}"
+        zone = tz(self.db)
+        active = [(m["name"], json.loads(m["checks"]) if m["checks"] else None)
+                  for m in self.db.all("SELECT * FROM maintenance WHERE site=?", (self.site,)) if window_active(m, now, zone)]
+
+        def why(key: str) -> str | None:
+            if key in snoozed:
+                return snoozed[key]
+            return next((f"maintenance: {name}" for name, keys in active if keys is None or key in keys), None)
+
+        return why
+
     def silenced(self, key: str, now: float) -> str | None:
         """Return why a check is silenced right now (snooze / maintenance), or None."""
-        s = self.db.one("SELECT reason FROM snoozes WHERE site=? AND check_key=? AND until>? ORDER BY until DESC",
-                        (self.site, key, now))
-        if s is not None:
-            return f"snoozed{': ' + s['reason'] if s['reason'] else ''}"
-        zone = tz(self.db)
-        for m in self.db.all("SELECT * FROM maintenance WHERE site=?", (self.site,)):
-            keys = json.loads(m["checks"]) if m["checks"] else None
-            if keys is not None and key not in keys:
-                continue
-            if window_active(m, now, zone):
-                return f"maintenance: {m['name']}"
-        return None
+        return self.silences(now)(key)
 
     # ---- results → events ------------------------------------------------------------------
     def apply(self, module: str, results: list[CheckResult], now: float, partial: bool = False) -> list[Event]:
@@ -161,8 +167,9 @@ class Engine:
     def released(self, names: dict[str, str], now: float) -> list[Event]:
         """Open issues that were held by a silence that has now ended."""
         out = []
+        why = self.silences(now)
         for i in self.db.all("SELECT * FROM issues WHERE site=? AND resolved IS NULL AND notified=0", (self.site,)):
-            if self.silenced(i["check_key"], now) is None:
+            if why(i["check_key"]) is None:
                 self.db.run("UPDATE issues SET notified=1 WHERE id=?", (i["id"],))
                 out.append(Event("open", i["check_key"], names.get(i["check_key"], i["check_key"]),
                                  i["level"], i["worst"], i["detail"], i["started"]))
@@ -174,8 +181,9 @@ class Engine:
         if hours <= 0 or now - last < hours * 3600:
             return []
         out = []
+        why = self.silences(now)
         for i in self.open_issues():
-            if i["notified"] and now - i["started"] >= hours * 3600 and self.silenced(i["check_key"], now) is None:
+            if i["notified"] and now - i["started"] >= hours * 3600 and why(i["check_key"]) is None:
                 out.append(Event("remind", i["check_key"], names.get(i["check_key"], i["check_key"]),
                                  i["level"], i["worst"], i["detail"], i["started"]))
         if out:

@@ -1209,11 +1209,12 @@ def _status_ctx(request: Request) -> dict:
     now = time.time()
     states = {r["check_key"]: r for r in rt.db.all("SELECT * FROM check_state WHERE site=?", (rt.cfg.site,))}
     tiles = []
+    why_silent = rt.engine.silences(now)
     for r in rt.results:
         st_row = states.get(r.key)
         tiles.append({"r": r, "status": st_row["status"] if st_row else OK,
                       "pending": st_row["pending"] if st_row else None,
-                      "silenced": rt.engine.silenced(r.key, now)})
+                      "silenced": why_silent(r.key)})
     overall = max((t["status"] for t in tiles), default=OK)
     groups = []
     for m in MODULES.values():
