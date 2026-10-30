@@ -769,7 +769,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         vm_ok = await rt.metrics.healthy()
         return page(request, "system.html", request.state.user, users=users, log=log_rows, vm_ok=vm_ok,
                     last_run=rt.last_run, last_error=rt.last_error, csrf=request.state.user.csrf,
-                    updates=rt.db.get("updates.check", True), latest=rt.db.get("updates.latest", ""),
+                    updates=rt.db.get("updates.check", True), status_tiles=rt.db.get("status.tiles", False), latest=rt.db.get("updates.latest", ""),
                     roles=ROLES, tzname=rt.db.get("home.tz") or "UTC", zones=sorted(available_timezones()),
                     home_name=rt.db.get("home.name") or "Home", home_url=rt.db.get("home.url") or "",
                     probe_age=_probe_age(rt), ookla=_ookla_version(rt), versions=version_rows,
@@ -924,6 +924,16 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/system", err=f"History deleted, but metrics could not be: {warning}")
         return back("/system", msg="History and metrics deleted")
 
+    @app.post("/system/status-page")
+    async def status_page_save(request: Request):
+        rt = rt_of(request)
+        form = await form_of(request, request.state.user)
+        if form is None:
+            return back("/system", err="Form expired")
+        rt.db.set("status.tiles", form.get("tiles") == "on")
+        audit(rt.db, request.state.user.username, "status page", f"tiles={form.get('tiles') == 'on'}")
+        return back("/system", msg="Saved")
+
     @app.post("/system/updates")
     async def updates_toggle(request: Request):
         rt = rt_of(request)
@@ -1014,7 +1024,7 @@ def _status_ctx(request: Request) -> dict:
             groups.append((m.id, m.name, mine))
     errors, warnings = rt.engine.counts()
     sp = MODULES["speedport"]
-    return dict(tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
+    return dict(tiles=tiles, tile_groups=groups, status_tiles=rt.db.get("status.tiles", False), dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
                 last_run=rt.last_run, last_error=rt.last_error, errors=errors, warnings=warnings,
                 setup_done=rt.db.get("setup.done", False))
 
