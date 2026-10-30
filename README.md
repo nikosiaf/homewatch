@@ -63,6 +63,10 @@ Things to know before you add a modem:
 - **Sessions:** each reading logs in, which ends any open browser session on the modem.
 - **Rejected logins:** after a rejected login homewatch waits 6 hours, because the modem slows
   down further attempts.
+- **Certificate:** the modem's certificate is self-signed, so homewatch trusts the one it sees at
+  the first reading and logs in only to that one. If it changes, the check goes to ERROR and
+  homewatch stops logging in until you accept the new one on the module page. The first reading
+  itself can't tell an impostor from the modem, so add the modem on a network you trust.
 
 ### Proxmox VE module (optional)
 

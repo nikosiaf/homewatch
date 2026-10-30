@@ -45,6 +45,8 @@ class SpeedportModule(Module):
                  "15 minutes or more."),
         ("text", "After a rejected login the modem slows down further attempts, so homewatch waits 6 hours (or until you "
                  "save new credentials)."),
+        ("text", "The modem's certificate is self-signed, so homewatch trusts the one it sees at the first reading and "
+                 "logs in only to that one. If it changes, homewatch stops logging in until you accept the new one."),
         ("text", "This host must be able to reach the modem's address. Behind a separate router or firewall that may need "
                  "a rule there."),
     ]
@@ -65,6 +67,7 @@ class SpeedportModule(Module):
             resyncs = res[0][2] if res else None
         return checks.State(now=now, interval=settings["interval_min"] * 60, last_ok=st.get("last_ok"),
                             last_error=st.get("last_error", ""), rejected=st.get("rejected", False),
+                            cert_changed=bool(st.get("cert_changed")),
                             values=st.get("values", {}), status=st.get("status", {}), resyncs_24h=resyncs,
                             contract_down=float(inet.get("contract_down") or 0),
                             contract_up=float(inet.get("contract_up") or 0))
@@ -98,7 +101,19 @@ class SpeedportModule(Module):
             rt.db.set(STATE, st)
             return "No password set"
         try:
-            r = await client.read(s["host"], s["username"], password)
+            if not st.get("cert"):
+                st["cert"] = await client.fetch_certificate(s["host"])
+                audit(rt.db, "homewatch", "speedport", f"trusting the modem's certificate {client.fingerprint(st['cert'])}")
+            r = await client.read(s["host"], s["username"], password, st["cert"])
+        except client.CertificateRejected as e:
+            try:
+                st["cert_new"] = await client.fetch_certificate(s["host"])
+            except (OSError, ValueError):
+                st.pop("cert_new", None)
+            st.update(last_error=f"{e}", rejected=False, cert_changed=True)
+            rt.db.set(STATE, st)
+            log.warning("speedport: the modem's certificate changed, not logging in")
+            return f"{e}. homewatch did not log in."
         except client.LoginRejected as e:
             st.update(last_error=str(e), rejected=True, backoff_until=now + BACKOFF)
             rt.db.set(STATE, st)
@@ -109,8 +124,9 @@ class SpeedportModule(Module):
             st.update(last_error=msg, rejected=False)
             rt.db.set(STATE, st)
             return msg
-        st.update(last_ok=now, last_error="", rejected=False, backoff_until=0, values=r.values, status=r.status,
-                  info=r.info)
+        st.pop("cert_new", None)
+        st.update(last_ok=now, last_error="", rejected=False, cert_changed=False, backoff_until=0, values=r.values,
+                  status=r.status, info=r.info)
         rt.db.set(STATE, st)
         try:
             await rt.metrics.write([line("hw_dsl", {"site": rt.cfg.site}, {**r.values, **r.status}, now)])
@@ -118,9 +134,25 @@ class SpeedportModule(Module):
             log.warning("%s", e)
         return ""
 
+    def trust_new_certificate(self, rt, fp: str, user) -> str:
+        """Accept the changed certificate the admin was shown, and no other."""
+        st = self.state(rt)
+        new = st.get("cert_new")
+        if not new or client.fingerprint(new) != fp:
+            return "The modem's certificate changed again, check the new fingerprint"
+        st.update(cert=new, cert_changed=False, last_error="", last_try=0)
+        del st["cert_new"]
+        rt.db.set(STATE, st)
+        audit(rt.db, user.username, "speedport", f"trusting the modem's new certificate {fp}")
+        rt.wake.set()
+        return ""
+
     def page_ctx(self, rt) -> dict:
-        return {"st": self.state(rt), "has_password": rt.secrets.has(SECRET), "models": MODELS,
-                "configured": rt.db.get(KEY) is not None}
+        st = self.state(rt)
+        return {"st": st, "has_password": rt.secrets.has(SECRET), "models": MODELS,
+                "configured": rt.db.get(KEY) is not None,
+                "cert_fp": client.fingerprint(st["cert"]) if st.get("cert") else "",
+                "cert_new_fp": client.fingerprint(st["cert_new"]) if st.get("cert_new") else ""}
 
     def save(self, rt, form: dict, user) -> str:
         old = self.load(rt)
@@ -154,6 +186,9 @@ class SpeedportModule(Module):
             return "Enter the modem password to switch the module on"
         rt.db.set(KEY, new)
         st = self.state(rt)
+        if host != old["host"]:  # another device: trust starts over
+            for k in ("cert", "cert_new", "cert_changed"):
+                st.pop(k, None)
         if form.get("password"):
             rt.secrets.put(SECRET, form["password"])
             st.update(rejected=False, backoff_until=0, last_try=0)  # new credentials: try right away

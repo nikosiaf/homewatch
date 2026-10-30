@@ -441,6 +441,14 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                         csrf=request.state.user.csrf, **m.page_ctx(rt))
         return back("/modules/speedport", err=note) if bad else back("/modules/speedport", msg=note)
 
+    @app.post("/modules/speedport/trust-certificate")
+    async def speedport_trust_certificate(request: Request):
+        form = await form_of(request, request.state.user)
+        if form is None:
+            return back("/modules/speedport", err="Form expired, please try again")
+        err = MODULES["speedport"].trust_new_certificate(rt_of(request), str(form.get("fingerprint", "")), request.state.user)
+        return back("/modules/speedport", err=err) if err else back("/modules/speedport", msg="New certificate trusted")
+
     def speedtests_partial(request: Request, note: str = "", note_err: bool = False):
         rt = rt_of(request)
         m = MODULES["internet"]

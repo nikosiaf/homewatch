@@ -14,7 +14,8 @@ MODULE = "speedport"
 
 CHECKS: list[CheckDef] = [
     CheckDef("readable", "Modem readable", "modem",
-             help="ERROR when homewatch could not log in to or read the modem for 2.5 read intervals."),
+             help="ERROR when homewatch could not log in to or read the modem for 2.5 read intervals, "
+                  "or at once when the modem's certificate changed."),
     CheckDef("link", "DSL link", "modem", help="ERROR when the modem reports the DSL line down."),
     CheckDef("sync", "Sync rate", "modem", unit="%", warn=85, error=50, editable=("warn", "error"),
              lower_is_worse=True,
@@ -37,6 +38,7 @@ class State:
     last_ok: float | None = None
     last_error: str = ""
     rejected: bool = False
+    cert_changed: bool = False
     values: dict = field(default_factory=dict)
     status: dict = field(default_factory=dict)
     resyncs_24h: float | None = None
@@ -59,7 +61,10 @@ def evaluate(settings: dict, th: dict[str, Thresholds], st: State) -> list[Check
 
     root = None
     limit = 2.5 * st.interval
-    if st.last_ok is None:
+    if st.cert_changed:  # possibly an impostor: say so now, not after 2.5 read intervals
+        add("readable", ERROR, f"Not logging in: {st.last_error}")
+        root = "readable"
+    elif st.last_ok is None:
         if st.last_error:
             add("readable", ERROR, f"Can't read the modem: {st.last_error}")
             root = "readable"

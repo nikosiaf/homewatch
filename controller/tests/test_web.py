@@ -226,6 +226,48 @@ def test_modem_read_returns_partial(client):
     assert "<html" not in r.text
 
 
+def test_modem_certificate_pin_flow(client, monkeypatch):
+    from homewatch.modules.speedport import client as modem
+    from .test_speedport import CERT_A, CERT_B
+
+    tok = setup_admin(client)
+    form = {"csrf": tok, "enabled": "on", "model": "speedport-plus-2", "host": "192.0.2.1", "username": "admin",
+            "password": "s3cret", "interval_min": "15"}
+    client.post("/modules/speedport", data=form)
+    seen, presented = [], [CERT_A]
+
+    async def fetch(host, timeout=10):
+        return presented[0]
+
+    async def read(host, user, password, cert, timeout=20):
+        seen.append(cert)
+        if cert != presented[0]:
+            raise modem.CertificateRejected("the modem's certificate is not the trusted one")
+        return modem.parse({"Device.DSL.Line.1.LinkStatus": "Up"})
+
+    monkeypatch.setattr(modem, "fetch_certificate", fetch)
+    monkeypatch.setattr(modem, "read", read)
+    post = lambda: client.post("/modules/speedport/read", data={"csrf": tok}, headers={"HX-Request": "true"})
+    assert "Modem read successfully" in post().text and modem.fingerprint(CERT_A) in post().text
+    assert client.rt.db.get("speedport.state")["cert"] == CERT_A  # first use pinned
+
+    presented[0] = CERT_B
+    page = post().text
+    assert "did not log in" in page and modem.fingerprint(CERT_B) in page
+    st = client.rt.db.get("speedport.state")
+    assert st["cert"] == CERT_A and st["cert_changed"]  # never replaced by itself
+
+    fp = modem.fingerprint(CERT_B)
+    r = client.post("/modules/speedport/trust-certificate", data={"csrf": tok, "fingerprint": "AA"})
+    assert "changed again" in r.text and client.rt.db.get("speedport.state")["cert"] == CERT_A
+    r = client.post("/modules/speedport/trust-certificate", data={"csrf": tok, "fingerprint": fp})
+    assert "New certificate trusted" in r.text
+    assert "Modem read successfully" in post().text and seen[-1] == CERT_B
+
+    client.post("/modules/speedport", data={**form, "password": "", "host": "192.0.2.2"})
+    assert "cert" not in client.rt.db.get("speedport.state")  # another device: trust starts over
+
+
 def test_message_lands_in_its_box(client):
     tok = setup_admin(client)
     r = client.post("/system/home", data={"csrf": tok, "_box": "home", "name": "H", "tz": "UTC"},

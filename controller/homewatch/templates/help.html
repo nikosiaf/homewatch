@@ -123,6 +123,7 @@ less install.sh          # please read it first; it's short
 <div class="card scroll"><table>
   <tr><th>What you see</th><th>What to do</th></tr>
   <tr><td>"HTTPS certificate isn't trusted"</td><td>Install a trusted certificate on the device, or untick "Check the HTTPS certificate" if it is self-signed.</td></tr>
+  <tr><td>ISP modem: "certificate is not the trusted one"</td><td>homewatch stopped logging in to the modem. If you replaced the modem or updated its firmware, press "Trust the new certificate" on the module page. If not, check your network first: another device may be posing as the modem.</td></tr>
   <tr><td>A module answers with a 503 or isn't recognized</td><td>Check the address is the device's web GUI and includes its port, such as <code>https://192.168.1.1:8443</code>. Port 443 may belong to a reverse proxy.</td></tr>
   <tr><td>MikroTik: "can't reach the REST API"</td><td>Check that <code>www-ssl</code> (or <code>www</code>) is enabled and that this host is in its <code>available-from</code> list.</td></tr>
   <tr><td>OPNsense: "lacks the privilege"</td><td>Add the named privilege to the homewatch user under System → Access → Users.</td></tr>
