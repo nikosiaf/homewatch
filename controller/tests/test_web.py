@@ -561,18 +561,21 @@ def test_history_level_filter_lists_only_that_level(client):
     assert "warning-over" in every and "error-over" in every
 
 
-def test_history_filters_and_groups_by_module(client):
+def test_history_all_modules_is_one_timeline_and_one_module_is_a_section(client):
     setup_admin(client)
     db, now = client.rt.db, time.time()
     add = "INSERT INTO issues(site,check_key,level,worst,started,detail) VALUES('home',?,1,1,?,?)"
+    db.run(add, ("ups.load", now - 90, "older-ups"))
     db.run(add, ("internet.loss", now - 60, "line-event"))
-    db.run(add, ("ups.load", now - 30, "ups-event"))
+    db.run(add, ("ups.health", now - 30, "newer-ups"))
     every = client.get("/history").text
-    assert "line-event" in every and "ups-event" in every
-    assert every.index("<h2>Internet line") < every.index("line-event") < every.index("<h2>UPS") < every.index("ups-event")
+    assert every.index("newer-ups") < every.index("line-event") < every.index("older-ups")  # newest first
+    assert "<th>Source</th>" in every and "<h2>UPS" not in every and "<h2>Internet line" not in every
+    assert ">UPS (NUT)<" in every or ">UPS<" in every
     assert '<option value="ups"' in every and 'value="ups.load"' not in every
     one = client.get("/history?module=ups").text
-    assert "ups-event" in one and "line-event" not in one
+    assert "newer-ups" in one and "older-ups" in one and "line-event" not in one
+    assert "<th>Source</th>" not in one and "<h2>UPS" in one
 
 
 def test_opnsense_key_is_encrypted_and_kept_out_of_versions_and_exports(client, monkeypatch):

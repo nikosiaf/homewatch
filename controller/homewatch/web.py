@@ -349,7 +349,11 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         uptime = 100 * (1 - down / (days * 86400))
         check_names = {f"{m.id}.{c.id}": c.name for m in MODULES.values() for c in m.checks}
         groups = [(m.name, in_module) for m in MODULES.values()
-                  if (in_module := [e for e in events if e["key"].split(".", 1)[0] == m.id])]
+                  if module == m.id and (in_module := [e for e in events if e["key"].split(".", 1)[0] == m.id])]
+        sources = {m.id: m.name for m in MODULES.values()}
+        for e in events:
+            mid = e["key"].split(".", 1)[0]
+            e["source"] = sources.get(mid, mid)
         return page(request, "history.html", request.state.user, events=events, groups=groups, names=check_names,
                     modules=[(m.id, m.name) for m in MODULES.values()], module=module, level=level, days=days, uptime=uptime, outages=outages, since=since, now=time.time())
 
