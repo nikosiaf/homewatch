@@ -525,3 +525,23 @@ def test_internet_saved_before_the_switch_is_off_only_when_all_probes_are_off(cl
         saved[p]["enabled"] = False
     rt.db.set("module.internet", saved)
     assert rt.internet_settings()["enabled"] is False
+
+
+def test_history_period_counts_events_not_start_times(client):
+    setup_admin(client)
+    db, now = client.rt.db, time.time()
+    add = "INSERT INTO issues(site,check_key,level,worst,started,resolved,detail,resolved_detail) VALUES('home',?,1,1,?,?,?,?)"
+    db.run(add, ("internet.loss", now - 3 * 86400, now - 3600, "started-earlier", "ended-today"))
+    db.run(add, ("internet.dns", now - 3 * 86400, None, "still-open", ""))
+    db.run(add, ("internet.jitter", now - 3 * 86400, now - 2 * 86400, "over-before", "over-before-too"))
+    day = client.get("/history?days=1").text
+    assert "ended-today" in day and "started-earlier" not in day and "still-open" in day and "over-before" not in day
+    week = client.get("/history?days=7").text
+    assert "started-earlier" in week and "over-before" in week
+    assert "data-autosubmit" in day
+
+
+def test_check_now_button_says_running(client):
+    setup_admin(client)
+    client.post("/setup/home", data={})
+    assert 'data-busy="Running…"' in client.get("/partials/status").text

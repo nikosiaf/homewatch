@@ -319,8 +319,9 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt = rt_of(request)
         days = max(1, min(days, 400))
         since = time.time() - days * 86400
-        q = "SELECT * FROM issues WHERE site=? AND started>?"
-        args: list = [rt.cfg.site, since]
+        # also issues that started earlier but ended in the period, or are still open
+        q = "SELECT * FROM issues WHERE site=? AND (started>? OR resolved>? OR resolved IS NULL)"
+        args: list = [rt.cfg.site, since, since]
         if check:
             q += " AND check_key=?"
             args.append(check)
@@ -339,13 +340,14 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                 events.append({"ts": i["resolved"], "kind": "off" if off else "ok", "level": OK,
                                "key": i["check_key"], "detail": i["resolved_detail"],
                                "after": i["resolved"] - i["started"]})
+        events = [e for e in events if e["ts"] > since or e.get("open_for") is not None]
         events.sort(key=lambda e: e["ts"], reverse=True)
         from .report import downtime
 
         down, outages = downtime(rt.db, rt.cfg.site, "internet.reachable", since, time.time())
         uptime = 100 * (1 - down / (days * 86400))
         return page(request, "history.html", request.state.user, events=events, names=rt.names(), check=check,
-                    level=level, days=days, uptime=uptime, outages=outages, now=time.time())
+                    level=level, days=days, uptime=uptime, outages=outages, since=since, now=time.time())
 
     # -- internet module ------------------------------------------------------------------------
     @app.get("/internet")

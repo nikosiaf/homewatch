@@ -3,7 +3,7 @@
 {% block content %}
 <h1>History</h1>
 <div class="card">
-  <form class="row" method="get" action="/history">
+  <form class="row" method="get" action="/history" data-autosubmit>
     <div><label for="c">Check</label><select id="c" name="check"><option value="">All checks</option>
       {% for k, n in names.items() %}<option value="{{ k }}" {{ 'selected' if k == check }}>{{ n }}</option>{% endfor %}</select></div>
     <div><label for="l">Worst level</label><select id="l" name="level"><option value="">Any</option>
@@ -13,6 +13,7 @@
     <div><button>Show</button></div>
   </form>
   <p>Internet uptime over {{ days }} day{{ 's' if days > 1 }}: <b>{{ '%.2f' | format(uptime) }} %</b> · {{ outages }} outage{{ 's' if outages != 1 }}</p>
+  <p class="quiet small">Showing {{ events | length }} event{{ 's' if events | length != 1 }} since {{ since | ts }}, plus anything still open.</p>
 </div>
 <div class="card scroll"><table>
   <tr><th>When</th><th>Status</th><th>Check</th><th>What happened</th><th>Duration</th></tr>

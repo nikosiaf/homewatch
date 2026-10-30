@@ -7,7 +7,7 @@
       {% if last_error %} · <span style="color:var(--err)">{{ last_error }}</span>{% endif %}</div>
   </div>
   {% if user.is_admin %}<form method="post" action="/checks/run" style="margin-left:auto">
-    <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status"><button class="secondary">Check now</button></form>{% endif %}
+    <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status"><button class="secondary" data-busy="Running…">Check now</button></form>{% endif %}
 </div>
 {% from "_note.html" import note with context %}{{ note("status") }}
 {% if open %}

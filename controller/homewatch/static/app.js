@@ -146,3 +146,24 @@ document.addEventListener("change", function (e) {
   const some = box.form && box.form.querySelector('input[name="scope"][value="some"]');
   if (some) some.checked = true;
 });
+
+// Buttons that wait for the server (data-busy): say so until the page answers. The status page's
+// 30 s refresh is held meanwhile, or it would put the idle button back.
+(function () {
+  let busy = false;
+  document.addEventListener("submit", function (e) {
+    const btn = e.target.querySelector("button[data-busy]");
+    if (!btn || e.defaultPrevented) return;
+    busy = true;
+    btn.textContent = btn.dataset.busy;
+    btn.disabled = true;
+  });
+  document.addEventListener("htmx:beforeRequest", function (e) { if (busy) e.preventDefault(); });
+  // back button: the browser may restore the page as it was left
+  window.addEventListener("pageshow", function (e) { if (e.persisted) location.reload(); });
+})();
+
+// Filter forms apply as soon as a choice changes.
+document.querySelectorAll("form[data-autosubmit]").forEach(function (form) {
+  form.addEventListener("change", function () { form.submit(); });
+});
