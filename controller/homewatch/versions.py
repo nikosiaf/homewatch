@@ -19,14 +19,14 @@ from .db import DB
 
 KEEP = 200
 # settings keys that are configuration; the rest of the settings table is runtime state
-CONFIG_KEYS = ("engine.timing", "home.name", "home.tz", "home.url", "report.schedule", "updates.check", "status.tiles")
+CONFIG_KEYS = ("engine.timing", "home.name", "home.tz", "home.url", "report.schedule", "updates.check")
 CONFIG_PREFIXES = ("module.",)
 CHECK_COLS = ("site", "check_key", "enabled", "warn", "error")
 CHANNEL_COLS = ("id", "kind", "name", "enabled", "levels", "quiet_start", "quiet_end", "weekly_report", "config")
 MAINT_COLS = ("id", "site", "name", "kind", "start_ts", "end_ts", "weekday", "start_min", "dur_min", "checks",
               "created_by", "created")
 LABELS = {"engine.timing": "check timing", "home.name": "home", "home.tz": "home", "home.url": "home",
-          "report.schedule": "weekly report", "updates.check": "update check", "status.tiles": "status page"}
+          "report.schedule": "weekly report", "updates.check": "update check"}
 
 
 def is_config(key: str) -> bool:

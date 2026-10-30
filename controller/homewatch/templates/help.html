@@ -65,6 +65,7 @@ less install.sh          # please read it first; it's short
     <li><b>Offline queue:</b> messages that can't be sent while the line is down go out when it's back, with the outage times.</li>
     <li><b>Snooze:</b> holds one check's notifications for a while, from Maintenance or next to the problem on Status. The history is still recorded.</li>
     <li><b>Maintenance windows:</b> hold notifications for chosen checks, once or every week.</li>
+    <li><b>Status page:</b> one tile per module, coloured by its worst check. Click one to see its checks; it stays open for your account until you close it.</li>
     <li><b>History:</b> a timeline of every problem and its return to OK, by module, level and period.</li>
   </ul>
 </div>
@@ -87,7 +88,6 @@ less install.sh          # please read it first; it's short
 <h2 id="config">Settings and accounts</h2>
 <div class="card">
   <ul style="margin:0">
-    <li><b>Status page:</b> System can show modules as tiles instead of rows. Click either to see the checks.</li>
     <li><b>Accounts:</b> an admin can change everything; a viewer can only see status, history and this page.</li>
     <li><b>Configuration versions:</b> every saved change is kept (last 200), showing who changed what. Each can be viewed and restored,
       and a restore can itself be undone.</li>

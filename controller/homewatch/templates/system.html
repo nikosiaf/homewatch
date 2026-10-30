@@ -39,14 +39,6 @@
     <p><button data-save>Save</button></p>
   </form>
 </div>
-<h2>Status page</h2>
-<form method="post" action="/system/status-page" class="card" id="status-page">
-  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="status-page">
-  {{ note("status-page") }}
-  <label class="check"><input type="checkbox" name="tiles" {{ 'checked' if status_tiles }}> Show modules as tiles</label>
-  <p class="quiet small">One tile per module, coloured by its worst check; click one to see its checks. Off: one row per module.</p>
-  <button data-save>Save</button>
-</form>
 <h2>Users</h2>
 <div class="card scroll" id="users">
   {{ note("users") }}

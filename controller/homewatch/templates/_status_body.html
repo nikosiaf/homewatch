@@ -25,11 +25,11 @@
       <button class="secondary">Snooze</button></form></td>{% endif %}</tr>{% endfor %}
 </table></div>
 {% endif %}
-{% if status_tiles %}<div class="module-grid">{% endif %}
+<div class="module-grid" data-csrf="{{ user.csrf }}">
 {% for mod_id, mod_name, mod_tiles in tile_groups %}
 {% set worst = mod_tiles | map(attribute='status') | max %}
 {% set probs = mod_tiles | selectattr('status', 'gt', 0) | list %}
-<details class="module s{{ worst }}" data-module="{{ mod_id }}">
+<details class="module s{{ worst }}" data-module="{{ mod_id }}" {{ 'open' if mod_id in open_modules }}>
   <summary>
     <span class="badge s{{ worst }}">{{ LEVEL_WORD[worst] }}</span>
     <b>{{ mod_name }}</b>
@@ -54,4 +54,4 @@
 {% else %}
 <p class="quiet">No results yet. The first run happens a few seconds after start, then every 2 minutes.</p>
 {% endfor %}
-{% if status_tiles %}</div>{% endif %}
+</div>

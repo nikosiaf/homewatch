@@ -93,24 +93,18 @@ document.querySelectorAll("[data-engine-select]").forEach(function (sel) {
   show();
 });
 
-// Status page: remember which module lines are expanded, across the 30 s refresh.
-(function () {
-  const KEY = "hw-open-modules";
-  function load() { try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { return []; } }
-  function restore(root) {
-    const open = load();
-    root.querySelectorAll("details[data-module]").forEach(function (d) { d.open = open.includes(d.dataset.module); });
-  }
-  document.addEventListener("toggle", function (e) {
-    const d = e.target;
-    if (!d.matches || !d.matches("details[data-module]")) return;
-    const open = load().filter(function (m) { return m !== d.dataset.module; });
-    if (d.open) open.push(d.dataset.module);
-    try { localStorage.setItem(KEY, JSON.stringify(open)); } catch (e) { /* private mode: not remembered */ }
-  }, true);
-  restore(document);
-  document.body.addEventListener("htmx:afterSwap", function (e) { restore(e.target); });
-})();
+// Status page: the server remembers which module tiles are open, per user. A click, not the toggle
+// event: that one also fires when a refresh renders a tile open.
+document.addEventListener("click", function (e) {
+  const summary = e.target.closest ? e.target.closest("details[data-module] > summary") : null;
+  if (!summary) return;
+  const d = summary.parentElement;
+  fetch("/status/open", {
+    method: "POST", credentials: "same-origin", keepalive: true,
+    headers: { "X-CSRF-Token": d.closest("[data-csrf]").dataset.csrf },
+    body: new URLSearchParams({ module: d.dataset.module, open: d.open ? "0" : "1" }),
+  });
+});
 
 // Grouped choice lists: the "All" box ticks / unticks its group and follows the group's boxes.
 document.querySelectorAll("[data-choice-group]").forEach(function (d) {

@@ -671,19 +671,20 @@ def test_help_page_has_every_modules_instructions(client, cfg):
     assert seen.status_code == 200 and "www-ssl" in seen.text and 'href="/modules/ups"' not in seen.text
 
 
-def test_status_page_can_show_modules_as_tiles(client):
+def test_status_tiles_stay_open_per_user(client):
     from homewatch.modules import CheckResult
 
     tok = setup_admin(client)
     rt = client.rt
     rt.results = [CheckResult("ups.load", "Load", 0, "fine")]
     body = client.get("/partials/status").text
-    assert 'data-module="ups"' in body and "module-grid" not in body
-    assert "Show modules as tiles" in client.get("/system").text
-    r = client.post("/system/status-page", data={"csrf": tok, "tiles": "on"})
-    assert "Saved" in r.text and rt.db.get("status.tiles") is True
-    body = client.get("/partials/status").text
-    assert "module-grid" in body and '<details class="module s0" data-module="ups">' in body and "fine" in body
-    client.post("/system/status-page", data={"csrf": tok})
-    assert "module-grid" not in client.get("/partials/status").text
+    assert "module-grid" in body and 'data-module="ups" >' in body
+    assert "Show modules as tiles" not in client.get("/system").text
+    assert client.post("/status/open", data={"csrf": "wrong", "module": "ups", "open": "1"}).status_code == 403
+    assert client.post("/status/open", data={"csrf": tok, "module": "nope", "open": "1"}).status_code == 200
+    client.post("/status/open", data={"csrf": tok, "module": "ups", "open": "1"}, headers={})
+    assert 'data-module="ups" open>' in client.get("/partials/status").text
+    assert 'data-module="ups" open>' in client.get("/").text
+    client.post("/status/open", data={"csrf": tok, "module": "ups", "open": "0"})
+    assert 'data-module="ups" >' in client.get("/partials/status").text
     rt.results = []
