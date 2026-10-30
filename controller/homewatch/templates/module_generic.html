@@ -29,11 +29,19 @@
 {% endmacro %}
 
 {% macro choice_list(items_all, prefix, word) %}
+  <div data-choice-list>
+  {% if items_all | length >= 15 %}
+  <div class="row choice-tools">
+    <input type="search" data-choice-search placeholder="Search {{ items_all | length }} items" aria-label="Search this list">
+    <label class="check"><input type="checkbox" data-choice-selected> Only {{ word }}</label>
+    <span class="quiet small" data-choice-count role="status"></span>
+  </div>
+  {% endif %}
   {% if items_all and items_all[0][0].group %}
   {% for g, items in items_all | groupby('0.group') %}{% set n_on = items | selectattr('1') | list | length %}
   <details class="choices" data-choice-group>
     <summary><b>{{ g }}</b> <span class="quiet small"><span data-group-count>{{ n_on }}</span> of {{ items | length }} {{ word }}{% if prefix == 'choose.' and ('group:' ~ g) in skipped %} · domain not watched{% endif %}</span></summary>
-    <label class="check all"><input type="checkbox" data-group-all {{ 'checked' if n_on == items | length }}> All {{ items | length }}</label>
+    <label class="check all"><input type="checkbox" data-group-all {{ 'checked' if n_on == items | length }}> <span data-group-all-label>All {{ items | length }}</span></label>
     <div class="row">{% for c, on in items %}
       <label class="check" title="{{ c.detail }}"><input type="checkbox" name="{{ prefix }}{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
     {% endfor %}</div>
@@ -44,6 +52,7 @@
     <label class="check" title="{{ c.detail }}"><input type="checkbox" name="{{ prefix }}{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
   {% else %}<span class="quiet">Appears after the first reading.</span>{% endfor %}</div>
   {% endif %}
+  </div>
 {% endmacro %}
 
 {% if not configured %}

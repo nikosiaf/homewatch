@@ -122,7 +122,9 @@ document.querySelectorAll("[data-choice-group]").forEach(function (d) {
     count.textContent = n;
   }
   all.addEventListener("change", function () {
-    boxes.forEach(function (b) { b.checked = all.checked; });
+    // while the list is filtered, only what is shown: nothing out of sight changes
+    boxes.filter(function (b) { return !b.closest("label").classList.contains("filtered-out"); })
+      .forEach(function (b) { b.checked = all.checked; });
     sync();
   });
   boxes.forEach(function (b) { b.addEventListener("change", sync); });
@@ -193,4 +195,42 @@ document.querySelectorAll("form[data-autosubmit]").forEach(function (form) {
     if (!document.hidden) htmx.ajax("GET", "/partials/status", { source: body, target: body, swap: "innerHTML" });
   });
 })();
+
+// Long tick lists: search and "only ticked". Rows are only hidden, so every tick is still sent when saving.
+document.querySelectorAll("[data-choice-search]").forEach(function (search) {
+  const list = search.closest("[data-choice-list]");
+  const only = list.querySelector("[data-choice-selected]");
+  const count = list.querySelector("[data-choice-count]");
+  const rows = Array.from(list.querySelectorAll("label.check:not(.all)")).filter(function (l) { return !l.closest(".choice-tools"); });
+  const groups = Array.from(list.querySelectorAll("[data-choice-group]"));
+  function apply() {
+    const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const filtering = words.length > 0 || only.checked;
+    let shown = 0, ticked = 0;
+    rows.forEach(function (l) {
+      const box = l.querySelector("input");
+      const text = (l.textContent + " " + box.name).toLowerCase();
+      const show = words.every(function (w) { return text.includes(w); }) && (!only.checked || box.checked);
+      l.classList.toggle("filtered-out", !show);
+      if (show) shown++;
+      if (box.checked) ticked++;
+    });
+    groups.forEach(function (d) {
+      const inGroup = Array.from(d.querySelectorAll("label.check:not(.all)"));
+      const visible = inGroup.filter(function (l) { return !l.classList.contains("filtered-out"); }).length;
+      d.hidden = filtering && visible === 0;
+      if (filtering) d.open = visible > 0;
+      else if (d.dataset.wasFiltering) d.open = false;
+      d.dataset.wasFiltering = filtering ? "1" : "";
+      const label = d.querySelector("[data-group-all-label]");
+      if (label) label.textContent = filtering ? "All " + visible + " shown" : "All " + inGroup.length;
+    });
+    count.textContent = shown + " of " + rows.length + " shown, " + ticked + " ticked";
+  }
+  search.addEventListener("input", apply);
+  search.addEventListener("keydown", function (e) { if (e.key === "Enter") e.preventDefault(); });  // not a save
+  only.addEventListener("change", apply);
+  list.addEventListener("change", function (e) { if (e.target !== only) apply(); });
+  apply();
+});
 

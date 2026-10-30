@@ -19,7 +19,11 @@
     <label class="check"><input type="checkbox" name="enabled" {{ 'checked' if c.enabled }}> Enabled</label>
   </div>
   {{ note("ch-" ~ c.id) }}
-  {% if queued.get(c.id) %}<p class="flash err">{{ queued[c.id].n }} message(s) waiting{% if queued[c.id].e %}: {{ queued[c.id].e }}{% endif %}</p>{% endif %}
+  {% if c.kind != 'healthchecks' %}<p class="quiet small" style="margin:6px 0">Last delivered: {{ ((now - c.last_ok) | dur) ~ ' ago' if c.last_ok else 'nothing yet' }}</p>{% endif %}
+  {% set q = queued.get(c.id) %}
+  {% if q %}<p class="flash {{ 'err' if q.e else 'ok' }}">{{ q.n }} message{{ 's' if q.n != 1 }} waiting, the oldest for {{ (now - q.oldest) | dur }}.
+    {% if q.next_try > now %}Next try in {{ (q.next_try - now) | dur }}.{% else %}Next try within 15 s.{% endif %}
+    {% if q.e %}<br>Last error: {{ q.e }}. Check the settings below and press Test these settings.{% else %}<br>Held for quiet hours.{% endif %}</p>{% endif %}
   {% if c.kind == 'healthchecks' %}<p class="quiet small">{{ mod.DESCRIPTION }} <a href="{{ mod.LINK }}" target="_blank" rel="noopener">healthchecks.io</a>
     · Last ping: {{ c.last_ping | ts('%d %b %H:%M') if c.last_ping else 'none yet' }}</p>{% endif %}
   <div class="row">

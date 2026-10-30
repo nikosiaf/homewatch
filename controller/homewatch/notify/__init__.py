@@ -230,6 +230,7 @@ class Notifier:
                 log.warning("channel %s: send failed (%s), retry in %ss", ch["name"], reason, delay)
                 return sent
             self._forget(ids)
+            self.db.set(f"channel.{ch_id}.last_ok", time.time())
             sent += 1
         return sent
 

@@ -809,13 +809,15 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                         "quiet_end": draft.get("quiet_end") or None, "enabled": int(draft.get("enabled") == "on")}
             chans.append(row | {"config": config, "levels": [lv for lv in (1, 2) if f"level{lv}" in draft] if draft else json.loads(c["levels"]),
                                     "has_private": rt.secrets.has(channel_private(c["id"])),
+                                    "last_ok": rt.db.get(f"channel.{c['id']}.last_ok", 0),
                                     "has_secret": rt.secrets.has(channel_secret(c["id"])),
                                     "last_ping": rt.db.get(f"heartbeat.{c['id']}.last_ok", 0)})
-        queued = rt.db.all("SELECT channel_id, COUNT(*) n, MAX(last_error) e FROM outbox GROUP BY channel_id")
+        queued = rt.db.all("SELECT channel_id, COUNT(*) n, MAX(last_error) e, MIN(created) oldest, MIN(next_try) next_try "
+                           "FROM outbox GROUP BY channel_id")
         return page(request, "notifications.html", request.state.user, chans=chans, providers=PROVIDERS,
                     timing=timing(rt.db), default_timing=DEFAULT_TIMING,
                     coming=COMING_SOON, csrf=request.state.user.csrf,
-                    add=rt.drafts.pop((request.state.user.id, "/notifications/add"), {}),
+                    add=rt.drafts.pop((request.state.user.id, "/notifications/add"), {}), now=time.time(),
                     schedule=rt.db.get("report.schedule") or {"weekday": 0, "time": "08:00"},
                     queued={q["channel_id"]: q for q in queued})
 
@@ -894,6 +896,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt.db.run("DELETE FROM channels WHERE id=?", (cid,))
         rt.db.run("DELETE FROM outbox WHERE channel_id=?", (cid,))
         forget_channel(rt.secrets, cid)
+        rt.db.run("DELETE FROM settings WHERE key IN (?, ?)", (f"channel.{cid}.last_ok", f"heartbeat.{cid}.last_ok"))
         audit(rt.db, user.username, "channel.delete", str(cid))
         return back("/notifications", msg="Removed")
 

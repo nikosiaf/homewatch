@@ -152,3 +152,7 @@ header .menu { order: 2; }
 .module-grid details.module > summary > .quiet { flex-basis: 100%; order: 3; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .module-grid details.module[open] > summary { height: auto; }
 .module-grid details.module[open] > summary > .quiet { display: block; }
+label.check.filtered-out { display: none; }
+.choice-tools { align-items: center; margin-bottom: 8px; }
+.choice-tools input[type="search"] { max-width: 280px; }
+

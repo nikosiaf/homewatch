@@ -577,6 +577,41 @@ def test_history_says_when_it_is_cut_off(client, monkeypatch):
     assert "older ones in this period are left out" in client.get("/history").text
 
 
+def test_delivery_health_on_the_notifications_page(client):
+    tok = setup_admin(client)
+    client.post("/notifications/add", data={"csrf": tok, "kind": "ntfy", "ntfy.url": "https://n.test/topic"})
+    rt = client.rt
+    cid = rt.db.one("SELECT id FROM channels")["id"]
+    assert "Last delivered: nothing yet" in client.get("/notifications").text
+    now = time.time()
+    rt.db.set(f"channel.{cid}.last_ok", now - 7200)
+    rt.db.run("INSERT INTO outbox(channel_id,created,level,title,body,attempts,next_try,last_error) VALUES(?,?,2,'t','b',3,?,'ntfy answered HTTP 500')",
+              (cid, now - 600, now + 60))
+    page = client.get("/notifications").text
+    assert re.search(r"Last delivered: 2\s*h\S*( 0 min)? ago", page) and "1 message waiting" in page and "Next try in" in page and "ntfy answered HTTP 500" in page
+    client.post(f"/notifications/{cid}/delete", data={"csrf": tok})
+    assert rt.db.get(f"channel.{cid}.last_ok") is None
+
+
+def test_long_lists_get_search_short_ones_dont(client):
+    from homewatch.modules.apibase import Choice
+
+    setup_admin(client)
+    m = MODULES["pbs"]
+    client.rt.db.set("module.pbs", {"enabled": True, "url": "https://p.test:8007", "token_id": "a@b!c", "verify": True, "chosen": []})
+    m.snap = {"_summary": "s"}
+    saved = m.choices, m.tables
+    m.tables = lambda *a: []
+    try:
+        m.choices = lambda snap: [Choice(str(i), f"n{i}") for i in range(14)]
+        assert "data-choice-search" not in client.get("/modules/pbs").text
+        m.choices = lambda snap: [Choice(str(i), f"n{i}") for i in range(15)]
+        assert "data-choice-search" in client.get("/modules/pbs").text
+    finally:
+        m.choices, m.tables = saved
+        m.snap = None
+
+
 def test_message_lands_in_its_box(client):
     tok = setup_admin(client)
     r = client.post("/system/home", data={"csrf": tok, "_box": "home", "name": "H", "tz": "UTC"},
