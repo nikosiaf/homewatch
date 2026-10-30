@@ -98,6 +98,11 @@ class Runtime:
         for t in self.tasks:
             t.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
+        await self.notifier.http.aclose()
+        for m in MODULES.values():
+            if getattr(m, "client", None):
+                await m.client.close()
+                m.client = None
 
     async def check_loop(self) -> None:
         await asyncio.sleep(5)
@@ -198,6 +203,7 @@ class Runtime:
             return False
         self.speed_running = True  # set now, so the page shows the running row right away
         self.speed_started = time.time()
+        self.tasks = [t for t in self.tasks if not t.done()]
         self.tasks.append(asyncio.create_task(self.run_speedtest(already_marked=True)))
         return True
 

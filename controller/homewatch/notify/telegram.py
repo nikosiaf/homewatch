@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import httpx
 
+from .base import RateLimited
+
 TITLE = "Telegram"
 DESCRIPTION = ("Messages from your own Telegram bot. Create a bot with @BotFather to get its token, send the bot "
                "a message, then use your chat ID (for example from @userinfobot).")
@@ -12,6 +14,7 @@ FIELDS = [("chat_id", "Chat ID", "Your chat or group ID, e.g. 123456789 or -100â
 SECRET_LABEL = "Bot token"
 SECRET_REQUIRED = True
 MAX = 4000
+MAX_TEXT = MAX  # longer messages are sent as several
 
 
 async def send(http: httpx.AsyncClient, config: dict, secret: str, level: int, title: str, body: str) -> None:
@@ -26,6 +29,12 @@ async def send(http: httpx.AsyncClient, config: dict, secret: str, level: int, t
     except httpx.HTTPError as e:
         # report the error type only: some httpx errors carry the request URL, which holds the token
         raise RuntimeError(f"Telegram unreachable ({type(e).__name__})") from None
+    if r.status_code == 429:
+        try:
+            after = float(r.json().get("parameters", {}).get("retry_after", 60))
+        except (ValueError, TypeError, AttributeError):
+            after = 60.0
+        raise RateLimited("Telegram asks to slow down", max(1.0, after))
     if r.status_code != 200:
         # never echo the URL: it holds the token
         try:

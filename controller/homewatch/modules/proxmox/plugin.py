@@ -69,6 +69,8 @@ class ProxmoxModule(PinnedTLS, Module):
         pin = self.pins(rt).get(host_port(s["url"]), {}).get("cert")
         key = (s["url"], s["token_id"], secret, s["verify"], pin)
         if self.client is None or self.client_key != key:
+            if self.client:
+                await self.client.close()
             self.client, self.client_key = Client(s["url"], s["token_id"], secret, verify_for(full, s["url"])), key
         return self.client
 

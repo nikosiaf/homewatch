@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from ..modules import LEVEL_WORD
+from .base import RateLimited, retry_after
 
 TITLE = "Webhook"
 DESCRIPTION = ("POSTs each message as JSON to an address of yours: Slack, Discord or Mattermost incoming webhooks, "
@@ -45,5 +46,7 @@ async def send(http: httpx.AsyncClient, config: dict, secret: str, level: int, t
     except httpx.HTTPError as e:
         # error type only: the URL (which may hold a token) must not end up in logs or on the page
         raise RuntimeError(f"webhook unreachable ({type(e).__name__})") from None
+    if r.status_code == 429:
+        raise RateLimited("the webhook asks to slow down", retry_after(r.headers))
     if r.status_code >= 300:
         raise RuntimeError(f"webhook answered HTTP {r.status_code}")

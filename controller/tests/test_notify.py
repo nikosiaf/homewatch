@@ -9,7 +9,7 @@ import respx
 
 from homewatch.engine import Event
 from homewatch.modules import ERROR, OK, WARNING
-from homewatch.notify import Notifier, channel_secret, in_quiet, render
+from homewatch.notify import Message, Notifier, channel_secret, in_quiet, render
 from homewatch.secrets import Secrets
 from tests.conftest import KEY
 import base64
@@ -183,3 +183,89 @@ async def test_webhook_payload_and_errors(db):
             await webhook.send(http, {}, "https://hooks.example/bad", ERROR, "t", "b")
         assert "hooks.example" not in str(e.value)  # the URL may hold a token
     assert webhook.check_secret("hooks.example/x") and not webhook.check_secret("https://hooks.example/x")
+
+
+def _msg(n, body="x"):
+    return Message(2, f"m{n}", body)
+
+
+@respx.mock
+async def test_long_message_arrives_in_parts_nothing_lost(db):
+    s = secrets(db)
+    n = Notifier(db, s, httpx.AsyncClient())
+    cid = add_channel(db, kind="telegram")
+    s.put(channel_secret(cid), "TOKEN")
+    body = "\n\n".join(f"incident {i} " + "y" * 150 for i in range(60))
+    n.queue(cid, Message(2, "Outage", body), 1000.0)
+    route = respx.post(url__regex=r"https://api.telegram.org/.*").mock(return_value=httpx.Response(200, json={"ok": True}))
+    assert await n.send_due(1000.0) > 1
+    texts = [json.loads(c.request.content)["text"] for c in route.calls]
+    assert all(len(t) <= 4000 for t in texts) and "shortened" not in "".join(texts)
+    for i in range(60):
+        assert sum(f"incident {i} " in t for t in texts) == 1  # whole, at a boundary, exactly once
+    assert "(1/" in texts[0] and not db.all("SELECT 1 FROM outbox")
+
+
+@respx.mock
+async def test_failure_halfway_retries_only_the_rest(db):
+    s = secrets(db)
+    n = Notifier(db, s, httpx.AsyncClient())
+    cid = add_channel(db, kind="telegram")
+    s.put(channel_secret(cid), "TOKEN")
+    for i in range(3):
+        n.queue(cid, _msg(i, f"body{i} " + "z" * 3000), 1000.0 + i)
+    ok = httpx.Response(200, json={"ok": True})
+    route = respx.post(url__regex=r"https://api.telegram.org/.*").mock(side_effect=[ok, httpx.Response(500, json={})])
+    assert await n.send_due(2000.0) == 1
+    assert len(db.all("SELECT 1 FROM outbox")) == 2
+    route.side_effect = [ok, ok]
+    assert await n.send_due(2100.0) == 2
+    assert "body0" not in "".join(json.loads(c.request.content)["text"] for c in route.calls[2:])
+
+
+@respx.mock
+async def test_rate_limit_instruction_is_respected(db):
+    s = secrets(db)
+    n = Notifier(db, s, httpx.AsyncClient())
+    cid = add_channel(db, kind="telegram")
+    s.put(channel_secret(cid), "TOKEN")
+    n.queue(cid, _msg(1), 1000.0)
+    respx.post(url__regex=r"https://api.telegram.org/.*").mock(
+        return_value=httpx.Response(429, json={"ok": False, "parameters": {"retry_after": 500}}))
+    assert await n.send_due(1000.0) == 0
+    row = db.one("SELECT next_try, last_error FROM outbox")
+    assert row["next_try"] == 1500.0 and "slow down" in row["last_error"]
+    assert await n.send_due(1100.0) == 0 and db.one("SELECT attempts FROM outbox")["attempts"] == 1  # not tried early
+
+
+async def test_dead_channel_doesnt_hold_up_the_others(db, monkeypatch):
+    import asyncio
+
+    import homewatch.notify as nt
+
+    monkeypatch.setattr(nt, "SEND_LIMIT", 0.05)
+    s = secrets(db)
+    n = Notifier(db, s, httpx.AsyncClient())
+    dead, live = add_channel(db, kind="telegram"), add_channel(db, kind="ntfy")
+    n.queue(dead, _msg(1), 1000.0)
+    n.queue(live, _msg(2), 1000.0)
+    order = []
+
+    async def deliver(ch, msg):
+        if ch["id"] == dead:
+            await asyncio.sleep(5)
+        order.append(ch["id"])
+
+    monkeypatch.setattr(n, "deliver", deliver)
+    assert await n.send_due(1000.0) == 1
+    assert order == [live]
+    row = db.one("SELECT channel_id, last_error FROM outbox")
+    assert row["channel_id"] == dead and "no answer" in row["last_error"]
+
+
+def test_split_text_prefers_boundaries():
+    from homewatch.notify import split_text
+
+    assert split_text("aaa\n\nbbb\nccc", 8) == ["aaa", "bbb\nccc"]
+    assert split_text("x" * 25, 10) == ["x" * 10, "x" * 10, "x" * 5]
+

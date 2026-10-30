@@ -6,6 +6,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from .base import RateLimited, retry_after
+
 TITLE = "ntfy"
 DESCRIPTION = ("Push notifications through the free ntfy app (ntfy.sh or your own server). Pick a hard-to-guess "
                "topic, subscribe to it in the app, and paste the topic's full address here.")
@@ -13,6 +15,7 @@ LINK = "https://ntfy.sh"
 FIELDS = [("url", "Topic URL", "https://ntfy.sh/your-hard-to-guess-topic")]
 SECRET_LABEL = "Access token (optional, for protected topics)"
 DEFAULT_SERVER = "https://ntfy.sh"
+MAX_TEXT = 2000  # ntfy turns bodies over 4096 bytes into attachments; Greek and emoji take 2 to 4 bytes each
 PRIVATE = ("url", "topic")  # a hard-to-guess topic is its own password
 DESTINATION = ("server",)
 PRIORITY = {0: "default", 1: "high", 2: "urgent"}
@@ -61,5 +64,7 @@ async def send(http: httpx.AsyncClient, config: dict, secret: str, level: int, t
     if secret:
         headers["Authorization"] = f"Bearer {secret}"
     r = await http.post(f"{server}/{topic}", content=body.encode(), headers=headers)
+    if r.status_code == 429:
+        raise RateLimited("ntfy asks to slow down", retry_after(r.headers))
     if r.status_code >= 300:
         raise RuntimeError(f"ntfy answered HTTP {r.status_code}")

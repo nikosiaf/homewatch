@@ -6,6 +6,7 @@ when several messages wait for the same channel they go out as one.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -20,6 +21,7 @@ from ..engine import Event, tz
 from ..modules import ERROR, LEVEL_WORD, OK, WARNING
 from ..secrets import Secrets
 from . import healthchecks, mail, ntfy, telegram, webhook
+from .base import RateLimited
 
 log = logging.getLogger("homewatch.notify")
 
@@ -28,6 +30,8 @@ KINDS = {"telegram": telegram, "ntfy": ntfy, "email": mail, "webhook": webhook} 
 PROVIDERS = {**KINDS, "healthchecks": healthchecks}  # everything that can be added on the Notifications page
 COMING_SOON: tuple[str, ...] = ()
 RETRY_MAX = 120
+SEND_LIMIT = 60  # seconds one message may take
+JOIN_ROOM = 300  # left free in a long message's parts for its title and "delivered late" note
 
 
 @dataclass
@@ -193,33 +197,66 @@ class Notifier:
                     (channel_id, now, msg.level, msg.title, msg.body, next_try if next_try is not None else now))
 
     async def send_due(self, now: float | None = None) -> int:
-        """Deliver due messages; several waiting for one channel are joined into one."""
+        """Deliver due messages, each channel on its own, so that a dead one doesn't hold up the others."""
         now = now or time.time()
-        sent = 0
-        zone = tz(self.db)
-        due = self.db.all("SELECT * FROM outbox WHERE next_try<=? ORDER BY channel_id, created", (now,))
+        due = self.db.all("SELECT * FROM outbox WHERE next_try<=? ORDER BY channel_id, created, id", (now,))
         by_channel: dict[int, list] = {}
         for row in due:
             by_channel.setdefault(row["channel_id"], []).append(row)
-        for ch_id, rows in by_channel.items():
-            ch = self.db.one("SELECT * FROM channels WHERE id=?", (ch_id,))
-            ids = [r["id"] for r in rows]
-            if ch is None or not ch["enabled"]:
-                self.db.run(f"DELETE FROM outbox WHERE id IN ({','.join('?' * len(ids))})", ids)
-                continue
-            msg = join(rows, zone, now)
+        counts = await asyncio.gather(*(self._send_channel(ch_id, rows, now) for ch_id, rows in by_channel.items()))
+        return sum(counts)
+
+    async def _send_channel(self, ch_id: int, rows: list, now: float) -> int:
+        """Send a channel's queue in order. What was delivered is gone from the queue at once, so a failure
+        halfway retries only the rest, and nothing arrives twice."""
+        ch = self.db.one("SELECT * FROM channels WHERE id=?", (ch_id,))
+        if ch is None or not ch["enabled"]:
+            self._forget(r["id"] for r in rows)
+            return 0
+        limit = getattr(KINDS.get(ch["kind"]), "MAX_TEXT", None)
+        zone = tz(self.db)
+        sent = 0
+        for batch in batches(self._split_long(rows, limit), zone, now, limit):
+            ids = [r["id"] for r in batch]
             try:
-                await self.deliver(ch, msg)
+                await asyncio.wait_for(self.deliver(ch, join(batch, zone, now)), SEND_LIMIT)
             except Exception as e:  # noqa: BLE001 - any failure means "try again later"
-                attempts = max(r["attempts"] for r in rows) + 1
-                delay = min(15 * 2 ** (attempts - 1), RETRY_MAX)
+                attempts = max(r["attempts"] for r in batch) + 1
+                delay = e.after if isinstance(e, RateLimited) else min(15 * 2 ** (attempts - 1), RETRY_MAX)
+                reason = str(e)[:300] or f"no answer within {SEND_LIMIT} s"
+                rest = self.db.all("SELECT id FROM outbox WHERE channel_id=? AND next_try<=?", (ch_id, now))
                 self.db.run(f"UPDATE outbox SET attempts=?, next_try=?, last_error=? WHERE id IN "
-                            f"({','.join('?' * len(ids))})", (attempts, now + delay, str(e)[:300], *ids))
-                log.warning("channel %s: send failed (%s), retry in %ss", ch["name"], e, delay)
-                continue
-            self.db.run(f"DELETE FROM outbox WHERE id IN ({','.join('?' * len(ids))})", ids)
+                            f"({','.join('?' * len(rest))})", (attempts, now + delay, reason, *[r["id"] for r in rest]))
+                log.warning("channel %s: send failed (%s), retry in %ss", ch["name"], reason, delay)
+                return sent
+            self._forget(ids)
             sent += 1
         return sent
+
+    def _forget(self, ids) -> None:
+        for i in ids:
+            self.db.run("DELETE FROM outbox WHERE id=?", (i,))
+
+    def _split_long(self, rows: list, limit: int | None) -> list:
+        """Replace any message too long for the channel by parts in the queue, so that each is tracked by itself."""
+        if not limit:
+            return rows
+        room = limit - JOIN_ROOM
+        out = []
+        for row in rows:
+            if len(row["body"]) <= room:
+                out.append(row)
+                continue
+            parts = split_text(row["body"], room)
+            with self.db.tx() as t:
+                t.run("DELETE FROM outbox WHERE id=?", (row["id"],))
+                for n, part in enumerate(parts, 1):
+                    i = t.run("INSERT INTO outbox(channel_id,created,level,title,body,attempts,next_try,last_error) "
+                              "VALUES(?,?,?,?,?,?,?,?)",
+                              (row["channel_id"], row["created"], row["level"], f"{row['title']} ({n}/{len(parts)})", part,
+                               row["attempts"], row["next_try"], row["last_error"]))
+                    out.append(t.one("SELECT * FROM outbox WHERE id=?", (i,)))
+        return out
 
     async def deliver(self, ch, msg: Message) -> None:
         mod = KINDS.get(ch["kind"])
@@ -228,6 +265,38 @@ class Notifier:
         config = full_config(self.secrets, ch)
         secret = self.secrets.get(channel_secret(ch["id"])) or ""
         await mod.send(self.http, config, secret, msg.level, msg.title, msg.body)
+
+
+def split_text(text: str, room: int) -> list[str]:
+    """Cut at incident boundaries (a blank line) where possible, then at line ends, then anywhere."""
+    parts = []
+    while len(text) > room:
+        cut = text.rfind("\n\n", 0, room)
+        if cut <= 0:
+            cut = text.rfind("\n", 0, room)
+        if cut <= 0:
+            cut = room
+        parts.append(text[:cut].rstrip())
+        text = text[cut:].lstrip("\n")
+    return parts + [text] if text else parts
+
+
+def batches(rows: list, zone: ZoneInfo, now: float, limit: int | None) -> list[list]:
+    """Group a queue into messages that each fit the channel, keeping the order."""
+    out: list[list] = []
+    for row in rows:
+        if out and _fits(out[-1] + [row], zone, now, limit):
+            out[-1].append(row)
+        else:
+            out.append([row])
+    return out
+
+
+def _fits(rows: list, zone: ZoneInfo, now: float, limit: int | None) -> bool:
+    if limit is None:
+        return True
+    msg = join(rows, zone, now)
+    return len(msg.title) + 2 + len(msg.body) <= limit
 
 
 def join(rows, zone: ZoneInfo, now: float) -> Message:
