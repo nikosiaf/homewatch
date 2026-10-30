@@ -52,7 +52,8 @@ class MikroTikModule(ApiModule):
                  "/ip service set www-ssl certificate=www disabled=no\n"
                  "# if www-ssl has an 'available-from' list, add this homewatch host's address to it:\n"
                  "/ip service set www-ssl available-from=<existing list>,<homewatch ip>/32"),
-        ("text", "Use the same user and password on every device, then list their addresses below."),
+        ("text", "Use the same user and password on every device, then list their addresses below. That certificate is "
+                 "self-signed, so untick \"Check the HTTPS certificate\" unless you installed a trusted one."),
     ]
     fields = [
         Field("devices", "Device addresses", "192.168.88.1, 192.168.88.2"),

@@ -21,6 +21,14 @@ class InternetModule(Module):
     id = checks.MODULE
     name = "Internet line"
     checks = checks.CHECKS
+    description = ("Watches your internet line: public ping, gateway ping, DNS lookup and an optional speed test, so a "
+                   "router or LAN problem can be told apart from the line being down.")
+    setup = [
+        ("text", "Nothing to create. Enter your contracted speed, tick the probes you want and check the targets."),
+        ("text", "The speed test is off by default and uses Cloudflare, which needs nothing extra. To use Ookla, pick it as "
+                 "the engine, accept its EULA and privacy policy, and press Save: homewatch then downloads Ookla's "
+                 "program, which it isn't allowed to include."),
+    ]
 
     def load(self, rt) -> dict:
         return load(rt.db, rt.cfg.gateway_hint, rt.cfg.dns_hint)

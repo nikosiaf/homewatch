@@ -36,6 +36,18 @@ MODELS = {
 class SpeedportModule(Module):
     id = checks.MODULE
     name = "ISP modem"
+    description = ("Reads the DSL line from your provider's modem: sync rate, attainable rate, SNR margin, attenuation, "
+                   "line uptime and resyncs. Values are only read, never changed.")
+    setup = [
+        ("text", "The modem has only its admin login, so homewatch needs that password. It is stored encrypted and never "
+                 "shown again."),
+        ("text", "Each reading logs in, which ends any open browser session on the modem's web page. Keep the interval at "
+                 "15 minutes or more."),
+        ("text", "After a rejected login the modem slows down further attempts, so homewatch waits 6 hours (or until you "
+                 "save new credentials)."),
+        ("text", "This host must be able to reach the modem's address. Behind a separate router or firewall that may need "
+                 "a rule there."),
+    ]
     checks = checks.CHECKS
 
     def load(self, rt) -> dict:

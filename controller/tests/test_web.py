@@ -627,3 +627,21 @@ def test_old_plain_key_moves_to_secrets_everywhere(client, tmp_path):
     snap["settings"]["module.opnsense"]["api_key"] = "from-import"
     versions.apply(rt.db, snap)
     assert "api_key" not in rt.db.get("module.opnsense")
+
+
+def test_help_page_has_every_modules_instructions(client, cfg):
+    setup_admin(client)
+    text = client.get("/help").text
+    assert 'href="/help"' in text and "www-ssl" in text and "pveum user token add" in text
+    for m in MODULES.values():
+        assert m.name.replace("&", "&amp;") in text and m.setup and m.description, m.id
+        for c in m.checks:
+            assert c.name in text or c.name.replace("'", "&#39;") in text
+    assert 'href="/modules/ups"' in text
+    from homewatch.auth import Auth
+    Auth(client.rt.db).create_user("viewer", "a-long-password", "viewer")
+    client.post("/logout", data={"csrf": csrf(text)})
+    login = client.get("/login")
+    client.post("/login", data={"username": "viewer", "password": "a-long-password", "csrf": csrf(login.text)})
+    seen = client.get("/help")
+    assert seen.status_code == 200 and "www-ssl" in seen.text and 'href="/modules/ups"' not in seen.text

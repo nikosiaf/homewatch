@@ -35,6 +35,14 @@ def normalize_url(url: str) -> str:
 class ProxmoxModule(Module):
     id = checks.MODULE
     name = "Proxmox VE"
+    description = ("Watches a Proxmox VE host or cluster through a read-only API token: nodes, guests, storage, disk "
+                   "health and backups. Nothing on Proxmox is changed.")
+    setup = [
+        ("text", "In the Proxmox shell (node → Shell), run:"),
+        ("code", "\n".join(SETUP_COMMANDS)),
+        ("text", "The last command prints the token's secret once: paste it into the module. The token can only read "
+                 "(role PVEAuditor). Then tick the guests to watch."),
+    ]
     checks = checks.CHECKS
 
     def __init__(self):

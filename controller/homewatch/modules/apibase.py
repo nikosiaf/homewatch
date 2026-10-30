@@ -75,8 +75,6 @@ def https_url(value: str, default_port: int | None = None, allow_http: bool = Fa
 
 
 class ApiModule(Module):
-    description = ""
-    setup: list[tuple[str, str]] = []  # ("text" | "code", content)
     fields: list[Field] = []
     secret_label = ""  # empty: no secret
     secret_placeholder = ""

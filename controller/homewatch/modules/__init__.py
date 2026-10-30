@@ -85,6 +85,8 @@ class Module:
     id = ""
     name = ""
     checks: list[CheckDef] = []
+    description = ""  # shown on the Help page, with setup
+    setup: list[tuple[str, str]] = []  # ("text" | "code", content)
 
     def load(self, rt) -> dict:
         raise NotImplementedError

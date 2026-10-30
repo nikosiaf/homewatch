@@ -180,7 +180,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if user is None:
             return RedirectResponse("/login", status_code=303)
         request.state.user = user
-        viewer_ok = path in ("/", "/history", "/partials/status", "/api/series", "/logout", "/password")
+        viewer_ok = path in ("/", "/history", "/help", "/partials/status", "/api/series", "/logout", "/password")
         if not user.is_admin and not viewer_ok:
             return HTMLResponse("Admins only", status_code=403)
         resp = await call_next(request)
@@ -352,6 +352,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                   if (in_module := [e for e in events if e["key"].split(".", 1)[0] == m.id])]
         return page(request, "history.html", request.state.user, events=events, groups=groups, names=check_names,
                     modules=[(m.id, m.name) for m in MODULES.values()], module=module, level=level, days=days, uptime=uptime, outages=outages, since=since, now=time.time())
+
+    @app.get("/help")
+    async def help_page(request: Request):
+        return page(request, "help.html", request.state.user, modules=list(MODULES.values()))
 
     # -- internet module ------------------------------------------------------------------------
     @app.get("/internet")

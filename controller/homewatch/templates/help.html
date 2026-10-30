@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Help{% endblock %}
+{% block content %}
+<h1>Help</h1>
+
+<div class="card" id="about">
+  <h2 style="margin-top:0">About homewatch</h2>
+  <p>A self-hosted monitor for your home: internet line, servers, network, backups and UPS, with notifications when
+    something needs attention. It only reads from your devices and never changes them.</p>
+  <table>
+    <tr><td>Version</td><td>{{ version }}</td></tr>
+    <tr><td>License</td><td>MIT</td></tr>
+    <tr><td>Source</td><td><a href="https://github.com/nikosiaf/homewatch" target="_blank" rel="noopener">github.com/nikosiaf/homewatch</a></td></tr>
+  </table>
+  <p class="small" style="margin-bottom:0">On this page:
+    <a href="#install">Install</a> · <a href="#modules">Modules</a> · <a href="#alerts">Alerts</a> ·
+    <a href="#channels">Notifications</a> · <a href="#config">Settings</a> · <a href="#update">Update and back up</a> ·
+    <a href="#security">Security</a> · <a href="#trouble">Troubleshooting</a></p>
+</div>
+
+<h2 id="install">Install</h2>
+<div class="card">
+  <p>You need a Linux host with Docker Engine and the Compose plugin (2 CPU, 2 GB RAM and 10 GB disk are plenty).
+    Download <code>docker-compose.yml</code>, <code>Caddyfile</code>, <code>env.example</code> and <code>install.sh</code>
+    from the latest release, then:</p>
+  <pre class="code">mkdir homewatch &amp;&amp; cd homewatch
+chmod +x install.sh
+less install.sh          # please read it first; it's short
+./install.sh</pre>
+  <p>The script writes <code>.env</code> with a new master key, creates a self-signed certificate and starts the containers.
+    It prints the certificate's SHA-256 fingerprint: compare it when your browser warns about the certificate at
+    <code>https://&lt;host&gt;</code>.</p>
+  <p style="margin-bottom:0">The setup wizard then asks for an admin account, your home's name and time zone, the internet checks and contracted
+    speed, a notification channel and an optional heartbeat. Add everything else one module at a time, under Modules.</p>
+</div>
+
+<h2 id="modules">Modules</h2>
+<p class="quiet">Every module only reads, and all but Internet line start off. Open one for its setup steps and what it checks. The limits shown are the
+  defaults{% if user.is_admin %}; change them under <a href="/checks">Checks</a>{% endif %}.</p>
+{% for m in modules %}
+<details class="choices" id="module-{{ m.id }}">
+  <summary><b>{{ m.name }}</b></summary>
+  {% if m.description %}<p>{{ m.description }}</p>{% endif %}
+  {% if m.setup %}<h3>Setup</h3>
+  {% for kind, text in m.setup %}{% if kind == 'code' %}<pre class="code">{{ text }}</pre>{% else %}<p class="small" style="margin:4px 0">{{ text }}</p>{% endif %}{% endfor %}{% endif %}
+  <h3>Checks</h3>
+  <div class="scroll"><table>
+    <tr><th>Check</th><th>Warning</th><th>Error</th><th>What it does</th></tr>
+    {% for c in m.checks %}<tr>
+      <td style="white-space:nowrap">{{ c.name }}{% if not c.default_on %} <span class="quiet small">(off by default)</span>{% endif %}</td>
+      <td style="white-space:nowrap">{% if c.warn is not none %}{{ '<' if c.lower_is_worse else '≥' }} {{ c.warn }} {{ c.unit }}{% endif %}</td>
+      <td style="white-space:nowrap">{% if c.error is not none %}{{ '<' if c.lower_is_worse else '≥' }} {{ c.error }} {{ c.unit }}{% endif %}</td>
+      <td class="small">{{ c.help }}</td>
+    </tr>{% endfor %}
+  </table></div>
+  {% if user.is_admin %}<p><a href="/modules/{{ m.id }}">Open {{ m.name }}</a></p>{% endif %}
+</details>
+{% endfor %}
+
+<h2 id="alerts">How alerts work</h2>
+<div class="card">
+  <ul style="margin:0">
+    <li><b>Confirmation:</b> a change must hold for 2 runs (about 4 minutes) before it's sent, so short blips stay quiet.</li>
+    <li><b>Reminders:</b> open problems are repeated every 12 hours.</li>
+    <li><b>Offline queue:</b> messages that can't be sent while the line is down go out when it's back, with the outage times.</li>
+    <li><b>Snooze:</b> holds one check's notifications for a while, from the Checks page. The history is still recorded.</li>
+    <li><b>Maintenance windows:</b> hold notifications for chosen checks, once or every week.</li>
+    <li><b>History:</b> a timeline of every problem and its return to OK, by module, level and period.</li>
+  </ul>
+</div>
+
+<h2 id="channels">Notifications</h2>
+<div class="card">
+  <ul style="margin:0">
+    <li><b>Telegram:</b> a bot token and chat ID.</li>
+    <li><b>ntfy:</b> one topic URL.</li>
+    <li><b>Email:</b> any SMTP server. Port 465 uses TLS, other ports STARTTLS; a password is never sent unencrypted.</li>
+    <li><b>Webhook:</b> every message is POSTed as JSON with <code>text</code>, <code>content</code>, <code>title</code>, <code>body</code>,
+      <code>level</code> and <code>level_name</code>. It works as-is with Slack, Mattermost, Rocket.Chat and Discord.</li>
+    <li><b>healthchecks.io heartbeat:</b> homewatch pings it after every run, and healthchecks.io alerts you when the pings
+      stop, for example when the host, power or internet is down.</li>
+    <li><b>Quiet hours</b> per channel: warnings wait until they end; errors are always sent.</li>
+    <li><b>Weekly report:</b> optional; pick the day, the time and the channels.</li>
+  </ul>
+</div>
+
+<h2 id="config">Settings and accounts</h2>
+<div class="card">
+  <ul style="margin:0">
+    <li><b>Accounts:</b> an admin can change everything; a viewer can only see status, history and this page.</li>
+    <li><b>Configuration versions:</b> every saved change is kept (last 200), showing who changed what. Each can be viewed and restored,
+      and a restore can itself be undone.</li>
+    <li><b>Export and import:</b> System downloads all settings as one YAML file, and one is written every night (last 14 kept).
+      Importing replaces the settings; the previous ones stay under Configuration versions.</li>
+    <li>Passwords, tokens and users are never part of a version or an export. Enter them again after importing elsewhere.</li>
+  </ul>
+</div>
+
+<h2 id="update">Update and back up</h2>
+<div class="card">
+  <p>To update, set <code>HW_VERSION</code> in <code>.env</code> to the new release, then run:</p>
+  <pre class="code">docker compose pull &amp;&amp; docker compose up -d</pre>
+  <p>Database changes apply on start. The System page tells you when a newer release exists.</p>
+  <p style="margin-bottom:0">To back up, keep the Docker volumes <code>homewatch_hw-data</code> (settings, users, history, encrypted secrets) and
+    <code>homewatch_vm-data</code> (metrics), and a copy of <code>.env</code>. Without <code>HW_MASTER_KEY</code> from that file, saved passwords
+    and tokens can't be decrypted and you would enter them again.</p>
+</div>
+
+<h2 id="security">Security</h2>
+<div class="card">
+  <ul style="margin:0">
+    <li>Don't forward homewatch to the internet. Use it on your LAN or over a VPN such as Tailscale.</li>
+    <li>Give each module a dedicated read-only account, as its setup steps describe.</li>
+    <li>Keep "Check the HTTPS certificate" on when the device has a trusted certificate. Without it, someone on your network could
+      pose as the device and capture its login.</li>
+    <li>Secrets are encrypted at rest and never shown again after saving. Passwords are hashed with Argon2, and logins lock for
+      5 minutes after 5 failures.</li>
+  </ul>
+</div>
+
+<h2 id="trouble">Troubleshooting</h2>
+<div class="card scroll"><table>
+  <tr><th>What you see</th><th>What to do</th></tr>
+  <tr><td>"HTTPS certificate isn't trusted"</td><td>Install a trusted certificate on the device, or untick "Check the HTTPS certificate" if it is self-signed.</td></tr>
+  <tr><td>A module answers with a 503 or isn't recognized</td><td>Check the address is the device's web GUI and includes its port, such as <code>https://192.168.1.1:8443</code>. Port 443 may belong to a reverse proxy.</td></tr>
+  <tr><td>MikroTik: "can't reach the REST API"</td><td>Check that <code>www-ssl</code> (or <code>www</code>) is enabled and that this host is in its <code>available-from</code> list.</td></tr>
+  <tr><td>OPNsense: "lacks the privilege"</td><td>Add the named privilege to the homewatch user under System → Access → Users.</td></tr>
+  <tr><td>"Probe data fresh" is in error</td><td>Check that the Telegraf container is running. If the host's clock jumps at boot, Telegraf stalls: on a Proxmox VM, set "Use local time for RTC" to No.</td></tr>
+  <tr><td>The internet checks show nothing</td><td>Check that the Internet line module is enabled and at least one probe is ticked.</td></tr>
+  <tr><td>Home Assistant doesn't report an entity</td><td>Only essential entities are read by default. Turn on "Watch every entity" to include the rest; network RX/TX sensors are never reported.</td></tr>
+  <tr><td>A device's check is often down on purpose</td><td>Untick it in the module's lists, or switch the check off under Checks.</td></tr>
+</table></div>
+{% endblock %}
