@@ -23,19 +23,19 @@ down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy.
 | Public ping | 1.1.1.1 and 8.8.8.8, every 30 s | Internet reachable, packet loss, latency, jitter |
 | Gateway ping | your router, every 30 s | Gateway reachable |
 | DNS lookup | `cloudflare.com` via your router, every 60 s | DNS failing / slow |
-| Speed test | Cloudflare (or Ookla CLI), every 3 h | Line speed against your contract |
+| Speed test | Cloudflare (or Ookla CLI), every 6 h, off by default | Line speed against your contract |
 
 Every probe can be switched off, and every threshold changed, in the web page.
 
 | Check | WARNING | ERROR |
 |---|---|---|
 | Internet reachable | | all public targets at 100 % loss |
-| Packet loss (5-min average) | ≥ 10 % | ≥ 20 % |
-| Latency (5-min median) | ≥ 100 ms | |
-| Jitter (10-min median) | ≥ 15 ms | ≥ 30 ms |
+| Packet loss (5-min average) | ≥ 25 % | ≥ 50 % |
+| Latency (5-min median) | ≥ 200 ms | |
+| Jitter (10-min median) | ≥ 50 ms | ≥ 100 ms |
 | Gateway reachable | | 100 % loss |
 | DNS | ≥ 500 ms | lookups fail while ping works |
-| Line speed | < 70 % of contract on 2 tests in a row | optional level, e.g. < 30 % |
+| Line speed | < 50 % of contract on 2 tests in a row | optional level, e.g. < 30 % |
 | Speed test recent | no successful test for 7 h | |
 | Speed test latency | > 40 ms on 2 tests in a row | |
 | Probe data fresh | | no data for > 3 min |

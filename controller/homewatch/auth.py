@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+import re
 import time
 from dataclasses import dataclass
 
@@ -111,8 +112,24 @@ class Auth:
         self.db.run("DELETE FROM sessions WHERE token=?", (token,))
 
 
+_CREDENTIAL = re.compile(r'"(api_key|apikey|password|secret|token)": "[^"]*"')
+
+
+def redact(detail: str) -> str:
+    """Credentials in a settings dump never reach the audit log, whichever module wrote it."""
+    return _CREDENTIAL.sub(r'"\1": "(hidden)"', detail)
+
+
+def scrub_audit(db: DB) -> None:
+    """Hide credentials in rows written before redact() existed."""
+    for row in db.all("SELECT id, detail FROM audit"):
+        clean = redact(row["detail"])
+        if clean != row["detail"]:
+            db.run("UPDATE audit SET detail=? WHERE id=?", (clean, row["id"]))
+
+
 def audit(db: DB, username: str, action: str, detail: str = "") -> None:
-    db.run("INSERT INTO audit(ts,username,action,detail) VALUES(?,?,?,?)", (time.time(), username, action, detail))
+    db.run("INSERT INTO audit(ts,username,action,detail) VALUES(?,?,?,?)", (time.time(), username, action, redact(detail)))
     from .versions import record  # every audited change may have changed the configuration
 
     record(db, username, action)

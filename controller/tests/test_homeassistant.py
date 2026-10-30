@@ -109,3 +109,61 @@ def test_alarm_safety_tamper_and_batteries():
     assert r["tamper"].status == ERROR
     assert res(w=[watch[0] | {"state": "unavailable"}])["alarm"].status == WARNING
     assert sn["watch"] == watch
+
+
+def test_rx_tx_sensors_are_never_reported():
+    gone = {"entity_id": "sensor.phone_rx", "state": "unavailable", "last_changed": iso(NOW - 3600), "name": "Phone RX"}
+    assert run(snap(unavailable=[gone]))["unavailable"].status == OK
+
+
+def _ha(monkeypatch, states):
+    import httpx
+    calls = []
+
+    def handler(request):
+        path = request.url.path
+        calls.append(path)
+        if path == "/api/config":
+            return httpx.Response(200, json={"version": "1", "state": "RUNNING"})
+        if path == "/api/states":
+            return httpx.Response(200, json=states)
+        found = [e for e in states if path.endswith("/" + e["entity_id"])]
+        return httpx.Response(200, json=found[0]) if found else httpx.Response(404)
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    return calls
+
+
+def test_only_essential_entities_are_read_after_discovery(monkeypatch):
+    import asyncio
+
+    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
+    door = {"entity_id": "sensor.door_battery", "state": "80",
+            "attributes": {"device_class": "battery", "unit_of_measurement": "%"}}
+    light = {"entity_id": "light.a", "state": "unavailable"}
+    rx = {"entity_id": "sensor.phone_rx", "state": "unavailable"}
+    upd = {"entity_id": "update.core", "state": "on", "attributes": {"latest_version": "2"}}
+    calls = _ha(monkeypatch, [door, light, rx, upd])
+    m = HomeAssistantModule()
+    s = {"url": "http://ha", "verify": False}
+    first = asyncio.run(m.fetch(s, "t", NOW))
+    assert "/api/states" in calls and first["unavailable"] == [] and first["updates"][0]["latest_version"] == "2"
+    assert [a[0] for a in first["all"]] == ["sensor.door_battery"] and first["entities"] == 4
+    calls.clear()
+    m.snap_ts = NOW
+    second = asyncio.run(m.fetch(s, "t", NOW + 120))
+    assert "/api/states" not in calls and "/api/states/sensor.door_battery" in calls
+    assert len(second["watch"]) == 1 and second["updates"] == first["updates"]
+    calls.clear()
+    asyncio.run(m.fetch(s, "t", NOW + 7 * 3600))
+    assert "/api/states" in calls
+
+
+def test_watch_every_entity_keeps_the_full_list_without_rx_tx(monkeypatch):
+    import asyncio
+
+    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
+    _ha(monkeypatch, [{"entity_id": "light.a", "state": "unavailable"}, {"entity_id": "sensor.phone_tx", "state": "1"}])
+    snap_all = asyncio.run(HomeAssistantModule().fetch({"url": "http://ha", "watch_all": True}, "t", NOW))
+    assert [a[0] for a in snap_all["all"]] == ["light.a"] and len(snap_all["unavailable"]) == 1

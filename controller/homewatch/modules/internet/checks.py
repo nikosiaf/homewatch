@@ -17,26 +17,27 @@ from .. import ERROR, OK, WARNING, CheckDef, CheckResult, Thresholds
 MODULE = "internet"
 
 CHECKS: list[CheckDef] = [
-    CheckDef("fresh", "Probe data fresh", "any", unit="s", error=180, editable=("error",),
+    CheckDef("fresh", "Probe data fresh", "any", unit="s", error=300, editable=("error",),
              help="ERROR when no ping or DNS data arrived for this many seconds."),
     CheckDef("gateway", "Gateway reachable", "gateway",
              help="ERROR when the home router answers no pings."),
     CheckDef("reachable", "Internet reachable", "public",
              help="ERROR when every public target is at 100 % packet loss."),
-    CheckDef("loss", "Packet loss", "public", unit="%", warn=10, error=20, editable=("warn", "error"),
+    CheckDef("loss", "Packet loss", "public", unit="%", warn=25, error=50, editable=("warn", "error"),
              help="5-minute average, best public target."),
-    CheckDef("latency", "Latency", "public", unit="ms", warn=100, editable=("warn", "error"),
+    CheckDef("latency", "Latency", "public", unit="ms", warn=200, editable=("warn", "error"),
              help="5-minute median round trip, best public target."),
-    CheckDef("jitter", "Jitter", "public", unit="ms", warn=15, error=30, editable=("warn", "error"),
+    CheckDef("jitter", "Jitter", "public", unit="ms", warn=50, error=100, editable=("warn", "error"),
              help="10-minute median of the ping standard deviation, best public target."),
-    CheckDef("dns", "DNS", "dns", unit="ms", warn=500, editable=("warn",),
+    CheckDef("dns", "DNS", "dns", unit="ms", warn=1000, editable=("warn",),
              help="ERROR when lookups fail while ping works; WARNING when the 5-minute median is slow."),
-    CheckDef("speed", "Line speed", "speed", unit="%", warn=70, editable=("warn", "error"), lower_is_worse=True,
+    CheckDef("speed", "Line speed", "speed", unit="%", warn=50, editable=("warn", "error"), lower_is_worse=True,
              help="Download or upload below this share of the contract on 2 tests in a row."),
-    CheckDef("speed_age", "Speed test recent", "speed", unit="h", warn=7, editable=("warn",),
+    CheckDef("speed_age", "Speed test recent", "speed", unit="h", warn=14, editable=("warn",),
              help="WARNING when no speed test succeeded for this many hours (keep it above twice the test interval)."),
-    CheckDef("speed_ping", "Speed test latency", "speed", unit="ms", warn=40, editable=("warn",),
-             help="Latency measured by the speed test, on 2 tests in a row."),
+    CheckDef("speed_ping", "Speed test latency", "speed", unit="ms", warn=40, editable=("warn",), default_on=False,
+             help="Latency measured by the Ookla speed test, on 2 tests in a row. Cloudflare's test measures "
+                  "over HTTP, which reads much higher, so it doesn't count."),
 ]
 CHECK_BY_ID = {c.id: c for c in CHECKS}
 
@@ -65,6 +66,7 @@ class Speed:
     up: float | None
     ok: bool
     latency: float | None = None
+    engine: str = ""
 
 
 @dataclass
@@ -219,13 +221,13 @@ def add_speed(s: dict, ths: dict[str, Thresholds], speeds: list[Speed], add, now
     age = (now - last.ts) / 3600
     add("speed_age", _level(age, ths["speed_age"]),
         f"last successful test {age:.1f} h ago" if age >= 1 else f"last successful test {age * 60:.0f} min ago", age)
-    pings = [x.latency for x in good if x.latency is not None]
+    pings = [x.latency for x in good if x.latency is not None and x.engine != "cloudflare"]
     if pings:
         slow = len(pings) >= 2 and ths["speed_ping"].warn is not None and all(p > ths["speed_ping"].warn for p in pings)
         add("speed_ping", WARNING if slow else OK,
             f"{pings[0]:.0f} ms" + (" on 2 tests in a row" if slow else ""), pings[0])
     else:
-        add("speed_ping", OK, "not measured by this engine")
+        add("speed_ping", OK, "only measured by the Ookla engine")
     contract = f" of {c_down:g} / {c_up:g}" if c_down and c_up else ""
     detail = f"{last.down or 0:.1f} / {last.up or 0:.1f} Mbit/s"
     if not (c_down and c_up) or (t.warn is None and t.error is None):

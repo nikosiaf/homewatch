@@ -11,10 +11,11 @@ from .checks import CHECKS, MODULE  # noqa: F401
 SETTINGS_KEY = f"module.{MODULE}"
 
 DEFAULTS = {
+    "enabled": True,
     "public": {"enabled": True, "targets": ["1.1.1.1", "8.8.8.8"]},
     "gateway": {"enabled": True, "target": ""},
     "dns": {"enabled": True, "server": "", "domain": "cloudflare.com"},
-    "speed": {"enabled": True, "engine": "cloudflare", "interval_h": 3, "ookla_accepted": False},
+    "speed": {"enabled": False, "engine": "cloudflare", "interval_h": 6, "ookla_accepted": False},
     # the line's contracted speed: used by the speed test and by modem modules, whatever is switched on
     "line": {"contract_down": 0, "contract_up": 0},
 }
@@ -42,6 +43,8 @@ def load(db, gateway_hint: str = "", dns_hint: str = "") -> dict:
         s["line"] = {"contract_down": old.get("contract_down", 0), "contract_up": old.get("contract_up", 0)}
     for k in ("contract_down", "contract_up"):
         s["speed"].pop(k, None)
+    if saved:  # settings saved before the module had a switch: on when any probe is on
+        s["enabled"] = saved.get("enabled", any(s[p]["enabled"] for p in ("public", "gateway", "dns", "speed")))
     if not saved:
         s["gateway"]["target"] = gateway_hint
         s["dns"]["server"] = dns_hint or gateway_hint

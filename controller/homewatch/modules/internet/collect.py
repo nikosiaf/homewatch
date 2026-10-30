@@ -51,6 +51,6 @@ async def collect(metrics: Metrics, db: DB, site: str, now: float | None = None)
             last_ts=max(v for _, _, v in last),
         )
 
-    rows = db.all("SELECT ts, down, up, ok, latency FROM speedtests WHERE site=? ORDER BY ts DESC LIMIT 5", (site,))
-    r.speeds = [Speed(row["ts"], row["down"], row["up"], bool(row["ok"]), row["latency"]) for row in rows]
+    rows = db.all("SELECT ts, down, up, ok, latency, engine FROM speedtests WHERE site=? ORDER BY ts DESC LIMIT 5", (site,))
+    r.speeds = [Speed(row["ts"], row["down"], row["up"], bool(row["ok"]), row["latency"], row["engine"]) for row in rows]
     return r

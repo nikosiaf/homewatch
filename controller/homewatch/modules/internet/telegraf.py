@@ -38,6 +38,8 @@ def render(settings: dict, site: str) -> str:
         "  collect_memstats = false",
         '  namepass = ["internal_agent"]',
     ]
+    if not settings["enabled"]:
+        return "\n".join(parts) + "\n"
     pub, gw, dns = settings["public"], settings["gateway"], settings["dns"]
     if pub["enabled"] and pub["targets"]:
         parts += _ping(pub["targets"], "public")

@@ -3,10 +3,16 @@
 {% block title %}Internet{% endblock %}
 {% block content %}
 <h1><a href="/modules" class="quiet" style="text-decoration:none">Modules</a> › {{ module.name }}</h1>
-<form method="post" action="/modules/internet" class="card" id="settings">
-  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="settings">
+<form method="post" action="/modules/internet" class="card {{ 'off' if not s.enabled }}" id="settings">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="settings"><input type="hidden" name="_switch" value="1">
+  <div class="row" style="justify-content:space-between">
+    <h2 style="margin:0">{{ module.name }}</h2>
+    <label class="check"><input type="checkbox" name="enabled" data-enable-toggle {{ 'checked' if s.enabled }}> Enabled</label>
+  </div>
   {{ note("settings") }}
+  <fieldset data-enable-target class="plain" {{ 'disabled' if not s.enabled }}>
   {% include "_internet_form.html" %}
+  </fieldset>
   <button data-save data-ookla-installed="{{ '1' if ookla_found else '' }}">Save</button>
 </form>
 <h2>Speed tests</h2>

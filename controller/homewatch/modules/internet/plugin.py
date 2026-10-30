@@ -26,7 +26,7 @@ class InternetModule(Module):
         return load(rt.db, rt.cfg.gateway_hint, rt.cfg.dns_hint)
 
     def enabled(self, settings: dict) -> bool:
-        return True  # probes are switched one by one
+        return bool(settings["enabled"])
 
     async def readings(self, rt, settings, now):
         return await collect.collect(rt.metrics, rt.db, rt.cfg.site, now)
@@ -44,6 +44,13 @@ class InternetModule(Module):
 
     def save(self, rt, form: dict, user) -> str:
         old = self.load(rt)
+        switched = "_switch" in form  # the wizard has no switch; turning the module off greys out (and so omits) the rest
+        if switched and form.get("enabled") != "on":
+            save(rt.db, old | {"enabled": False})
+            rt.sync_telegraf()
+            audit(rt.db, user.username, "internet", json.dumps({"enabled": False}))
+            rt.wake.set()
+            return ""
         targets = [t.strip() for t in form.get("public.targets", "").replace(",", " ").split() if t.strip()]
         if not 1 <= len(targets) <= 4 or not all(valid_host(t) for t in targets):
             return "Public targets: 1 to 4 IP addresses or host names"
@@ -59,6 +66,7 @@ class InternetModule(Module):
         if not 0.5 <= interval <= 48:
             return "Speed test interval: 0.5 to 48 hours"
         new = {
+            "enabled": True if switched else old["enabled"],
             "public": {"enabled": form.get("public.enabled") == "on", "targets": targets},
             "gateway": {"enabled": form.get("gateway.enabled") == "on" and bool(gw), "target": gw},
             "dns": {"enabled": form.get("dns.enabled") == "on" and bool(dns_server), "server": dns_server,

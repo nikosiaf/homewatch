@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import re
 from datetime import datetime
 
 import httpx
@@ -26,6 +28,10 @@ CHECKS = [
              help="Age of the last successful automatic backup; ERROR when the last attempt failed."),
 ]
 SETTLE = 30 * 60
+DISCOVER = 6 * 3600  # how often the full state list is read to find essential entities and updates
+MAX_SINGLE = 100  # more essential entities than this: one bulk read is lighter than this many requests
+BACKUP = ("sensor.backup_last_successful_automatic_backup", "sensor.backup_last_attempted_automatic_backup")
+NOISE = re.compile(r"^sensor\..*_(rx|tx)$")  # per-client traffic counters; they drop out whenever a client sleeps
 SAFETY = {"smoke", "moisture", "gas", "carbon_monoxide", "heat", "safety"}  # binary_sensor device classes  # an entity counts as unavailable after this long (restarts and blips stay quiet)
 
 
@@ -51,8 +57,10 @@ class HomeAssistantModule(ApiModule):
     id = "homeassistant"
     name = "Home Assistant"
     checks = CHECKS
-    description = ("Watches Home Assistant through the token of a non-admin user: core state, entities that become "
-                   "unavailable, available updates and automatic backups. Nothing in Home Assistant is changed.")
+    description = ("Watches Home Assistant through the token of a non-admin user: core state, alarm panels, safety and "
+                   "tamper sensors, batteries, available updates and automatic backups. Only those entities are read "
+                   "at each check; the full list is read every 6 hours to find new ones and updates, and isn't kept. "
+                   "Nothing in Home Assistant is changed.")
     setup = [
         ("text", "In Home Assistant: Settings → People → Users → Add user. Name it homewatch and leave "
                  "\"Administrator\" off."),
@@ -63,15 +71,26 @@ class HomeAssistantModule(ApiModule):
         Field("url", "Home Assistant address", "http://homeassistant.local:8123"),
         Field("verify", "Check the HTTPS certificate", kind="check", default=False,
               help="Only matters for https addresses; leave off for self-signed certificates."),
+        Field("watch_all", "Watch every entity", kind="check", default=False,
+              help="Off: only the essential entities above are read. On: all of them are read at every check and "
+                   "listed below, so any one that becomes unavailable can be reported (network traffic RX/TX "
+                   "sensors never are)."),
     ]
     secret_label = "Long-lived access token"
     secret_placeholder = "eyJ0eXAiOiJKV1Qi…"
     filter_title = "Entities to watch"
-    filter_help = ("Unavailable entities are reported only when they are ticked here, grouped by domain. New entities "
-                   "are watched, except in a domain where you untick everything.")
+    filter_help = ("Unticked entities are not checked or reported. New ones are watched, except in a domain where you "
+                   "untick everything.")
     choices_title = "Unavailable entities to ignore"
     choices_help = ("These are unavailable now, grouped by domain. Ticked ones are ignored (on purpose, or long gone). "
                     "Entities that become unavailable later are reported; tick them here if that's expected.")
+
+    def __init__(self):
+        super().__init__()
+        self._ids: list[str] | None = None  # essential entities found by the last full read
+        self._updates: list[dict] = []
+        self._total = 0
+        self._found_ts = 0.0
 
     def validate(self, form, old):
         out, err = super().validate(form, old)
@@ -85,36 +104,57 @@ class HomeAssistantModule(ApiModule):
     async def fetch(self, s, secret, now):
         async with httpx.AsyncClient(verify=bool(s.get("verify")), timeout=20,  # noqa: S501
                                      headers={"Authorization": f"Bearer {secret}"}) as http:
-            async def get(path):
+            async def get(path, missing_ok=False):
                 try:
                     r = await http.get(f"{s['url']}/api/{path}")
                 except httpx.HTTPError as e:
                     raise ApiError(f"can't reach Home Assistant ({type(e).__name__})") from None
                 if r.status_code == 401:
                     raise ApiError("Home Assistant rejected the token")
+                if missing_ok and r.status_code == 404:
+                    return None
                 if r.status_code >= 300:
                     raise ApiError(f"Home Assistant answered HTTP {r.status_code} for /api/{path}")
                 return r.json()
 
             config = await get("config")
-            states = await get("states")
+            everything = bool(s.get("watch_all"))
+            full = (everything or self._ids is None or self.snap_ts == float("-inf")
+                    or now - self._found_ts >= DISCOVER or len(self._ids) > MAX_SINGLE)
+            if full:
+                states = await get("states")
+                self._ids = [e["entity_id"] for e in states if _special(e) or e["entity_id"] in BACKUP]
+                self._updates = [{"entity_id": e["entity_id"], **{k: e.get("attributes", {}).get(k) for k in
+                                  ("title", "installed_version", "latest_version", "skipped_version")}}
+                                 for e in states if e["entity_id"].startswith("update.") and e.get("state") == "on"]
+                self._total, self._found_ts = len(states), now
+                if not everything:
+                    states = [e for e in states if e["entity_id"] in set(self._ids)]
+            else:
+                gate = asyncio.Semaphore(8)
+
+                async def one(eid):
+                    async with gate:
+                        return await get(f"states/{eid}", missing_ok=True)
+
+                states = [e for e in await asyncio.gather(*(one(i) for i in self._ids)) if e]
+        states = [e for e in states if not NOISE.match(e["entity_id"])]
         keep = ("entity_id", "state", "last_changed")
         snap = {"config": {k: config.get(k) for k in ("version", "state", "safe_mode", "recovery_mode", "location_name")},
                 "unavailable": [{k: e.get(k) for k in keep} | {"name": e.get("attributes", {}).get("friendly_name", "")}
                                 for e in states if e.get("state") == "unavailable"],
-                "updates": [{"entity_id": e["entity_id"], **{k: e.get("attributes", {}).get(k) for k in
-                             ("title", "installed_version", "latest_version", "skipped_version")}}
-                            for e in states if e["entity_id"].startswith("update.") and e.get("state") == "on"],
+                "updates": self._updates,
                 "backup": {e["entity_id"].removeprefix("sensor.backup_"): e.get("state") for e in states
-                           if e["entity_id"] in ("sensor.backup_last_successful_automatic_backup",
-                                                 "sensor.backup_last_attempted_automatic_backup")},
-                "entities": len(states),
+                           if e["entity_id"] in BACKUP},
+                "entities": self._total,
                 "watch": [{"entity_id": e["entity_id"], "state": e.get("state"),
                            "dc": e.get("attributes", {}).get("device_class"),
                            "name": e.get("attributes", {}).get("friendly_name") or ""}
                           for e in states if _special(e)],
-                "all": sorted([e["entity_id"], e.get("attributes", {}).get("friendly_name") or ""] for e in states)}
-        snap["_summary"] = f"Home Assistant {config.get('version', '?')}, {len(states)} entities"
+                "all": sorted([e["entity_id"], e.get("attributes", {}).get("friendly_name") or ""] for e in states
+                              if everything or e["entity_id"] not in BACKUP)}
+        snap["_summary"] = (f"Home Assistant {config.get('version', '?')}, "
+                            + (f"{len(states)} entities" if everything else f"{len(states)} of {self._total} entities read"))
         return snap
 
     def default_chosen(self, snap):
@@ -133,7 +173,8 @@ class HomeAssistantModule(ApiModule):
     def _reported(s, snap):
         """Unavailable entities that count: not ignored and in a watched domain."""
         ignored, skipped = set(s.get("chosen", [])), set(s.get("skipped", []))
-        return [e for e in snap["unavailable"] if e["entity_id"] not in ignored and e["entity_id"] not in skipped
+        return [e for e in snap["unavailable"] if not NOISE.match(e["entity_id"])
+                and e["entity_id"] not in ignored and e["entity_id"] not in skipped
                 and f"group:{_domain(e)}" not in skipped]
 
     def check(self, s, th, snap, now):

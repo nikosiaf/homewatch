@@ -13,6 +13,7 @@ def settings(**over):
     s = copy.deepcopy(DEFAULTS)
     s["gateway"]["target"] = "192.168.1.1"
     s["dns"]["server"] = "192.168.1.1"
+    s["speed"]["enabled"] = True  # off by default
     s["line"].update(contract_down=100, contract_up=10)
     for k, v in over.items():
         s[k].update(v)
@@ -51,9 +52,9 @@ def test_all_ok():
 
 
 def test_lossy_line_warns_and_errors():
-    r = readings(public={"1.1.1.1": good(loss=12), "8.8.8.8": good(loss=15)})
+    r = readings(public={"1.1.1.1": good(loss=30), "8.8.8.8": good(loss=35)})
     assert by_id(evaluate(settings(), th(), r))["loss"].status == WARNING
-    r = readings(public={"1.1.1.1": good(loss=25), "8.8.8.8": good(loss=30)})
+    r = readings(public={"1.1.1.1": good(loss=55), "8.8.8.8": good(loss=60)})
     assert by_id(evaluate(settings(), th(), r))["loss"].status == ERROR
 
 
@@ -89,15 +90,15 @@ def test_dns_failing_while_ping_works():
 
 
 def test_slow_dns_warns():
-    res = by_id(evaluate(settings(), th(), readings(dns=Dns(True, "success", 650, NOW - 30))))
+    res = by_id(evaluate(settings(), th(), readings(dns=Dns(True, "success", 1200, NOW - 30))))
     assert res["dns"].status == WARNING
 
 
 def test_latency_and_jitter():
-    r = readings(public={"1.1.1.1": good(rtt=150, jitter=20), "8.8.8.8": good(rtt=160, jitter=35)})
+    r = readings(public={"1.1.1.1": good(rtt=250, jitter=60), "8.8.8.8": good(rtt=260, jitter=110)})
     res = by_id(evaluate(settings(), th(), r))
     assert res["latency"].status == WARNING
-    assert res["jitter"].status == WARNING  # best target 20 ms: warn 15, error 30
+    assert res["jitter"].status == WARNING  # best target 60 ms: warn 50, error 100
 
 
 def test_no_data_means_monitoring_broken():
@@ -116,15 +117,15 @@ def test_stale_data():
 def test_speed_needs_two_low_tests():
     one_low = [Speed(NOW - 100, 40, 9, True), Speed(NOW - 10900, 95, 9.5, True)]
     assert by_id(evaluate(settings(), th(), readings(speeds=one_low)))["speed"].status == OK
-    two_low = [Speed(NOW - 100, 40, 9, True), Speed(NOW - 10900, 60, 9.5, True)]
+    two_low = [Speed(NOW - 100, 40, 9, True), Speed(NOW - 10900, 45, 9.5, True)]
     res = by_id(evaluate(settings(), th(), readings(speeds=two_low)))
     assert res["speed"].status == WARNING and "2 tests in a row" in res["speed"].detail
-    low_upload = [Speed(NOW - 100, 95, 5, True), Speed(NOW - 10900, 95, 6, True)]
+    low_upload = [Speed(NOW - 100, 95, 4, True), Speed(NOW - 10900, 95, 4.5, True)]
     assert by_id(evaluate(settings(), th(), readings(speeds=low_upload)))["speed"].status == WARNING
 
 
 def test_failed_speed_tests_are_ignored():
-    speeds = [Speed(NOW - 100, None, None, False), Speed(NOW - 200, 40, 9, True), Speed(NOW - 300, 50, 9, True)]
+    speeds = [Speed(NOW - 100, None, None, False), Speed(NOW - 200, 40, 9, True), Speed(NOW - 300, 45, 9, True)]
     assert by_id(evaluate(settings(), th(), readings(speeds=speeds)))["speed"].status == WARNING
 
 
@@ -171,10 +172,17 @@ def test_speed_error_level_age_and_latency():
     t["speed"].error = 30
     two_very_low = [Speed(NOW - 100, 25, 9, True, 12), Speed(NOW - 10900, 28, 9, True, 11)]
     assert by_id(evaluate(settings(), t, readings(speeds=two_very_low)))["speed"].status == ERROR
-    old = [Speed(NOW - 8 * 3600, 95, 9.5, True, 12), Speed(NOW - 11 * 3600, 95, 9.5, True, 12)]
+    old = [Speed(NOW - 16 * 3600, 95, 9.5, True, 12), Speed(NOW - 19 * 3600, 95, 9.5, True, 12)]
     res = by_id(evaluate(settings(), th(), readings(speeds=old)))
-    assert res["speed_age"].status == WARNING and "8.0 h ago" in res["speed_age"].detail
+    assert res["speed_age"].status == WARNING and "16.0 h ago" in res["speed_age"].detail
     slow = [Speed(NOW - 100, 95, 9.5, True, 55), Speed(NOW - 10900, 95, 9.5, True, 48)]
     assert by_id(evaluate(settings(), th(), readings(speeds=slow)))["speed_ping"].status == WARNING
     one_slow = [Speed(NOW - 100, 95, 9.5, True, 55), Speed(NOW - 10900, 95, 9.5, True, 12)]
     assert by_id(evaluate(settings(), th(), readings(speeds=one_slow)))["speed_ping"].status == OK
+
+
+def test_cloudflare_latency_does_not_count_for_speed_ping():
+    slow = [Speed(NOW - 100, 95, 9.5, True, 55, "cloudflare"), Speed(NOW - 10900, 95, 9.5, True, 48, "cloudflare")]
+    assert by_id(evaluate(settings(), th(), readings(speeds=slow)))["speed_ping"].status == OK
+    ookla = [Speed(NOW - 100, 95, 9.5, True, 55, "ookla"), Speed(NOW - 10900, 95, 9.5, True, 48, "ookla")]
+    assert by_id(evaluate(settings(), th(), readings(speeds=ookla)))["speed_ping"].status == WARNING

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from . import __version__, report, versions
-from .auth import audit
+from .auth import audit, scrub_audit
 from .config import Config
 from .db import DB
 from .engine import Engine, thresholds, timing
@@ -75,6 +75,7 @@ class Runtime:
     # ---- loops ---------------------------------------------------------------------------
     def start(self) -> None:
         self.migrate_heartbeat()
+        scrub_audit(self.db)
         self.sync_telegraf()
         coros = [self.check_loop(), self.outbox_loop(), self.daily_loop()]
         for m in MODULES.values():
@@ -168,8 +169,9 @@ class Runtime:
     async def speed_loop(self) -> None:
         await asyncio.sleep(60)
         while True:
-            s = self.internet_settings()["speed"]
-            if s["enabled"] and self.speed_due(float(s["interval_h"]), time.time()):
+            settings = self.internet_settings()
+            s = settings["speed"]
+            if settings["enabled"] and s["enabled"] and self.speed_due(float(s["interval_h"]), time.time()):
                 try:
                     await self.run_speedtest()
                 except Exception:  # noqa: BLE001

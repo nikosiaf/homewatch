@@ -1,12 +1,14 @@
 """Web flows: first-run setup, login, roles, CSRF."""
 
 import json
+import os
 import re
 import time
 
 import pytest
 from fastapi.testclient import TestClient
 
+from homewatch.modules.registry import MODULES
 from homewatch.runtime import Runtime
 from homewatch.web import create_app
 
@@ -492,3 +494,34 @@ def test_maintenance_checks_grouped_by_module(client):
                                           "start_time": "03:00", "dur_min": "30", "scope": "some",
                                           "check.internet.loss": "on"})
     assert "Modem swap" in r.text and "Packet loss" in r.text
+
+
+def test_internet_module_switch(client):
+    tok = setup_admin(client)
+    rt = client.rt
+    assert rt.internet_settings()["enabled"] is True
+    # turning it off posts only the switch: the rest of the form is greyed out, and its settings stay
+    r = client.post("/modules/internet", data={"csrf": tok, "_box": "settings", "_switch": "1"})
+    assert "Saved" in r.text
+    s = rt.internet_settings()
+    assert s["enabled"] is False and s["public"]["targets"]
+    assert "inputs.ping" not in open(os.path.join(rt.cfg.telegraf_dir, "telegraf.conf")).read()
+    assert not MODULES["internet"].enabled(s)
+    r = client.post("/modules/internet", data={"csrf": tok, "_box": "settings", "_switch": "1", "enabled": "on",
+                                              "public.enabled": "on", "public.targets": "1.1.1.1",
+                                              "speed.engine": "cloudflare", "speed.interval_h": "6"})
+    assert rt.internet_settings()["enabled"] is True
+    assert "inputs.ping" in open(os.path.join(rt.cfg.telegraf_dir, "telegraf.conf")).read()
+
+
+def test_internet_saved_before_the_switch_is_off_only_when_all_probes_are_off(client):
+    setup_admin(client)
+    rt = client.rt
+    s = rt.internet_settings()
+    saved = {k: s[k] for k in ("public", "gateway", "dns", "speed", "line")}
+    rt.db.set("module.internet", saved)
+    assert rt.internet_settings()["enabled"] is True
+    for p in ("public", "gateway", "dns", "speed"):
+        saved[p]["enabled"] = False
+    rt.db.set("module.internet", saved)
+    assert rt.internet_settings()["enabled"] is False

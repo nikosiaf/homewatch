@@ -116,3 +116,17 @@ async def test_install_ookla_from_a_mocked_download(tmp_path, monkeypatch):
             return_value=httpx.Response(200, content=buf.getvalue()))
         assert await speedtest.install_ookla(str(tmp_path / "ookla")) == ""
     assert os.access(tmp_path / "ookla" / "speedtest", os.X_OK)
+
+
+def test_audit_hides_credentials(tmp_path):
+    from homewatch.auth import audit, redact, scrub_audit
+    from homewatch.db import DB
+
+    db = DB(str(tmp_path / "a.db"))
+    dump = '{"enabled": true, "url": "https://x", "api_key": "abc", "token_id": "u!t"} secret=replaced'
+    audit(db, "admin", "opnsense", dump)
+    db.run("INSERT INTO audit(ts,username,action,detail) VALUES(1,'admin','opnsense',?)", (dump,))
+    scrub_audit(db)
+    rows = [r["detail"] for r in db.all("SELECT detail FROM audit")]
+    assert all("abc" not in r and "u!t" in r and "(hidden)" in r for r in rows)
+    assert redact("plain text") == "plain text"
