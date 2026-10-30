@@ -214,6 +214,7 @@ def with_pre(request: Request, resp: Response, tok: str) -> Response:
     return resp
 
 
+HISTORY_ROWS = 500
 NEVER_KEPT = {"csrf", "current", "password", "password2", "secret", "_box", "new", "new2"}
 
 
@@ -452,7 +453,9 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if level in ("1", "2"):
             q += " AND worst=?"
             args.append(int(level))
-        rows = rt.db.all(q + " ORDER BY started DESC LIMIT 500", tuple(args))
+        rows = rt.db.all(q + f" ORDER BY started DESC LIMIT {HISTORY_ROWS + 1}", tuple(args))
+        cut_off = len(rows) > HISTORY_ROWS
+        rows = rows[:HISTORY_ROWS]
         now = time.time()
         # a timeline: each issue is a "problem" event and, once it ends, a "back to OK" event
         events = []
@@ -478,7 +481,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             mid = e["key"].split(".", 1)[0]
             e["source"] = sources.get(mid, mid)
         return page(request, "history.html", request.state.user, events=events, groups=groups, names=check_names,
-                    modules=[(m.id, m.name) for m in MODULES.values()], module=module, level=level, days=days, avail=avail, since=since, now=now)
+                    modules=[(m.id, m.name) for m in MODULES.values()], module=module, level=level, days=days, avail=avail, since=since, now=now, cut_off=cut_off, history_rows=HISTORY_ROWS)
 
     @app.get("/help")
     async def help_page(request: Request):

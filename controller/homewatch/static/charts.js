@@ -3,26 +3,35 @@
   const el = document.getElementById("chart");
   if (!el) return;
   const note = document.getElementById("chart-note");
-  let chart = "latency", range = "24h", plot = null;
+  let chart = "latency", range = "24h", plot = null, pending = null;
   const colors = ["#2457c5", "#c0392b", "#1a7f37", "#b26b00"];
 
   // series written every few minutes or hours: join the dots instead of showing gaps
   function sparse() { return ["speed", "sync", "snr"].includes(chart); }
+  function clear() { if (plot) { plot.destroy(); plot = null; } }
   function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 
   async function load() {
     document.querySelectorAll("[data-chart]").forEach(b => b.classList.toggle("secondary", b.dataset.chart !== chart));
     document.querySelectorAll("[data-range]").forEach(b => b.classList.toggle("secondary", b.dataset.range !== range));
+    if (pending) pending.abort();  // only the newest choice may draw
+    const mine = pending = new AbortController();
+    clear();  // the old chart isn't what was asked for any more
     note.textContent = "Loading…";
     let d;
     try {
-      const r = await fetch(`/api/series?chart=${chart}&range=${range}`, { credentials: "same-origin" });
+      const r = await fetch(`/api/series?chart=${chart}&range=${range}`, { credentials: "same-origin", signal: mine.signal });
       d = await r.json();
       if (!r.ok) throw new Error(d.error || r.status);
-    } catch (e) { note.textContent = "Chart unavailable: " + e.message; return; }
-    if (plot) { plot.destroy(); plot = null; }
-    if (!d.x.length) { note.textContent = "No data in this period yet."; return; }
-    note.textContent = "";
+    } catch (e) {
+      if (mine === pending) note.textContent = "Chart unavailable: " + e.message;
+      return;
+    }
+    if (mine !== pending) return;
+    const last = d.x.filter((t, i) => d.series.some(s => s.data[i] != null)).pop();
+    if (last === undefined) { note.textContent = "No data in this period yet."; return; }
+    const age = Date.now() / 1000 - last;
+    note.textContent = !sparse() && age > 900 ? `Stale: the newest data is ${Math.round(age / 60)} min old.` : "";
     const ink = cssVar("--quiet"), grid = cssVar("--line");
     const axis = { stroke: ink, grid: { stroke: grid }, ticks: { stroke: grid } };
     const opts = {

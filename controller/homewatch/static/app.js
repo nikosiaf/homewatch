@@ -165,3 +165,32 @@ document.addEventListener("change", function (e) {
 document.querySelectorAll("form[data-autosubmit]").forEach(function (form) {
   form.addEventListener("change", function () { form.submit(); });
 });
+
+// The Status page's 30 s refresh: not for a tab nobody sees, and not while someone is choosing in a field it would replace.
+(function () {
+  const body = document.getElementById("status-body");
+  if (!body) return;
+  const MAX_HELD = 4;  // about 2 minutes: an abandoned field must not leave the page stale for ever
+  let held = 0, focusModule = null;
+  document.addEventListener("htmx:beforeRequest", function (e) {
+    if (e.detail.elt !== body) return;
+    const a = document.activeElement;
+    if (document.hidden || (body.contains(a) && a.matches("select, input, textarea") && held < MAX_HELD)) {
+      if (!document.hidden) held++;
+      e.preventDefault();
+      return;
+    }
+    held = 0;
+    const open = a && a.closest && body.contains(a) ? a.closest("details[data-module]") : null;
+    focusModule = open && a.tagName === "SUMMARY" ? open.dataset.module : null;
+  });
+  document.body.addEventListener("htmx:afterSwap", function (e) {
+    if (e.target !== body || !focusModule) return;
+    const s = body.querySelector(`details[data-module="${focusModule}"] > summary`);
+    if (s) s.focus({ preventScroll: true });
+  });
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) htmx.ajax("GET", "/partials/status", { source: body, target: body, swap: "innerHTML" });
+  });
+})();
+

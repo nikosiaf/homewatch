@@ -91,7 +91,7 @@
     <tr><th>#</th><th>When</th><th>Who</th><th>What changed</th><th></th></tr>
     {% for v in versions %}<tr><td>{{ v.id }}</td><td>{{ v.ts | ts('%d %b %H:%M') }}</td><td>{{ v.username }}</td>
       <td class="small">{{ v.summary }}{% if v.action == 'config.restore' %} <span class="quiet">(restore)</span>{% endif %}</td>
-      <td class="row" style="flex-wrap:nowrap;gap:6px"><a class="small" href="/system/versions/{{ v.id }}" target="_blank">View</a>
+      <td class="row" style="gap:6px"><a class="small" href="/system/versions/{{ v.id }}" target="_blank">View</a>
         {% if not loop.first %}<form class="inline" method="get" action="/system/versions/{{ v.id }}/restore"><button class="secondary">Restore…</button></form>
         {% else %}<span class="quiet small">current</span>{% endif %}</td></tr>
     {% else %}<tr><td colspan="5" class="quiet">Nothing yet.</td></tr>{% endfor %}

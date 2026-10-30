@@ -36,6 +36,7 @@ h2 { font-size: 17px; margin: 24px 0 10px; }
 .banner { padding: 16px; border-radius: 10px; margin-bottom: 16px; display: flex; gap: 12px; align-items: center;
           border: 2px solid var(--line); background: var(--card); }
 .banner .big { font-size: 22px; font-weight: 700; }
+.banner.mute { border-color: var(--line); }
 .banner.s0 { border-color: var(--ok); } .banner.s1 { border-color: var(--warn); } .banner.s2 { border-color: var(--err); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .tile { background: var(--card); border: 1px solid var(--line); border-left: 5px solid var(--ok); border-radius: 10px; padding: 12px; }

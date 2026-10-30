@@ -15,6 +15,6 @@
   {% else %}<p>No passwords or tokens are affected.</p>{% endif %}
   <p class="quiet small">The current settings are kept as a version first, so the settings themselves can be put back.</p>
   <label for="cur">Your current password</label><input id="cur" type="password" name="current" autocomplete="current-password" required>
-  <p class="row"><button class="{{ 'danger' if cleared }}">{{ button }}</button> <a href="/system#{{ box }}">Cancel</a></p>
+  <p class="row" style="align-items:center"><button class="{{ 'danger' if cleared }}">{{ button }}</button> <a href="/system#{{ box }}">Cancel</a></p>
 </form>
 {% endblock %}

@@ -16,6 +16,7 @@
   {% else %}<p>Internet availability over {{ days }} day{{ 's' if days > 1 }}: <b>{{ '%.2f' | format(avail.percent) }} %</b> · {{ avail.outages }} outage{{ 's' if avail.outages != 1 }}
     <br><span class="quiet small">Monitored {{ '%.0f' | format(avail.coverage) }} % of this period; the rest is unknown, not counted as up.
     Last good observation {{ (now - avail.last_observed) | dur }} ago.</span></p>{% endif %}
+  {% if cut_off %}<p class="flash err">Only the newest {{ history_rows }} issues are shown, and older ones in this period are left out. Choose a shorter period or a module.</p>{% endif %}
   <p class="quiet small">Showing {{ events | length }} event{{ 's' if events | length != 1 }} since {{ since | ts }}, plus anything still open.</p>
 </div>
 {% macro event_table(rows, with_source) %}

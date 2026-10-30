@@ -563,6 +563,20 @@ def test_status_isnt_green_when_it_cant_tell(client):
     assert "Nothing is being checked yet" in page and "All checks OK" not in page
 
 
+def test_history_says_when_it_is_cut_off(client, monkeypatch):
+    import homewatch.web as w
+
+    setup_admin(client)
+    monkeypatch.setattr(w, "HISTORY_ROWS", 2)
+    add = "INSERT INTO issues(site,check_key,level,worst,started,resolved) VALUES(?,'internet.loss',1,1,?,NULL)"
+    now = time.time()
+    for i in range(2):
+        client.rt.db.run(add, (client.rt.cfg.site, now - i))
+    assert "older ones in this period are left out" not in client.get("/history").text
+    client.rt.db.run(add, (client.rt.cfg.site, now - 3))
+    assert "older ones in this period are left out" in client.get("/history").text
+
+
 def test_message_lands_in_its_box(client):
     tok = setup_admin(client)
     r = client.post("/system/home", data={"csrf": tok, "_box": "home", "name": "H", "tz": "UTC"},
