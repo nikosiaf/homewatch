@@ -398,10 +398,9 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                                "after": i["resolved"] - i["started"]})
         events = [e for e in events if e["ts"] > since or e.get("open_for") is not None]
         events.sort(key=lambda e: e["ts"], reverse=True)
-        from .report import downtime
+        from .report import availability
 
-        down, outages = downtime(rt.db, rt.cfg.site, "internet.reachable", since, time.time())
-        uptime = 100 * (1 - down / (days * 86400))
+        avail = availability(rt.db, rt.cfg.site, since, now)
         check_names = {f"{m.id}.{c.id}": c.name for m in MODULES.values() for c in m.checks}
         groups = [(m.name, in_module) for m in MODULES.values()
                   if module == m.id and (in_module := [e for e in events if e["key"].split(".", 1)[0] == m.id])]
@@ -410,7 +409,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             mid = e["key"].split(".", 1)[0]
             e["source"] = sources.get(mid, mid)
         return page(request, "history.html", request.state.user, events=events, groups=groups, names=check_names,
-                    modules=[(m.id, m.name) for m in MODULES.values()], module=module, level=level, days=days, uptime=uptime, outages=outages, since=since, now=time.time())
+                    modules=[(m.id, m.name) for m in MODULES.values()], module=module, level=level, days=days, avail=avail, since=since, now=now)
 
     @app.get("/help")
     async def help_page(request: Request):
@@ -1079,7 +1078,14 @@ def _status_ctx(request: Request) -> dict:
             groups.append((m.id, m.name, mine))
     errors, warnings = rt.engine.counts()
     sp = MODULES["speedport"]
-    return dict(tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
+    info = {}
+    for m in MODULES.values():
+        mine = [t["r"] for t in tiles if t["r"].key.startswith(m.id + ".")]
+        if mine:
+            info[m.id] = {"observed": m.observed(mine), "last_good": m.reading_ts(rt) or rt.engine.last_observed(m.id)}
+    switched_off = [m.name for m in MODULES.values() if m.is_set_up(rt) and not m.enabled(m.load(rt))]
+    unknown = [m.name for m in MODULES.values() if m.id in info and not info[m.id]["observed"]]
+    return dict(module_info=info, switched_off=switched_off, unknown=unknown, tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
                 last_run=rt.last_run, last_error=rt.last_error, errors=errors, warnings=warnings,
                 setup_done=rt.db.get("setup.done", False))
 

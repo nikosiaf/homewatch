@@ -2,7 +2,7 @@
 <div class="banner s{{ overall }}" id="status">
   <span class="badge s{{ overall }}">{{ LEVEL_WORD[overall] }}</span>
   <div>
-    <div class="big">{% if overall == 0 %}All checks OK{% else %}{{ errors }} error{{ 's' if errors != 1 }}, {{ warnings }} warning{{ 's' if warnings != 1 }}{% endif %}</div>
+    <div class="big">{% if overall == 0 and unknown %}No problems found, but {{ unknown | join(', ') }} not read{% elif overall == 0 %}All checks OK{% else %}{{ errors }} error{{ 's' if errors != 1 }}, {{ warnings }} warning{{ 's' if warnings != 1 }}{% endif %}</div>
     <div class="quiet small">{% if last_run %}Last run {{ last_run | ts('%H:%M:%S') }}{% else %}Waiting for the first run…{% endif %}
       {% if last_error %} · <span style="color:var(--err)">{{ last_error }}</span>{% endif %}</div>
   </div>
@@ -31,11 +31,14 @@
 {% set probs = mod_tiles | selectattr('status', 'gt', 0) | list %}
 <details class="module s{{ worst }}" data-module="{{ mod_id }}">
   <summary>
-    <span class="badge s{{ worst }}">{{ LEVEL_WORD[worst] }}</span>
+    {% set info = module_info.get(mod_id, {}) %}
+    {% if worst == 0 and not info.observed %}<span class="badge mute">UNKNOWN</span>{% else %}<span class="badge s{{ worst }}">{{ LEVEL_WORD[worst] }}</span>{% endif %}
     <b>{{ mod_name }}</b>
     <span class="quiet small">{% if probs %}{{ probs[0].r.name }}: {{ probs[0].r.detail }}{% if probs | length > 1 %} (+{{ probs | length - 1 }} more){% endif %}
-      {% else %}{{ mod_tiles | length }} checks OK{% endif %}</span>
+      {% elif not info.observed %}Not read yet{% else %}{{ mod_tiles | length }} checks OK{% endif %}</span>
   </summary>
+  <p class="quiet small" style="margin:8px 0 0">Last attempt {{ last_run | ts('%H:%M:%S') if last_run else 'none yet' }} ·
+    last good reading {{ ((now - info.last_good) | dur) ~ ' ago' if info.last_good else 'none yet' }}</p>
   <div class="tiles">
   {% for t in mod_tiles %}
     {% set r = t.r %}
@@ -55,3 +58,4 @@
 <p class="quiet">No results yet. The first run happens a few seconds after start, then every 2 minutes.</p>
 {% endfor %}
 </div>
+{% if switched_off %}<p class="quiet small">Switched off, so not watched: {{ switched_off | join(', ') }}.</p>{% endif %}

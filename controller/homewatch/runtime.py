@@ -17,7 +17,7 @@ from .config import Config
 from .db import DB
 from .engine import Engine, thresholds, timing
 from .metrics import Metrics, MetricsError, line
-from .modules import CheckResult
+from .modules import ERROR, CheckResult
 from .modules import internet as inet
 from .modules.internet import speedtest, telegraf
 from .modules.registry import MODULES
@@ -27,8 +27,9 @@ from .secrets import Secrets
 log = logging.getLogger("homewatch.runtime")
 
 HC_SECRET = "healthchecks.url"
+MODULE_LIMIT = 90  # seconds one module may take to read; devices are read one after the other
 SPEED_RETRY = 15 * 60  # after a failed speed test, try again this soon instead of waiting a full interval
-HISTORY_TABLES = ("issues", "speedtests", "check_state", "outbox", "snoozes")
+HISTORY_TABLES = ("issues", "speedtests", "check_state", "outbox", "snoozes", "coverage")
 CONFIG_TABLES = ("settings", "checks", "secrets", "maintenance", "channels", "sessions", "users", "audit",
                  "config_versions")
 RELEASES = "https://api.github.com/repos/nikosiaf/homewatch/releases/latest"
@@ -112,31 +113,54 @@ class Runtime:
 
     async def run_checks(self, now: float | None = None) -> list[CheckResult]:
         now = now or time.time()
-        try:
-            work = []
-            for m in MODULES.values():
-                s = m.load(self)
-                if m.enabled(s):
-                    th = thresholds(self.db, self.cfg.site, m.id, m.checks)
-                    work.append((m, s, th, await m.readings(self, s, now)))
-                else:
-                    work.append((m, s, None, None))
-        except MetricsError as e:
-            self.last_error = str(e)
-            ev = self.engine.read_failed(str(e))
-            if ev:
-                self.notifier.dispatch([ev], self.engine.counts(), now)
-            return self.results
-        self.last_error = ""
         events = []
-        ok_ev = self.engine.read_ok()
-        if ok_ev:
-            events.append(ok_ev)
         results: list[CheckResult] = []
-        for m, s, th, readings in work:
-            mine = m.evaluate(s, th, readings) if th is not None else []
-            events += self.engine.apply(m.id, mine, now)  # a switched-off module closes its issues silently
+        metrics_error = ""
+        gap = max(3 * int(timing(self.db)["interval"]), 600)
+        for m in MODULES.values():
+            s = m.load(self)
+            if not m.enabled(s):
+                events += self.engine.apply(m.id, [], now)  # a switched-off module closes its issues silently
+                continue
+            th = thresholds(self.db, self.cfg.site, m.id, m.checks)
+            failure = ""
+            try:
+                mine = m.evaluate(s, th, await asyncio.wait_for(m.readings(self, s, now), MODULE_LIMIT))
+            except MetricsError as e:  # our own store, not this module's device: keep what the module last showed
+                metrics_error = str(e)
+                results += [r for r in self.results if r.key.startswith(m.id + ".")]
+                continue
+            except TimeoutError:
+                failure = f"no answer within {MODULE_LIMIT} s"
+            except Exception as e:  # noqa: BLE001 - one module must not stop the others
+                log.exception("module %s failed", m.id)
+                failure = type(e).__name__
+            if failure:
+                first = m.checks[0]
+                mine = [CheckResult(f"{m.id}.{first.id}", first.name, ERROR, f"Can't read {m.name}: {failure}", None,
+                                    first.unit)] if th[first.id].enabled else []
+                events += self.engine.apply(m.id, mine, now, partial=True)
+                results += mine
+                continue
+            seen = m.observed(mine)
+            if seen:
+                self.engine.observe(m.id, now, gap)
+                taken = m.reading_ts(self)
+                for r in mine:
+                    r.observed_at = taken
+            events += self.engine.apply(m.id, mine, now)
             results += mine
+            if seen and m.reading_ts(self) and self.db.one(
+                    "SELECT 1 FROM check_state WHERE site=? AND check_key LIKE ? AND pending IS NOT NULL",
+                    (self.cfg.site, f"{m.id}.%")):
+                m.refresh_soon(self)
+        self.last_error = metrics_error
+        if metrics_error:
+            ev = self.engine.read_failed(metrics_error)
+        else:
+            ev = self.engine.read_ok()
+        if ev:
+            events.append(ev)
         names = self.names()
         events += self.engine.released(names, now)
         events += self.engine.reminders(names, now)
@@ -149,7 +173,8 @@ class Runtime:
             ] + [line("hw_run", {"site": self.cfg.site}, {"ok": 1, "duration_seconds": time.time() - now}, now)])
         except MetricsError as e:
             log.warning("%s", e)
-        await self.heartbeat()
+        if not metrics_error:  # a store that can't be read is what the heartbeat must not hide
+            await self.heartbeat()
         return results
 
     async def heartbeat(self) -> None:

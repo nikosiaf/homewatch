@@ -63,6 +63,13 @@ MIGRATIONS: list[str] = [
         id INTEGER PRIMARY KEY, ts REAL NOT NULL, username TEXT NOT NULL, action TEXT NOT NULL,
         summary TEXT NOT NULL DEFAULT '', data TEXT NOT NULL);
     """,
+    # 3: when each module was really being observed; which reading a pending change was last seen in
+    """
+    CREATE TABLE coverage (
+        id INTEGER PRIMARY KEY, site TEXT NOT NULL, module TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL);
+    CREATE INDEX coverage_module ON coverage (site, module, end);
+    ALTER TABLE check_state ADD COLUMN pending_obs REAL;
+    """,
 ]
 
 

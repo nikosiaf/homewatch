@@ -159,3 +159,24 @@ def test_account_lock_ignores_capitalization(db):
     with pytest.raises(AuthError, match="Too many"):
         auth.login("aDmIn", "correct horse battery", "10.0.1.1")
 
+
+def test_availability_counts_only_observed_time(db):
+    from homewatch.engine import Engine
+    from homewatch.report import availability
+
+    H = 3600.0
+    e = Engine(db, "home")
+    e.observe("internet", 10 * H, 600)
+    e.observe("internet", 10 * H + 300, 600)
+    db.run("UPDATE coverage SET end=?", (20 * H,))
+    e.observe("internet", 30 * H, 600)  # after a gap: a new span
+    db.run("UPDATE coverage SET end=? WHERE start=?", (40 * H, 30 * H))
+    add = "INSERT INTO issues(site,check_key,level,worst,started,resolved) VALUES('home','internet.reachable',2,2,?,?)"
+    db.run(add, (15 * H, 16 * H))  # one hour in view
+    db.run(add, (19 * H, 31 * H))  # 12 h long, only 2 h of it observed
+    db.run(add, (22 * H, 23 * H))  # entirely in the gap: not seen, not counted
+    a = availability(db, "home", 0.0, 100 * H)
+    assert a.observed == 20 * H and a.coverage == 20
+    assert a.down == 3 * H and a.outages == 2 and a.percent == 85
+    assert availability(db, "home", 50 * H, 60 * H).percent is None
+

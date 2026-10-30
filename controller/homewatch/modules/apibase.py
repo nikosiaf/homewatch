@@ -210,6 +210,7 @@ class ApiModule(Module):
                 out += [result(d, OK, "no reading", sup=first.id) for d in self.checks[1:]]
             else:
                 out.append(result(first, OK, "No reading yet"))
+                out[-1].unknown = True
         else:
             out.append(result(first, OK, snap.get("_summary", "Read OK")))
             out += self.check(settings, th, snap, now)

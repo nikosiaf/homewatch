@@ -290,6 +290,70 @@ def test_login_refuses_uploads_and_oversized_bodies(client):
     assert r.status_code == 413
 
 
+async def _slow(*a):
+    import asyncio
+    await asyncio.sleep(5)
+
+
+def test_one_module_failing_doesnt_stop_the_others(client, monkeypatch):
+    import asyncio
+
+    from homewatch import runtime
+    from homewatch.metrics import MetricsError
+
+    setup_admin(client)
+    rt = client.rt
+    inet, ups = MODULES["internet"], MODULES["ups"]
+    rt.db.set("module.ups", {"enabled": True, "host": "ups.test", "port": 3493, "ups": ""})
+    monkeypatch.setattr(runtime, "MODULE_LIMIT", 0.01)
+    monkeypatch.setattr(ups, "readings", _slow)
+    ran = []
+
+    async def fine(*a):
+        ran.append(1)
+        return "r"
+
+    monkeypatch.setattr(inet, "readings", fine)
+    monkeypatch.setattr(inet, "evaluate", lambda *a: [])
+    res = asyncio.run(rt.run_checks())
+    assert ran and any(r.key == "ups." + ups.checks[0].id and "no answer" in r.detail for r in res)
+
+    async def store_down(*a):
+        raise MetricsError("store down")
+
+    pings = []
+
+    async def heartbeat():
+        pings.append(1)
+
+    monkeypatch.setattr(inet, "readings", store_down)
+    monkeypatch.setattr(rt, "heartbeat", heartbeat)
+    asyncio.run(rt.run_checks())
+    assert rt.last_error == "store down" and not pings
+    assert rt.db.get("engine.fails") == 1
+
+
+def test_status_says_what_is_unknown(client):
+    from homewatch.modules import OK, CheckResult
+
+    setup_admin(client)
+    rt = client.rt
+    first = MODULES["ups"].checks[0]
+    rt.results = [CheckResult(f"ups.{first.id}", first.name, OK, "No reading yet", unknown=True)]
+    page = client.get("/").text
+    assert "UNKNOWN" in page and "All checks OK" not in page and "not read" in page
+
+
+def test_history_shows_coverage(client):
+    setup_admin(client)
+    rt = client.rt
+    assert "unknown" in client.get("/history?days=7").text
+    now = time.time()
+    rt.db.run("INSERT INTO coverage(site,module,start,end) VALUES(?,?,?,?)", (rt.cfg.site, "internet", now - 86400, now))
+    page = client.get("/history?days=2").text
+    assert "100.00 %" in page and "Monitored 50 %" in page
+
+
 def test_message_lands_in_its_box(client):
     tok = setup_admin(client)
     r = client.post("/system/home", data={"csrf": tok, "_box": "home", "name": "H", "tz": "UTC"},

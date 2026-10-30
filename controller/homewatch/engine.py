@@ -87,7 +87,8 @@ class Engine:
         return None
 
     # ---- results → events ------------------------------------------------------------------
-    def apply(self, module: str, results: list[CheckResult], now: float) -> list[Event]:
+    def apply(self, module: str, results: list[CheckResult], now: float, partial: bool = False) -> list[Event]:
+        """partial: the results are only part of the module's checks, so the others didn't disappear."""
         confirm = int(timing(self.db)["confirm"])
         events: list[Event] = []
         seen = set()
@@ -110,12 +111,14 @@ class Engine:
                                (res.detail, self.site, res.key))
                     continue
                 if st["pending"] == level:
+                    if res.observed_at is not None and res.observed_at == st["pending_obs"]:
+                        continue  # the same reading again confirms nothing
                     count, since = st["pending_count"] + 1, st["pending_since"]
                 else:
                     count, since = 1, now
                 if count < confirm:
-                    db.run("UPDATE check_state SET pending=?,pending_count=?,pending_since=?,detail=?,value=? "
-                           "WHERE site=? AND check_key=?", (level, count, since, res.detail, res.value,
+                    db.run("UPDATE check_state SET pending=?,pending_count=?,pending_since=?,pending_obs=?,detail=?,value=? "
+                           "WHERE site=? AND check_key=?", (level, count, since, res.observed_at, res.detail, res.value,
                                                             self.site, res.key))
                     continue
                 db.run("UPDATE check_state SET status=?,pending=NULL,pending_count=0,pending_since=NULL,since=?,"
@@ -127,7 +130,7 @@ class Engine:
             # checks that disappeared (probe switched off): close silently
             for st in db.all("SELECT check_key FROM check_state WHERE site=? AND check_key LIKE ?",
                              (self.site, f"{module}.%")):
-                if st["check_key"] not in seen:
+                if st["check_key"] not in seen and not partial:
                     db.run("UPDATE issues SET resolved=?, resolved_detail='check switched off', notified=1 "
                            "WHERE site=? AND check_key=? AND resolved IS NULL", (now, self.site, st["check_key"]))
                     db.run("DELETE FROM check_state WHERE site=? AND check_key=?", (self.site, st["check_key"]))
@@ -180,6 +183,22 @@ class Engine:
         return out
 
     # ---- read failures ---------------------------------------------------------------------
+    # ---- coverage -------------------------------------------------------------------------
+    def observe(self, module: str, now: float, gap: float) -> None:
+        """Extend the module's observed span, or start a new one after a gap."""
+        with self.db.tx() as db:
+            last = db.one("SELECT id, end FROM coverage WHERE site=? AND module=? ORDER BY end DESC LIMIT 1",
+                          (self.site, module))
+            if last and now - last["end"] <= gap:
+                db.run("UPDATE coverage SET end=? WHERE id=?", (now, last["id"]))
+            else:
+                db.run("INSERT INTO coverage(site,module,start,end) VALUES(?,?,?,?)", (self.site, module, now, now))
+                db.run("DELETE FROM coverage WHERE end<?", (now - 400 * 86400,))
+
+    def last_observed(self, module: str) -> float | None:
+        row = self.db.one("SELECT MAX(end) e FROM coverage WHERE site=? AND module=?", (self.site, module))
+        return row["e"] if row else None
+
     def read_failed(self, error: str) -> Event | None:
         fails = self.db.get("engine.fails", 0) + 1
         self.db.set("engine.fails", fails)

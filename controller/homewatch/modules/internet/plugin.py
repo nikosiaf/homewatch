@@ -36,6 +36,9 @@ class InternetModule(Module):
     def enabled(self, settings: dict) -> bool:
         return bool(settings["enabled"])
 
+    def observed(self, results) -> bool:
+        return any(r.key == "internet.reachable" and not r.suppressed_by for r in results)
+
     async def readings(self, rt, settings, now):
         return await collect.collect(rt.metrics, rt.db, rt.cfg.site, now)
 

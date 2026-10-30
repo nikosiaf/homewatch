@@ -55,6 +55,8 @@ class CheckResult:
     unit: str = ""
     suppressed_by: str | None = None  # the check whose failure explains this one
     extra: dict = field(default_factory=dict)
+    unknown: bool = False  # OK only because nothing has been read yet
+    observed_at: float | None = None  # when the reading behind this result was taken, if it can be reused between runs
 
     @property
     def effective(self) -> int:
@@ -92,6 +94,25 @@ class Module:
 
     def load(self, rt) -> dict:
         raise NotImplementedError
+
+    def is_set_up(self, rt) -> bool:
+        return self.configured(rt) if hasattr(self, "configured") else True
+
+    def observed(self, results: list[CheckResult]) -> bool:
+        """Did this run really see the device? The module's first check says whether it could be read."""
+        root = next((r for r in results if r.key == f"{self.id}.{self.checks[0].id}"), None)
+        if root is None:
+            return any(not r.suppressed_by for r in results)
+        return root.status == OK and not root.unknown and not root.suppressed_by
+
+    def reading_ts(self, rt) -> float | None:
+        """When the latest reading was taken, for modules that keep one between runs."""
+        return (getattr(self, "snap_ts", 0) or None) if getattr(self, "snap", None) else None
+
+    def refresh_soon(self, rt) -> None:
+        """A kept reading showed a change: read again for the next run, so that a new reading confirms it."""
+        if hasattr(self, "snap_ts"):
+            self.snap_ts = 0
 
     def secret_keys(self) -> list[str]:
         """Names of the module's entries in the encrypted secrets."""

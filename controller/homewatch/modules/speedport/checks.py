@@ -70,6 +70,7 @@ def evaluate(settings: dict, th: dict[str, Thresholds], st: State) -> list[Check
             root = "readable"
         else:
             add("readable", OK, "No reading yet")
+            out["readable"].unknown = True
             return [out[c.id] for c in CHECKS if c.id in out and th[c.id].enabled]
     elif st.now - st.last_ok > limit:
         add("readable", ERROR, f"No modem reading for {_ago(st.now - st.last_ok)}"

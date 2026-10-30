@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from .db import DB
@@ -15,11 +16,39 @@ from .notify import Message, _dur
 WEEK = 7 * 24 * 3600
 
 
-def downtime(db: DB, site: str, key: str, start: float, end: float) -> tuple[float, int]:
-    rows = db.all("SELECT started, resolved FROM issues WHERE site=? AND check_key=? AND started<? "
-                  "AND (resolved IS NULL OR resolved>?)", (site, key, end, start))
-    total = sum(min(r["resolved"] or end, end) - max(r["started"], start) for r in rows)
-    return total, len(rows)
+@dataclass
+class Availability:
+    period: float  # seconds asked about
+    observed: float  # seconds of it when the line was really being watched
+    down: float  # seconds of the observed time with the line down
+    outages: int
+    last_observed: float | None
+
+    @property
+    def percent(self) -> float | None:
+        """Share of the observed time the line was up; None when nothing was observed."""
+        return 100 * (1 - self.down / self.observed) if self.observed > 0 else None
+
+    @property
+    def coverage(self) -> float:
+        return 100 * self.observed / self.period if self.period > 0 else 0
+
+
+def availability(db: DB, site: str, start: float, end: float, module: str = "internet",
+                 key: str = "internet.reachable") -> Availability:
+    """Uptime over what was observed. Time before the install or with monitoring down is unknown, not uptime."""
+    spans = [(max(r["start"], start), min(r["end"], end)) for r in
+             db.all("SELECT start, end FROM coverage WHERE site=? AND module=? AND start<? AND end>?",
+                    (site, module, end, start))]
+    issues = db.all("SELECT started, resolved FROM issues WHERE site=? AND check_key=? AND started<? "
+                    "AND (resolved IS NULL OR resolved>?)", (site, key, end, start))
+    down, outages = 0.0, 0
+    for i in issues:
+        seen = sum(max(0.0, min(i["resolved"] or end, b) - max(i["started"], a)) for a, b in spans)
+        down += seen
+        outages += seen > 0
+    last = db.one("SELECT MAX(end) e FROM coverage WHERE site=? AND module=?", (site, module))
+    return Availability(end - start, sum(b - a for a, b in spans), down, outages, last["e"] if last else None)
 
 
 async def build(db: DB, metrics: Metrics, site: str, now: float | None = None) -> Message:
@@ -29,10 +58,13 @@ async def build(db: DB, metrics: Metrics, site: str, now: float | None = None) -
     home = db.get("home.name") or "Home"
     lines = []
 
-    down, outages = downtime(db, site, "internet.reachable", start, now)
-    uptime = 100 * (1 - down / WEEK)
-    lines.append(f"Internet uptime {uptime:.2f} % · {outages} outage{'s' if outages != 1 else ''}"
-                 + (f", {_dur(down)} down in total" if outages else ""))
+    a = availability(db, site, start, now)
+    if a.percent is None:
+        lines.append("Internet availability: not monitored this week")
+    else:
+        lines.append(f"Internet availability {a.percent:.2f} % · {a.outages} outage{'s' if a.outages != 1 else ''}"
+                     + (f", {_dur(a.down)} down in total" if a.outages else "")
+                     + f" · monitored {a.coverage:.0f} % of the week")
 
     sel = f'{{site="{site}",role="public"}}'
     quality = []

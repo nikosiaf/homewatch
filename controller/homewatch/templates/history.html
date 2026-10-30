@@ -12,7 +12,10 @@
       {% for d in [1, 7, 30, 90, 365] %}<option value="{{ d }}" {{ 'selected' if d == days }}>{{ d }} day{{ 's' if d > 1 }}</option>{% endfor %}</select></div>
     <div><button>Show</button></div>
   </form>
-  <p>Internet uptime over {{ days }} day{{ 's' if days > 1 }}: <b>{{ '%.2f' | format(uptime) }} %</b> · {{ outages }} outage{{ 's' if outages != 1 }}</p>
+  {% if avail.percent is none %}<p>Internet availability over {{ days }} day{{ 's' if days > 1 }}: <b>unknown</b>, the line wasn't monitored in this period.</p>
+  {% else %}<p>Internet availability over {{ days }} day{{ 's' if days > 1 }}: <b>{{ '%.2f' | format(avail.percent) }} %</b> · {{ avail.outages }} outage{{ 's' if avail.outages != 1 }}
+    <br><span class="quiet small">Monitored {{ '%.0f' | format(avail.coverage) }} % of this period; the rest is unknown, not counted as up.
+    Last good observation {{ (now - avail.last_observed) | dur }} ago.</span></p>{% endif %}
   <p class="quiet small">Showing {{ events | length }} event{{ 's' if events | length != 1 }} since {{ since | ts }}, plus anything still open.</p>
 </div>
 {% macro event_table(rows, with_source) %}

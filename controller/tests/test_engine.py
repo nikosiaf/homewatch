@@ -127,3 +127,20 @@ def test_switched_off_check_closes_silently(db):
         run(e, ERROR, T0 + i * 120)
     assert e.apply("internet", [], T0 + 240) == []
     assert db.one("SELECT resolved_detail FROM issues")["resolved_detail"] == "check switched off"
+
+
+def test_the_same_reading_confirms_nothing(db):
+    e = Engine(db, "home")
+    bad = lambda ts: CheckResult("x.a", "A", ERROR, "bad", observed_at=ts)  # noqa: E731
+    assert e.apply("x", [CheckResult("x.a", "A", OK, "ok")], 1.0) == []
+    assert e.apply("x", [bad(100.0)], 2.0) == []
+    assert e.apply("x", [bad(100.0)], 3.0) == []  # cached: still waiting
+    assert [ev.kind for ev in e.apply("x", [bad(200.0)], 4.0)] == ["open"]
+
+
+def test_partial_results_keep_the_other_checks(db):
+    e = Engine(db, "home")
+    e.apply("x", [CheckResult("x.a", "A", OK, "ok"), CheckResult("x.b", "B", OK, "ok")], 1.0)
+    e.apply("x", [CheckResult("x.a", "A", ERROR, "bad")], 2.0, partial=True)
+    assert db.one("SELECT 1 FROM check_state WHERE check_key='x.b'")
+

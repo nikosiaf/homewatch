@@ -55,6 +55,15 @@ class SpeedportModule(Module):
     def load(self, rt) -> dict:
         return {**DEFAULTS, **(rt.db.get(KEY) or {})}
 
+    def is_set_up(self, rt) -> bool:
+        return rt.db.get(KEY) is not None
+
+    def reading_ts(self, rt) -> float | None:
+        return self.state(rt).get("last_ok")
+
+    def refresh_soon(self, rt) -> None:
+        rt.db.set(STATE, {**self.state(rt), "last_try": 0})  # the reader loop looks every 30 s
+
     def secret_keys(self) -> list[str]:
         return [SECRET]
 

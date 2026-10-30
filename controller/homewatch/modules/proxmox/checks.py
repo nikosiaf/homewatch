@@ -74,6 +74,7 @@ def evaluate(settings: dict, th: dict[str, Thresholds], st: State) -> list[Check
                 add(c.id, OK, "no reading", suppressed_by="api")
         else:
             add("api", OK, "No reading yet")
+            out["api"].unknown = True
         return done()
     s = st.snap
     add("api", OK, f"{len(s.nodes)} node{'s' if len(s.nodes) != 1 else ''}, {len(s.guests)} guests")
