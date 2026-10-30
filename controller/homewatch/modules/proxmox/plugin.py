@@ -118,6 +118,12 @@ class ProxmoxModule(Module):
             self.snap, self.snap_ts, self.error = snap, time.time(), ""
         return ""
 
+    def secret_keys(self) -> list[str]:
+        return [SECRET]
+
+    def imported_error(self, settings: dict) -> str:
+        return "" if normalize_url(str(settings.get("url", ""))) else "address: an https:// address"
+
     def save(self, rt, form: dict, user) -> str:
         if form.get("remove"):
             rt.db.run("DELETE FROM settings WHERE key=?", (KEY,))

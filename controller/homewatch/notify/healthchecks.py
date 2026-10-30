@@ -17,6 +17,7 @@ DESCRIPTION = ("Tells you when homewatch itself goes quiet. If this host, its po
 LINK = "https://healthchecks.io"
 FIELDS = [("url", "Ping URL", "https://hc-ping.com/your-check-uuid")]
 SECRET_LABEL = ""
+PRIVATE = ("url",)  # anyone holding the URL can send false pings
 
 
 def normalize(config: dict) -> tuple[dict, str]:
@@ -28,6 +29,8 @@ def normalize(config: dict) -> tuple[dict, str]:
 
 
 async def ping(http: httpx.AsyncClient, config: dict) -> None:
+    if not config.get("url"):
+        raise RuntimeError("healthchecks.io needs its ping URL")
     try:
         r = await http.get(config["url"], timeout=10)
     except httpx.HTTPError as e:

@@ -88,12 +88,18 @@ def record(db: DB, username: str, action: str) -> int | None:
     return vid
 
 
-def restore(db: DB, vid: int) -> dict | None:
-    """Put version vid's configuration back. Returns its snapshot, or None when it doesn't exist."""
+def restore(db: DB, vid: int, before=None) -> dict | None:
+    """Put version vid's configuration back. Returns its snapshot, or None when it doesn't exist.
+
+    before(snapshot), when given, runs first and may change the snapshot.
+    """
     row = db.one("SELECT data FROM config_versions WHERE id=?", (vid,))
     if row is None:
         return None
     snap = json.loads(row["data"])
+    strip_secret_fields(snap)
+    if before:
+        before(snap)
     apply(db, snap)
     return snap
 
@@ -108,18 +114,37 @@ def _secret_fields() -> dict[str, list[str]]:
 
 def strip_secret_fields(snap: dict) -> bool:
     """Drop secret fields from a snapshot's settings; True when any was there."""
+    from .notify import split_config
+
     found = False
     for key, names in _secret_fields().items():
         for name in names:
             if name in snap.get("settings", {}).get(key, {}):
                 del snap["settings"][key][name]
                 found = True
+    for c in snap.get("channels", []):
+        try:
+            config = json.loads(c["config"])
+            public, private = split_config(c["kind"], config)
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+        if private:
+            c["config"] = json.dumps(public)
+            found = True
     return found
 
 
 def move_secret_fields(db: DB, secrets) -> bool:
     """Older versions kept these fields in plain settings: encrypt them and clean every stored copy."""
+    from .notify import split_config, store_private
+
     moved = False
+    for row in db.all("SELECT id, kind, config FROM channels"):
+        public, private = split_config(row["kind"], json.loads(row["config"]))
+        if private:
+            store_private(secrets, row["id"], private)
+            db.run("UPDATE channels SET config=? WHERE id=?", (json.dumps(public), row["id"]))
+            moved = True
     for key, names in _secret_fields().items():
         saved = db.get(key)
         if isinstance(saved, dict) and any(n in saved for n in names):
@@ -149,6 +174,12 @@ def scrub_exports(path_dir: str) -> None:
             with open(path) as f:
                 text = f.read()
             clean = line.sub("", text)
+            try:
+                doc = yaml.safe_load(clean)
+                if isinstance(doc, dict) and strip_secret_fields({"channels": doc.get("channels") or []}):
+                    clean = _HEADER + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
+            except yaml.YAMLError:
+                pass
             if clean != text:
                 with open(path, "w") as f:
                     f.write(clean)
@@ -183,6 +214,8 @@ FORMAT = 1
 MAX_IMPORT = 1_000_000  # bytes
 EXPORTS_KEPT = 14
 _EXPORT_NAME = re.compile(r"^homewatch-config-\d{4}-\d{2}-\d{2}\.yaml$")
+_HEADER = ("# homewatch configuration export. It holds no passwords, tokens, private notification addresses or users:\n"
+           "# after importing it elsewhere, enter those again on the module and notification pages.\n")
 
 
 def to_yaml(db: DB) -> str:
@@ -190,9 +223,7 @@ def to_yaml(db: DB) -> str:
 
     body = {"format": FORMAT, "homewatch": __version__, "exported": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             **snapshot(db)}
-    return ("# homewatch configuration export. It holds no passwords, tokens or users:\n"
-            "# after importing it elsewhere, enter those again on the module and notification pages.\n"
-            + yaml.safe_dump(body, sort_keys=False, allow_unicode=True))
+    return _HEADER + yaml.safe_dump(body, sort_keys=False, allow_unicode=True)
 
 
 def from_yaml(text: str) -> tuple[dict | None, str]:
@@ -223,6 +254,42 @@ def from_yaml(text: str) -> tuple[dict | None, str]:
                 return None, f"{part} entry {i}: {', '.join(bad)} must be a plain value"
         snap[part] = [{c: r[c] for c in cols} for r in rows]
     return snap, ""
+
+
+def imported_error(snap: dict) -> str:
+    """Hold an imported snapshot to the rules of the module and channel forms; returns what is wrong."""
+    from .modules.registry import MODULES
+    from .notify import imported_error as channel_error
+
+    for m in MODULES.values():
+        settings = snap["settings"].get(f"module.{m.id}")
+        if settings is None:
+            continue
+        if not isinstance(settings, dict):
+            return f"{m.name}: settings must be a mapping"
+        err = m.imported_error(settings)
+        if err:
+            return f"{m.name}: {err}"
+    for c in snap["channels"]:
+        try:
+            config = json.loads(c["config"])
+        except (TypeError, ValueError):
+            config = None
+        if not isinstance(config, dict):
+            return f"channel {c['name']}: config is not valid"
+        err = channel_error(str(c["kind"]), config)
+        if err:
+            return f"channel {c['name']}: {err}"
+    return ""
+
+
+def same_destination(module, old: dict | None, new: dict | None) -> bool:
+    """Would the module's retained credentials still go to the same place, at least as safely?"""
+    if old is None or new is None:
+        return old is new
+    if any(old.get(k) != new.get(k) for k in module.destination_keys):
+        return False
+    return not any(old.get(k) and not new.get(k) for k in module.transport_keys)
 
 
 def write_export(db: DB, folder: str, today: str) -> str:

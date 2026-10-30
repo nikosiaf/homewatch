@@ -110,6 +110,22 @@ class ApiModule(Module):
     def enabled(self, settings: dict) -> bool:
         return bool(settings.get("_configured", True)) and bool(settings.get("enabled"))
 
+    def secret_keys(self) -> list[str]:
+        return [self.secret_key] + [self.field_secret_key(f) for f in self.fields if f.secret]
+
+    def imported_error(self, settings: dict) -> str:
+        form = {"enabled": "on"}
+        for f in self.fields:
+            if f.secret:
+                continue
+            value = settings.get(f.key, f.default)
+            if f.kind == "check":
+                if value:
+                    form[f.key] = "on"
+            else:
+                form[f.key] = ", ".join(map(str, value)) if isinstance(value, list) else str(value)
+        return self.validate(form, {})[1]
+
     def validate(self, form: dict, old: dict) -> tuple[dict, str]:
         """Turn the form into settings; override to normalize addresses. Returns (settings, error)."""
         out = {}

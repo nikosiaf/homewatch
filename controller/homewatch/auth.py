@@ -15,6 +15,7 @@ from .db import DB
 SESSION_IDLE = 7 * 24 * 3600
 MAX_FAILS = 5
 LOCK_SECONDS = 300
+MAX_ACCOUNT_FAILS = 20  # from any address; higher, so that one visitor can't easily lock the admin out
 ROLES = ("admin", "viewer")
 MIN_PASSWORD = 10
 
@@ -66,15 +67,19 @@ class Auth:
         self.db.run("UPDATE users SET pw_hash=? WHERE id=?", (_ph.hash(password), user_id))
         self.db.run("DELETE FROM sessions WHERE user_id=?", (user_id,))
 
-    def locked(self, client: str, now: float | None = None) -> bool:
+    def locked(self, client: str, now: float | None = None, limit: int = MAX_FAILS) -> bool:
         now = now or time.time()
         recent = [t for t in self.fails.get(client, []) if now - t < LOCK_SECONDS]
-        self.fails[client] = recent
-        return len(recent) >= MAX_FAILS
+        if recent:
+            self.fails[client] = recent
+        else:
+            self.fails.pop(client, None)
+        return len(recent) >= limit
 
     def login(self, username: str, password: str, client: str) -> str:
         """Return a new session token, or raise AuthError."""
-        if self.locked(client):
+        account = f"account:{username.strip()}"
+        if self.locked(client) or self.locked(account, limit=MAX_ACCOUNT_FAILS):
             raise AuthError("Too many failed attempts. Try again in a few minutes.")
         row = self.db.one("SELECT * FROM users WHERE username=?", (username.strip(),))
         try:
@@ -83,8 +88,11 @@ class Auth:
                 raise VerifyMismatchError
         except (VerifyMismatchError, InvalidHashError):
             self.fails.setdefault(client, []).append(time.time())
+            if row is not None:  # only real accounts, so made-up names can't fill this up
+                self.fails.setdefault(account, []).append(time.time())
             raise AuthError("Wrong username or password") from None
         self.fails.pop(client, None)
+        self.fails.pop(account, None)
         if _ph.check_needs_rehash(row["pw_hash"]):
             self.db.run("UPDATE users SET pw_hash=? WHERE id=?", (_ph.hash(password), row["id"]))
         token = secrets.token_urlsafe(32)

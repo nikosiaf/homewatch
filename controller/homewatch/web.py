@@ -14,7 +14,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo, available_timezones
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -24,7 +24,8 @@ from .auth import ROLES, Auth, AuthError, User, audit
 from .engine import DEFAULT_TIMING, thresholds, timing, tz
 from .modules import CATALOG, LEVEL_WORD, OK
 from .modules.registry import MODULES
-from .notify import COMING_SOON, KINDS, PROVIDERS, Message, channel_secret
+from .notify import (COMING_SOON, KINDS, PROVIDERS, Message, channel_private, channel_secret, forget_channel, full_config,
+                     private_fields, split_config, store_private)
 from .runtime import Runtime
 
 log = logging.getLogger("homewatch.web")
@@ -85,6 +86,7 @@ def create_app(rt: Runtime | None = None, start_loops: bool = True) -> FastAPI:
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
+    app.add_middleware(BodyLimit)
     _routes(app)
     return app
 
@@ -126,9 +128,54 @@ def back(url: str, msg: str = "", err: str = "") -> RedirectResponse:
     return RedirectResponse(url + ("?" + q if q else "") + (f"#{box}" if box else ""), status_code=303)
 
 
-async def form_of(request: Request, user: User | None) -> dict | None:
-    """Parse a POST form and check its CSRF token. Returns None when the token is wrong."""
-    form = dict(await request.form(max_fields=20000))  # module pages can list thousands of entities
+MAX_BODY = 8 * 1024 * 1024  # the same limit as the Caddyfile; the largest real form is a long entity list
+
+
+class _BodyTooLarge(Exception):
+    pass
+
+
+class BodyLimit:
+    """Refuse a request body over the limit while it arrives, before anything stores it."""
+
+    def __init__(self, app, limit: int = MAX_BODY):
+        self.app, self.limit = app, limit
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        length = dict(scope["headers"]).get(b"content-length", b"0")
+        too_large = PlainTextResponse("Request too large", status_code=413)
+        if length.isdigit() and int(length) > self.limit:
+            return await too_large(scope, receive, send)
+        seen, started = 0, False
+
+        async def counted():
+            nonlocal seen
+            message = await receive()
+            seen += len(message.get("body", b""))
+            if seen > self.limit:
+                raise _BodyTooLarge
+            return message
+
+        async def tracked(message):
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, counted, tracked)
+        except _BodyTooLarge:
+            if not started:
+                await too_large(scope, receive, send)
+
+
+async def form_of(request: Request, user: User | None, files: int = 0) -> dict | None:
+    """Parse a POST form and check its CSRF token. Returns None when the token is wrong.
+
+    Only a form that takes an upload passes files; any other that receives one answers 400.
+    """
+    form = dict(await request.form(max_files=files, max_fields=20000))  # module pages can list thousands of entities
     box = str(form.get("_box", ""))
     _box.set(box if box.replace("-", "").isalnum() else "")
     token = form.get("csrf") or request.headers.get("x-csrf-token", "")
@@ -151,6 +198,14 @@ def pre_value(request: Request) -> str:
 def with_pre(request: Request, resp: Response, tok: str) -> Response:
     resp.set_cookie(PRE, tok, httponly=True, secure=rt_of(request).cfg.secure_cookies, samesite="strict")
     return resp
+
+
+def _dropped_note(rt) -> str:
+    """What the last import or restore switched off because its destination changed."""
+    if not rt.dropped:
+        return ""
+    return (" These had a new address, so their credentials were deleted and they are switched off: "
+            + ", ".join(rt.dropped) + ".")
 
 
 def _float(v, default=None):
@@ -656,10 +711,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt = rt_of(request)
         chans = []
         for c in rt.notifier.channels(enabled_only=False, messages_only=False):
-            config = json.loads(c["config"])
-            if c["kind"] == "ntfy" and not config.get("url"):
-                config = KINDS["ntfy"].normalize(config)[0]
-            chans.append(dict(c) | {"config": config, "levels": json.loads(c["levels"]),
+            chans.append(dict(c) | {"config": json.loads(c["config"]), "levels": json.loads(c["levels"]),
+                                    "has_private": rt.secrets.has(channel_private(c["id"])),
                                     "has_secret": rt.secrets.has(channel_secret(c["id"])),
                                     "last_ping": rt.db.get(f"heartbeat.{c['id']}.last_ok", 0)})
         queued = rt.db.all("SELECT channel_id, COUNT(*) n, MAX(last_error) e FROM outbox GROUP BY channel_id")
@@ -713,11 +766,14 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if ch is None or ch["kind"] not in PROVIDERS:
             return back("/notifications", err="Unknown channel")
         mod = PROVIDERS[ch["kind"]]
-        config = {k: form.get(k, "").strip() for k, _, _ in mod.FIELDS}
+        saved = full_config(rt.secrets, ch)
+        config = {k: form.get(k, "").strip() or (saved.get(k, "") if k in private_fields(ch["kind"]) else "")
+                  for k, _, _ in mod.FIELDS}
         if hasattr(mod, "normalize"):
             config, err = mod.normalize(config)
             if err:
                 return back("/notifications", err=err)
+        config, private = split_config(ch["kind"], config)
         if form.get("secret", "").strip() and hasattr(mod, "check_secret"):
             err = mod.check_secret(form["secret"])
             if err:
@@ -729,6 +785,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt.db.run("UPDATE channels SET name=?, enabled=?, levels=?, quiet_start=?, quiet_end=?, config=? WHERE id=?",
                   (form.get("name", ch["name"])[:60] or ch["name"], int(form.get("enabled") == "on"),
                    json.dumps(levels), qs or None, qe or None, json.dumps(config), cid))
+        store_private(rt.secrets, cid, private)
         if form.get("secret"):
             rt.secrets.put(channel_secret(cid), form["secret"].strip())
         audit(rt.db, user.username, "channel.edit", f"{ch['kind']} {ch['name']}")
@@ -742,7 +799,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/notifications", err="Form expired")
         rt.db.run("DELETE FROM channels WHERE id=?", (cid,))
         rt.db.run("DELETE FROM outbox WHERE channel_id=?", (cid,))
-        rt.secrets.delete(channel_secret(cid))
+        forget_channel(rt.secrets, cid)
         audit(rt.db, user.username, "channel.delete", str(cid))
         return back("/notifications", msg="Removed")
 
@@ -756,7 +813,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/notifications", err="Unknown channel")
         try:
             if ch["kind"] == "healthchecks":
-                await PROVIDERS["healthchecks"].ping(rt.notifier.http, json.loads(ch["config"]))
+                await PROVIDERS["healthchecks"].ping(rt.notifier.http, full_config(rt.secrets, ch))
                 rt.db.set(f"heartbeat.{cid}.last_ok", time.time())
                 return back("/notifications", msg=f"{ch['name']}: ping sent; healthchecks.io should show it as up")
             home = rt.db.get("home.name") or "Home"
@@ -806,7 +863,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     async def config_import(request: Request):
         from . import versions
         rt = rt_of(request)
-        form = await form_of(request, request.state.user)
+        form = await form_of(request, request.state.user, files=1)
         if form is None:
             return back("/system", err="Form expired")
         up = form.get("file")
@@ -823,7 +880,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if err:
             return back("/system", err=f"Nothing imported: {err}")
         return back("/system", msg="Imported. The previous settings are kept as a version. Enter passwords and "
-                                   "tokens on any module or channel that shows \"not set\".")
+                                   "tokens on any module or channel that shows \"not set\"." + _dropped_note(rt))
 
     @app.get("/system/versions/{vid}")
     async def version_view(request: Request, vid: int):
@@ -843,7 +900,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/system", err="Form expired")
         if not rt.restore_version(vid, request.state.user.username):
             return back("/system", err=f"Version {vid} no longer exists")
-        return back("/system", msg=f"Version {vid} restored. Passwords and tokens were left as they are.")
+        return back("/system", msg=f"Version {vid} restored. Passwords and tokens were left as they are." + _dropped_note(rt))
 
     @app.post("/system/home")
     async def system_home(request: Request):
@@ -1071,10 +1128,12 @@ def _save_section(request: Request, section: str, form: dict, user: User) -> str
             config, err = mod.normalize(config)
             if err:
                 return err
+        config, private = split_config(kind, config)
         name = form.get(f"{kind}.name", "").strip()[:60] or mod.TITLE
         levels = [] if kind == "healthchecks" else [1, 2]
         cid = rt.db.run("INSERT INTO channels(kind,name,levels,config) VALUES(?,?,?,?)",
                         (kind, name, json.dumps(levels), json.dumps(config)))
+        store_private(rt.secrets, cid, private)
         if secret:
             rt.secrets.put(channel_secret(cid), secret)
         audit(rt.db, user.username, "channel.add", f"{kind} {name}")

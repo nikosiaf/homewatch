@@ -55,6 +55,23 @@ class SpeedportModule(Module):
     def load(self, rt) -> dict:
         return {**DEFAULTS, **(rt.db.get(KEY) or {})}
 
+    def secret_keys(self) -> list[str]:
+        return [SECRET]
+
+    def forget_credentials(self, rt) -> None:
+        super().forget_credentials(rt)
+        st = self.state(rt)
+        for k in ("cert", "cert_new", "cert_changed"):  # another device: trust starts over
+            st.pop(k, None)
+        rt.db.set(STATE, st)
+
+    def imported_error(self, settings: dict) -> str:
+        if not valid_host(str(settings.get("host", ""))):
+            return "modem address: an IP address or host name"
+        if settings.get("model", "speedport-plus-2") not in MODELS:
+            return "unknown modem model"
+        return ""
+
     def state(self, rt) -> dict:
         return rt.db.get(STATE) or {}
 

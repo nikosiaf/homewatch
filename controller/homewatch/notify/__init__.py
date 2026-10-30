@@ -41,6 +41,48 @@ def channel_secret(channel_id: int) -> str:
     return f"channel.{channel_id}"
 
 
+def channel_private(channel_id: int) -> str:
+    return f"channel.{channel_id}.private"
+
+
+def private_fields(kind: str) -> tuple:
+    """Config fields that work as a credential (e.g. a hard-to-guess URL): encrypted, not in versions or exports."""
+    return getattr(PROVIDERS.get(kind), "PRIVATE", ())
+
+
+def split_config(kind: str, config: dict) -> tuple[dict, dict]:
+    """(what may be shared, what is kept encrypted)."""
+    names = private_fields(kind)
+    return ({k: v for k, v in config.items() if k not in names}, {k: v for k, v in config.items() if k in names})
+
+
+def store_private(secrets, channel_id: int, private: dict) -> None:
+    if private:
+        secrets.put(channel_private(channel_id), json.dumps(private))
+
+
+def full_config(secrets, ch) -> dict:
+    """The channel's config with its encrypted fields, for sending; never store the result."""
+    return json.loads(ch["config"]) | json.loads(secrets.get(channel_private(ch["id"])) or "{}")
+
+
+def forget_channel(secrets, channel_id: int) -> None:
+    secrets.delete(channel_secret(channel_id))
+    secrets.delete(channel_private(channel_id))
+
+
+def imported_error(kind: str, config: dict) -> str:
+    mod = PROVIDERS.get(kind)
+    if mod is None:
+        return f"unknown channel type {kind}"
+    return mod.check_imported(config) if hasattr(mod, "check_imported") else ""
+
+
+def destination(kind: str, config: dict) -> list:
+    """Where the channel's credentials go; a change means they must be entered again."""
+    return [config.get(k) for k in getattr(PROVIDERS.get(kind), "DESTINATION", ())]
+
+
 def _dur(seconds: float) -> str:
     m = int(seconds // 60)
     if m < 60:
@@ -116,7 +158,7 @@ class Notifier:
         """Ping every enabled healthchecks.io check after a successful run."""
         for ch in self.db.all("SELECT * FROM channels WHERE enabled=1 AND kind='healthchecks'"):
             try:
-                await healthchecks.ping(self.http, json.loads(ch["config"]))
+                await healthchecks.ping(self.http, full_config(self.secrets, ch))
                 self.db.set(f"heartbeat.{ch['id']}.last_ok", time.time())
             except RuntimeError as e:
                 log.warning("heartbeat %s: %s", ch["name"], e)
@@ -182,7 +224,7 @@ class Notifier:
         mod = KINDS.get(ch["kind"])
         if mod is None:
             raise RuntimeError(f"channel type {ch['kind']} is not available yet")
-        config = json.loads(ch["config"])
+        config = full_config(self.secrets, ch)
         secret = self.secrets.get(channel_secret(ch["id"])) or ""
         await mod.send(self.http, config, secret, msg.level, msg.title, msg.body)
 

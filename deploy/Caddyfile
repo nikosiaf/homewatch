@@ -2,9 +2,10 @@
 	admin off
 	auto_https off
 	servers {
-		# behind a reverse proxy on the LAN (e.g. HAProxy): keep the visitor's address, so a login
-		# lockout hits that visitor and not everyone coming through the proxy
-		trusted_proxies static private_ranges
+		# Only the reverse proxies named in HW_TRUSTED_PROXIES (.env) may state a visitor's address, so
+		# a login lockout hits that visitor. Everyone else is known by the address they connect from.
+		trusted_proxies static {$HW_TRUSTED_PROXIES:}
+		trusted_proxies_strict
 	}
 }
 
@@ -23,5 +24,10 @@
 		Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
 		-Server
 	}
-	reverse_proxy controller:8000
+	request_body {
+		max_size 8MB
+	}
+	reverse_proxy controller:8000 {
+		header_up X-Forwarded-For {client_ip}
+	}
 }

@@ -87,9 +87,23 @@ class Module:
     checks: list[CheckDef] = []
     description = ""  # shown on the Help page, with setup
     setup: list[tuple[str, str]] = []  # ("text" | "code", content)
+    destination_keys = ("url", "host", "port", "devices")  # settings that decide where credentials go
+    transport_keys = ("https", "verify")  # settings that protect them on the way, on or off
 
     def load(self, rt) -> dict:
         raise NotImplementedError
+
+    def secret_keys(self) -> list[str]:
+        """Names of the module's entries in the encrypted secrets."""
+        return []
+
+    def forget_credentials(self, rt) -> None:
+        for k in self.secret_keys():
+            rt.secrets.delete(k)
+
+    def imported_error(self, settings: dict) -> str:
+        """What is wrong with settings from an imported file, by the rules of the module's form."""
+        return ""
 
     def enabled(self, settings: dict) -> bool:
         return bool(settings.get("enabled", True))

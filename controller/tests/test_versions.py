@@ -1,7 +1,10 @@
 """Configuration versions: recorded after each change, viewable, restorable; secrets and users untouched."""
 
 import json
+import base64
 import time
+
+import yaml
 
 from homewatch import versions
 from tests.test_web import client, setup_admin  # noqa: F401 - fixture
@@ -104,3 +107,112 @@ def test_export_and_import_through_the_system_page(client):  # noqa: F811
     name = versions.list_exports(client.rt.exports_dir)[0]
     assert "home.name: Changed" in client.get(f"/system/exports/{name}").text
     assert client.get("/system/exports/..%2Fhomewatch.db", follow_redirects=False).status_code in (303, 404)
+
+
+def _channel(client, tok):
+    client.post("/notifications/add", data={"csrf": tok, "kind": "ntfy", "ntfy.url": "https://ntfy.example/secret-topic",
+                                            "ntfy.secret": "tk_1"})
+    client.post("/notifications/add", data={"csrf": tok, "kind": "healthchecks", "healthchecks.url": "https://hc.example/uuid-1"})
+    return {r["kind"]: r["id"] for r in client.rt.db.all("SELECT id, kind FROM channels")}
+
+
+def test_exports_and_versions_hold_no_capability_urls(client):  # noqa: F811
+    tok = setup_admin(client)
+    ids = _channel(client, tok)
+    text = client.get("/system/export").text
+    assert "secret-topic" not in text and "uuid-1" not in text
+    assert not any("secret-topic" in r["data"] or "uuid-1" in r["data"] for r in client.rt.db.all("SELECT data FROM config_versions"))
+    # saving the channel with the field empty keeps the address
+    r = client.post(f"/notifications/{ids['ntfy']}", data={"csrf": tok, "name": "n", "enabled": "on", "url": ""})
+    assert "Saved" in r.text and "secret-topic" in client.rt.secrets.get(f"channel.{ids['ntfy']}.private")
+
+
+def test_old_plain_channel_urls_are_moved(db, tmp_path):
+    from homewatch.secrets import Secrets
+    from tests.conftest import KEY
+
+    cfg_key = base64.b64decode(KEY)
+    cid = db.run("INSERT INTO channels(kind,name,levels,config) VALUES('healthchecks','h','[]',?)",
+                 (json.dumps({"url": "https://hc.example/old"}),))
+    versions.record(db, "t", "x")
+    secrets = Secrets(db, cfg_key)
+    assert versions.move_secret_fields(db, secrets)
+    assert json.loads(db.one("SELECT config FROM channels")["config"]) == {}
+    assert "hc.example" in secrets.get(f"channel.{cid}.private")
+    assert "hc.example" not in db.one("SELECT data FROM config_versions ORDER BY id DESC")["data"]
+    folder = tmp_path / "exports"
+    folder.mkdir()
+    old = folder / "homewatch-config-2026-01-01.yaml"
+    old.write_text(yaml.safe_dump({"format": 1, "channels": [{"kind": "ntfy", "config": '{"url":"https://n/t","server":"https://n","topic":"t"}'}]}))
+    versions.scrub_exports(str(folder))
+    assert "https://n/t" not in old.read_text() and "https://n" in old.read_text()
+
+
+def _export_with(client, change):
+    doc = yaml.safe_load(client.get("/system/export").text)
+    change(doc)
+    return yaml.safe_dump(doc).encode()
+
+
+def _import(client, tok, raw):
+    return client.post("/system/import", data={"csrf": tok}, files={"file": ("x.yaml", raw, "text/yaml")})
+
+
+def test_import_to_another_destination_drops_the_credentials(client):  # noqa: F811
+    tok = setup_admin(client)
+    rt = client.rt
+    rt.db.set("module.synology", {"enabled": True, "url": "https://nas.test:5001", "username": "u", "verify": True})
+    rt.secrets.put("module.synology.secret", "pw")
+    ids = _channel(client, tok)
+    private = f"channel.{ids['ntfy']}.private"
+
+    # same destination: everything stays
+    r = _import(client, tok, _export_with(client, lambda d: None))
+    assert "Imported" in r.text and rt.secrets.get("module.synology.secret") == "pw" and rt.secrets.has(private)
+
+    def elsewhere(d):
+        d["settings"]["module.synology"]["url"] = "https://evil.test:5001"
+        next(c for c in d["channels"] if c["kind"] == "ntfy")["config"] = json.dumps({"server": "https://evil.test"})
+
+    r = _import(client, tok, _export_with(client, elsewhere))
+    assert "credentials were deleted" in r.text
+    assert not rt.secrets.has("module.synology.secret") and not rt.secrets.has(private)
+    assert not rt.secrets.has(f"channel.{ids['ntfy']}") and not rt.db.get("module.synology")["enabled"]
+    assert rt.secrets.has(f"channel.{ids['healthchecks']}.private")  # untouched
+
+
+def test_import_turning_off_certificate_check_drops_the_credentials(client):  # noqa: F811
+    tok = setup_admin(client)
+    rt = client.rt
+    rt.db.set("module.synology", {"enabled": True, "url": "https://nas.test:5001", "username": "u", "verify": True})
+    rt.secrets.put("module.synology.secret", "pw")
+    _import(client, tok, _export_with(client, lambda d: d["settings"]["module.synology"].update(verify=False)))
+    assert not rt.secrets.has("module.synology.secret")
+
+
+def test_restore_to_another_destination_drops_the_credentials(client):  # noqa: F811
+    tok = setup_admin(client)
+    rt = client.rt
+    rt.db.set("module.synology", {"enabled": True, "url": "https://old.test:5001", "username": "u", "verify": True})
+    old = versions.record(rt.db, "t", "x")
+    rt.db.set("module.synology", {"enabled": True, "url": "https://new.test:5001", "username": "u", "verify": True})
+    versions.record(rt.db, "t", "y")
+    rt.secrets.put("module.synology.secret", "pw")
+    client.post(f"/system/versions/{old}/restore", data={"csrf": tok})
+    assert not rt.secrets.has("module.synology.secret")
+
+
+def test_import_uses_the_module_and_channel_rules(client):  # noqa: F811
+    tok = setup_admin(client)
+    bad = [
+        lambda d: d["settings"].update({"module.synology": {"url": "http://nas.test"}}),  # https only
+        lambda d: d["settings"].update({"module.speedport": {"host": "a b"}}),
+        lambda d: d["settings"].update({"module.proxmox": {"url": "ftp://x"}}),
+        lambda d: d["channels"].append({"id": 9, "kind": "nope", "name": "n", "enabled": 1, "levels": "[]", "quiet_start": None,
+                                        "quiet_end": None, "weekly_report": 0, "config": "{}"}),
+        lambda d: d["channels"].append({"id": 9, "kind": "ntfy", "name": "n", "enabled": 1, "levels": "[]", "quiet_start": None,
+                                        "quiet_end": None, "weekly_report": 0, "config": '{"server": "ftp://x"}'}),
+    ]
+    for change in bad:
+        assert "Nothing imported" in _import(client, tok, _export_with(client, change)).text
+

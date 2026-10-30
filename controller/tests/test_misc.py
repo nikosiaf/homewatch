@@ -130,3 +130,20 @@ def test_audit_hides_credentials(tmp_path):
     rows = [r["detail"] for r in db.all("SELECT detail FROM audit")]
     assert all("abc" not in r and "u!t" in r and "(hidden)" in r for r in rows)
     assert redact("plain text") == "plain text"
+
+
+def test_account_lock_holds_across_addresses(db):
+    from homewatch.auth import MAX_ACCOUNT_FAILS, Auth, AuthError
+
+    auth = Auth(db)
+    auth.create_user("admin", "correct horse battery", "admin")
+    for i in range(MAX_ACCOUNT_FAILS):
+        with pytest.raises(AuthError, match="Wrong"):
+            auth.login("admin", "nope", f"10.0.0.{i}")
+    with pytest.raises(AuthError, match="Too many"):
+        auth.login("admin", "correct horse battery", "10.0.1.1")
+    assert not any(k == "account:ghost" for k in auth.fails)
+    with pytest.raises(AuthError, match="Wrong"):
+        auth.login("ghost", "nope", "10.0.2.1")
+    assert "account:ghost" not in auth.fails
+

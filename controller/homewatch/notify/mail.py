@@ -25,6 +25,7 @@ FIELDS = [("server", "SMTP server", "smtp.example.com:587"),
           ("to", "To (comma-separated)", "you@example.com, partner@example.com")]
 SECRET_LABEL = "SMTP password (empty: no login)"
 SECRET_REQUIRED = False
+DESTINATION = ("server",)
 TIMEOUT = 20
 _ADDR = re.compile(r"^[^@\s,;<>]+@[^@\s,;<>]+\.[^@\s,;<>]+$")
 
@@ -42,6 +43,10 @@ def normalize(config: dict) -> tuple[dict, str]:
         return config, "Email: enter at least one valid To address"
     return {"server": f"{host}:{port}", "username": (config.get("username") or "").strip(), "sender": sender,
             "to": ", ".join(to)}, ""
+
+
+def check_imported(config: dict) -> str:
+    return normalize(config)[1]
 
 
 def build(config: dict, title: str, body: str) -> EmailMessage:

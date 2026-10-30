@@ -56,7 +56,8 @@ def test_first_run_wizard(client):
     r = client.post("/setup/healthchecks", data={"csrf": tok, "healthchecks.url": "https://hc-ping.com/abc"})
     assert r.url.path == "/" and "Setup done" in r.text
     hc = client.rt.db.one("SELECT * FROM channels WHERE kind='healthchecks'")
-    assert json.loads(hc["config"]) == {"url": "https://hc-ping.com/abc"}
+    assert json.loads(hc["config"]) == {}  # the ping URL is a credential
+    assert json.loads(client.rt.secrets.get(f"channel.{hc['id']}.private")) == {"url": "https://hc-ping.com/abc"}
     assert client.rt.db.get("home.name") == "Test Home"
 
 
@@ -169,12 +170,14 @@ def test_add_providers_with_prefixed_fields(client):
                                                 "telegram.chat_id": "ignored"})
     assert "Added" in r.text
     ch = client.rt.db.one("SELECT * FROM channels WHERE kind='ntfy'")
-    assert json.loads(ch["config"])["url"] == "https://ntfy.sh/home-alerts-x1"
+    assert json.loads(ch["config"]) == {"server": "https://ntfy.sh"}
+    assert "home-alerts-x1" in client.rt.secrets.get(f"channel.{ch['id']}.private")
+    assert "home-alerts-x1" not in client.get("/notifications").text
     r = client.post("/notifications/add", data={"csrf": tok, "kind": "telegram", "telegram.chat_id": "42"})
     assert "bot token" in r.text
     r = client.post("/notifications/add", data={"csrf": tok, "kind": "healthchecks",
                                                 "healthchecks.url": "https://hc-ping.com/u1"})
-    assert "Added" in r.text and "https://hc-ping.com/u1" in r.text  # the ping URL is shown, not hidden
+    assert "Added" in r.text and "https://hc-ping.com/u1" not in r.text  # a credential: encrypted, not shown
     assert len(client.rt.notifier.channels()) == 1  # the heartbeat gets no messages
 
 
@@ -193,7 +196,7 @@ def test_old_heartbeat_secret_becomes_a_provider(client):
     client.rt.secrets.put("healthchecks.url", "https://hc-ping.com/old")
     client.rt.migrate_heartbeat()
     ch = client.rt.db.one("SELECT * FROM channels WHERE kind='healthchecks'")
-    assert json.loads(ch["config"])["url"] == "https://hc-ping.com/old"
+    assert "https://hc-ping.com/old" in client.rt.secrets.get(f"channel.{ch['id']}.private")
     assert client.rt.secrets.get("healthchecks.url") is None
 
 
@@ -266,6 +269,25 @@ def test_modem_certificate_pin_flow(client, monkeypatch):
 
     client.post("/modules/speedport", data={**form, "password": "", "host": "192.0.2.2"})
     assert "cert" not in client.rt.db.get("speedport.state")  # another device: trust starts over
+
+
+def test_login_refuses_uploads_and_oversized_bodies(client):
+    from homewatch.web import MAX_BODY
+
+    setup_admin(client)
+    client.cookies.clear()
+    tok = csrf(client.get("/login").text)
+    r = client.post("/login", data={"csrf": tok}, files={"x": ("big.bin", b"0" * 1000)})
+    assert r.status_code == 400
+    r = client.post("/login", content=b"a" * (MAX_BODY + 1), headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert r.status_code == 413
+
+    def chunks():  # no Content-Length: counted as it arrives
+        for _ in range(9):
+            yield b"a" * (1024 * 1024)
+
+    r = client.post("/login", content=chunks(), headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert r.status_code == 413
 
 
 def test_message_lands_in_its_box(client):

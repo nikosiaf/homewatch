@@ -21,7 +21,7 @@ from .modules import CheckResult
 from .modules import internet as inet
 from .modules.internet import speedtest, telegraf
 from .modules.registry import MODULES
-from .notify import Notifier
+from .notify import Notifier, channel_private, channel_secret, destination, forget_channel, store_private
 from .secrets import Secrets
 
 log = logging.getLogger("homewatch.runtime")
@@ -46,6 +46,7 @@ class Runtime:
     last_run: float = 0
     last_error: str = ""
     speed_running: bool = False
+    dropped: list[str] = field(default_factory=list)  # what the last import or restore cut off from its credentials
     speed_started: float = 0
     wake: asyncio.Event = field(default_factory=asyncio.Event)
     tasks: list[asyncio.Task] = field(default_factory=list)
@@ -160,8 +161,8 @@ class Runtime:
         if not url:
             return
         if not self.db.one("SELECT 1 FROM channels WHERE kind='healthchecks'"):
-            self.db.run("INSERT INTO channels(kind,name,levels,config) VALUES('healthchecks','healthchecks.io','[]',?)",
-                        (json.dumps({"url": url}),))
+            cid = self.db.run("INSERT INTO channels(kind,name,levels,config) VALUES('healthchecks','healthchecks.io','[]','{}')")
+            store_private(self.secrets, cid, {"url": url})
         self.secrets.delete(HC_SECRET)
 
     def speedtest_background(self) -> bool:
@@ -209,9 +210,35 @@ class Runtime:
         self.wake.set()
         return warning
 
+    def guard_credentials(self, snap: dict) -> None:
+        """Credentials stay only with the destination they were entered for: when a snapshot changes where one
+        goes, or weakens how, delete it and switch that module or channel off. Call before applying the snapshot."""
+        self.dropped = []
+        for m in MODULES.values():
+            key = f"module.{m.id}"
+            old, new = self.db.get(key), snap["settings"].get(key)
+            if versions.same_destination(m, old, new) or not any(self.secrets.has(k) for k in m.secret_keys()):
+                continue
+            m.forget_credentials(self)
+            if new is not None:
+                new["enabled"] = False
+                self.dropped.append(m.name)
+        wanted = {c["id"]: c for c in snap["channels"]}
+        for row in self.db.all("SELECT * FROM channels"):
+            cid = row["id"]
+            c = wanted.get(cid)
+            if c is not None and c["kind"] == row["kind"] and destination(c["kind"], json.loads(c["config"])) == \
+                    destination(row["kind"], json.loads(row["config"])):
+                continue
+            had = self.secrets.has(channel_secret(cid)) or self.secrets.has(channel_private(cid))
+            forget_channel(self.secrets, cid)
+            if c is not None and had:
+                c["enabled"] = 0
+                self.dropped.append(c["name"])
+
     def restore_version(self, vid: int, username: str) -> bool:
         """Put an earlier configuration back and make every part of homewatch use it."""
-        if versions.restore(self.db, vid) is None:
+        if versions.restore(self.db, vid, before=self.guard_credentials) is None:
             return False
         self._config_replaced(username, "config.restore", f"version {vid}")
         return True
@@ -219,9 +246,11 @@ class Runtime:
     def import_config(self, text: str, username: str) -> str:
         """Replace the configuration with an uploaded export; returns an error or ''."""
         snap, err = versions.from_yaml(text)
+        err = err or versions.imported_error(snap)
         if err:
             return err
         versions.record(self.db, username, "config.before-import")  # so the import can be undone
+        self.guard_credentials(snap)
         versions.apply(self.db, snap)
         self._config_replaced(username, "config.import", f"{len(snap['settings'])} settings, "
                               f"{len(snap['checks'])} thresholds, {len(snap['channels'])} channels")
@@ -231,7 +260,11 @@ class Runtime:
         for m in MODULES.values():
             if hasattr(m, "snap"):
                 m.snap, m.error = None, ""  # the next run reads with the new settings
+            if hasattr(m, "client"):
+                m.client = None
         self.sync_telegraf()
+        if self.dropped:
+            detail += "; credentials deleted, destination changed: " + ", ".join(self.dropped)
         audit(self.db, username, action, detail)
         self.wake.set()
 

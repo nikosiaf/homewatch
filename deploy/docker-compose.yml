@@ -12,19 +12,24 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./certs:/certs:ro
       - caddy-data:/data
+    environment:
+      HW_TRUSTED_PROXIES: ${HW_TRUSTED_PROXIES:-}
+    networks: [edge]
     depends_on:
       - controller
     read_only: true
     tmpfs: [/tmp, /config]
 
   controller:
-    image: ghcr.io/nikosiaf/homewatch:${HW_VERSION:-0.17.0}
+    image: ghcr.io/nikosiaf/homewatch:${HW_VERSION:-0.18.0}
     restart: unless-stopped
     env_file: .env
     environment:
       HW_VM_URL: http://victoriametrics:8428
       HW_DATA_DIR: /data
       HW_TELEGRAF_DIR: /telegraf
+      FORWARDED_ALLOW_IPS: ${HW_EDGE_SUBNET:-172.30.77.0/29}  # only Caddy shares this network
+    networks: [edge, default]
     volumes:
       - hw-data:/data
       - telegraf-config:/telegraf
@@ -52,6 +57,12 @@ services:
     command: ["-storageDataPath=/storage", "-retentionPeriod=${HW_RETENTION:-1y}", "-httpListenAddr=:8428"]
     volumes:
       - vm-data:/storage
+
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: ${HW_EDGE_SUBNET:-172.30.77.0/29}
 
 volumes:
   hw-data:

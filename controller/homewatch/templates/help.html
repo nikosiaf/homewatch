@@ -114,8 +114,11 @@ less install.sh          # please read it first; it's short
     <li>Give each module a dedicated read-only account, as its setup steps describe.</li>
     <li>Keep "Check the HTTPS certificate" on when the device has a trusted certificate. Without it, someone on your network could
       pose as the device and capture its login.</li>
-    <li>Secrets are encrypted at rest and never shown again after saving. Passwords are hashed with Argon2, and logins lock for
-      5 minutes after 5 failures.</li>
+    <li>Secrets, including ntfy topic and healthchecks.io ping addresses, are encrypted at rest, never shown again after saving and
+      left out of exports. Passwords are hashed with Argon2. Logins lock for 5 minutes after 5 failures from one address, or 20 on one account.</li>
+    <li>Behind a reverse proxy, name it in <code>HW_TRUSTED_PROXIES</code> in <code>.env</code>. Otherwise every visitor counts as the proxy's address for login lockouts.</li>
+    <li>When an import or restore changes where a credential goes, or turns off HTTPS or certificate checks, homewatch deletes that
+      credential and switches the module or channel off until you enter it again.</li>
   </ul>
 </div>
 

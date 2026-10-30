@@ -25,7 +25,10 @@
   <div class="row">
     <div><label>Name</label><input type="text" name="name" value="{{ c.name }}" maxlength="60"></div>
     {% for k, label, hint in mod.FIELDS %}
-    <div style="flex:1;min-width:260px"><label>{{ label }}</label><input type="text" name="{{ k }}" value="{{ c.config.get(k, '') }}" placeholder="{{ hint }}" style="max-width:none"></div>{% endfor %}
+    {% if k in (mod.PRIVATE | default([])) %}
+    <div style="flex:1;min-width:260px"><label>{{ label }} · {{ 'set' if c.has_private else 'not set' }}</label><input type="password" name="{{ k }}" placeholder="{{ 'leave empty to keep' if c.has_private else hint }}" autocomplete="off" style="max-width:none"></div>
+    {% else %}
+    <div style="flex:1;min-width:260px"><label>{{ label }}</label><input type="text" name="{{ k }}" value="{{ c.config.get(k, '') }}" placeholder="{{ hint }}" style="max-width:none"></div>{% endif %}{% endfor %}
     {% if mod.SECRET_LABEL %}
     <div><label>{{ mod.SECRET_LABEL }} · {{ 'set' if c.has_secret else 'not set' }}</label>
       <input type="password" name="secret" placeholder="{{ 'leave empty to keep' if c.has_secret else '' }}" autocomplete="off"></div>{% endif %}

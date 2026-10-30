@@ -13,6 +13,8 @@ LINK = "https://ntfy.sh"
 FIELDS = [("url", "Topic URL", "https://ntfy.sh/your-hard-to-guess-topic")]
 SECRET_LABEL = "Access token (optional, for protected topics)"
 DEFAULT_SERVER = "https://ntfy.sh"
+PRIVATE = ("url", "topic")  # a hard-to-guess topic is its own password
+DESTINATION = ("server",)
 PRIORITY = {0: "default", 1: "high", 2: "urgent"}
 TAGS = {0: "white_check_mark", 1: "warning", 2: "rotating_light"}
 
@@ -35,6 +37,10 @@ def normalize(config: dict) -> tuple[dict, str]:
         return config, "ntfy: the topic name can have up to 64 characters"
     server = f"{parts.scheme}://{parts.netloc}" + ("/" + "/".join(prefix) if prefix else "")
     return {"url": f"{server}/{topic}", "server": server, "topic": topic}, ""
+
+
+def check_imported(config: dict) -> str:
+    return normalize({"server": config.get("server") or DEFAULT_SERVER, "topic": "t"})[1]
 
 
 async def send(http: httpx.AsyncClient, config: dict, secret: str, level: int, title: str, body: str) -> None:

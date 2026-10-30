@@ -68,6 +68,14 @@ Things to know before you add a modem:
   homewatch stops logging in until you accept the new one on the module page. The first reading
   itself can't tell an impostor from the modem, so add the modem on a network you trust.
 
+### Behind a reverse proxy
+
+If browsers reach homewatch through a reverse proxy (HAProxy, nginx…), put the proxy's address in
+`HW_TRUSTED_PROXIES` in `.env`, for example `HW_TRUSTED_PROXIES=192.168.1.1`, and run
+`docker compose up -d`. The proxy must send `X-Forwarded-For`. Without this setting every visitor
+counts as the proxy's address, so one person's failed logins lock everyone out for 5 minutes.
+Don't list anything that isn't a proxy: whoever is listed can claim to be any address.
+
 ### Proxmox VE module (optional)
 
 Watches a Proxmox VE host or cluster through a **read-only API token** (role PVEAuditor; the module
