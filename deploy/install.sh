@@ -60,3 +60,15 @@ echo
 echo "homewatch is starting. Open https://${host_ip:-<this host>} and follow the setup wizard."
 echo "Your browser will warn about the certificate once. Its SHA-256 fingerprint is:"
 openssl x509 -in certs/cert.pem -noout -fingerprint -sha256 | cut -d= -f2
+echo
+code=""
+for _ in $(seq 1 30); do
+  code=$("${compose[@]}" logs controller 2>/dev/null | grep -o 'First-run setup code: .*' | tail -1 | cut -d' ' -f4)
+  [[ -n "$code" ]] && break
+  sleep 2
+done
+if [[ -n "$code" ]]; then
+  echo "The setup wizard asks for this one-time code: $code"
+else
+  echo "If the setup wizard asks for a code: ${compose[*]} logs controller | grep \"setup code\""
+fi

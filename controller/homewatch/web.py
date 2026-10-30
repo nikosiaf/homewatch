@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -20,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 
 from . import __version__
 from . import config as config_mod
-from .auth import ROLES, Auth, AuthError, User, audit
+from .auth import ROLES, Auth, AuthError, Throttled, User, audit
 from .engine import DEFAULT_TIMING, thresholds, timing, tz
 from .modules import CATALOG, LEVEL_WORD, OK
 from .modules.registry import MODULES
@@ -78,6 +79,8 @@ def create_app(rt: Runtime | None = None, start_loops: bool = True) -> FastAPI:
     async def lifespan(app: FastAPI):
         app.state.rt = rt or Runtime.create(config_mod.load())
         app.state.auth = Auth(app.state.rt.db)
+        if not app.state.auth.has_users():
+            app.state.auth.setup_code()
         if start_loops:
             app.state.rt.start()
         yield
@@ -103,6 +106,17 @@ def current(request: Request) -> User | None:
 
 def client_ip(request: Request) -> str:
     return request.client.host if request.client else "?"
+
+
+async def password_problem(request: Request, user: User, form: dict) -> str:
+    """Sensitive actions ask for the signed-in user's password again; returns what is wrong, or ''."""
+    try:
+        await request.app.state.auth.verify(user.username, str(form.get("current", "")), client_ip(request))
+    except Throttled as e:
+        return str(e)
+    except AuthError:
+        return "Your current password is wrong"
+    return ""
 
 
 def page(request: Request, name: str, user: User | None, **ctx) -> HTMLResponse:
@@ -254,6 +268,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if auth.has_users():
             return RedirectResponse("/setup/home", status_code=303)
         tok = pre_value(request)
+        auth.setup_code()
         return with_pre(request, page(request, "setup_account.html", None, step=1, steps=SETUP_STEPS, csrf=tok), tok)
 
     @app.post("/setup")
@@ -267,8 +282,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if form.get("password") != form.get("password2"):
             return back("/setup", err="The passwords don't match")
         try:
-            auth.create_user(form.get("username", ""), form.get("password", ""), "admin")
-            token = auth.login(form["username"], form["password"], client_ip(request))
+            auth.check_setup_code(str(form.get("code", "")), client_ip(request))
+            await asyncio.to_thread(auth.create_user, form.get("username", ""), form.get("password", ""), "admin")
+            auth.setup_done()
+            token = await auth.login(form["username"], form["password"], client_ip(request))
         except AuthError as e:
             return back("/setup", err=str(e))
         audit(rt_of(request).db, form["username"], "setup", "admin account created")
@@ -320,7 +337,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/login", err="Form expired, please try again")
         auth: Auth = request.app.state.auth
         try:
-            token = auth.login(form.get("username", ""), form.get("password", ""), client_ip(request))
+            token = await auth.login(form.get("username", ""), form.get("password", ""), client_ip(request))
         except AuthError as e:
             return back("/login", err=str(e))
         resp = RedirectResponse("/", status_code=303)
@@ -916,9 +933,12 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         form = await form_of(request, user)
         if form is None:
             return back("/system", err="Form expired")
+        problem = await password_problem(request, user, form)
+        if problem:
+            return back("/system", err=problem)
         try:
-            request.app.state.auth.create_user(form.get("username", ""), form.get("password", ""),
-                                               form.get("role", "viewer"))
+            await asyncio.to_thread(request.app.state.auth.create_user, form.get("username", ""), form.get("password", ""),
+                                    form.get("role", "viewer"))
         except AuthError as e:
             return back("/system", err=str(e))
         audit(rt.db, user.username, "user.add", f"{form.get('username')} ({form.get('role')})")
@@ -928,8 +948,12 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     async def user_delete(request: Request, uid: int):
         rt = rt_of(request)
         user = request.state.user
-        if await form_of(request, user) is None:
+        form = await form_of(request, user)
+        if form is None:
             return back("/system", err="Form expired")
+        problem = await password_problem(request, user, form)
+        if problem:
+            return back("/system", err=problem)
         if uid == user.id:
             return back("/system", err="You can't remove yourself")
         row = rt.db.one("SELECT username, role FROM users WHERE id=?", (uid,))
@@ -951,14 +975,13 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if form is None:
             return back("/password", err="Form expired")
         auth: Auth = request.app.state.auth
-        try:
-            auth.login(user.username, form.get("current", ""), client_ip(request))
-        except AuthError:
-            return back("/password", err="The current password is wrong")
+        problem = await password_problem(request, user, form)
+        if problem:
+            return back("/password", err=problem)
         if form.get("new") != form.get("new2"):
             return back("/password", err="The new passwords don't match")
         try:
-            auth.set_password(user.id, form.get("new", ""))
+            await asyncio.to_thread(auth.set_password, user.id, form.get("new", ""))
         except AuthError as e:
             return back("/password", err=str(e))
         audit(rt.db, user.username, "password", "changed")
@@ -977,6 +1000,9 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         word = "RESET" if everything else "DELETE"
         if form.get("confirm", "").strip() != word:
             return back("/system", err=f"Type {word} in the box to confirm")
+        problem = await password_problem(request, user, form)
+        if problem:
+            return back("/system", err=problem)
         warning = await rt.reset(everything)
         if everything:
             log.warning("all configuration and history reset by %s", user.username)

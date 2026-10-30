@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import secrets
 import re
 import time
@@ -16,12 +18,26 @@ SESSION_IDLE = 7 * 24 * 3600
 MAX_FAILS = 5
 LOCK_SECONDS = 300
 MAX_ACCOUNT_FAILS = 20  # from any address; higher, so that one visitor can't easily lock the admin out
+MAX_VERIFYING = 2  # Argon2 checks at the same time
+MAX_WAITING = 8  # more than this at once are turned away rather than queued
 ROLES = ("admin", "viewer")
 MIN_PASSWORD = 10
 
 _ph = PasswordHasher()
 # a hash to verify against when the user doesn't exist, so timing doesn't reveal valid names
 _DUMMY = _ph.hash("not-a-real-password")
+
+
+def _token_hash(token: str) -> str:
+    """Tokens are long and random, so a plain hash is enough: a copy of the database holds no usable session."""
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _matches(pw_hash: str, password: str) -> bool:
+    try:
+        return _ph.verify(pw_hash, password)
+    except (VerifyMismatchError, InvalidHashError):
+        return False
 
 
 @dataclass
@@ -40,10 +56,17 @@ class AuthError(Exception):
     pass
 
 
+class Throttled(AuthError):
+    pass
+
+
 class Auth:
     def __init__(self, db: DB):
         self.db = db
         self.fails: dict[str, list[float]] = {}
+        self.slots = asyncio.Semaphore(MAX_VERIFYING)
+        self.waiting = 0
+        self._setup_code = ""
 
     def has_users(self) -> bool:
         return self.db.one("SELECT 1 FROM users LIMIT 1") is not None
@@ -76,49 +99,81 @@ class Auth:
             self.fails.pop(client, None)
         return len(recent) >= limit
 
-    def login(self, username: str, password: str, client: str) -> str:
-        """Return a new session token, or raise AuthError."""
+    async def verify(self, username: str, password: str, client: str):
+        """Check a password under the login limits; returns the user's row, or raises AuthError."""
         row = self.db.one("SELECT * FROM users WHERE username=?", (username.strip(),))
         # by user id: names match in any capitalization, so "ADMIN" must count against the same account
         account = f"account:{row['id']}" if row else ""
         if self.locked(client) or (account and self.locked(account, limit=MAX_ACCOUNT_FAILS)):
-            raise AuthError("Too many failed attempts. Try again in a few minutes.")
+            raise Throttled("Too many failed attempts. Try again in a few minutes.")
+        if self.waiting >= MAX_WAITING:
+            raise Throttled("Too many logins at once. Try again in a moment.")
+        # counted before the slow check, so that guesses sent in parallel can't all pass the limit above
+        now = time.time()
+        self.fails.setdefault(client, []).append(now)
+        if account:  # only real accounts, so made-up names can't fill this up
+            self.fails.setdefault(account, []).append(now)
+        self.waiting += 1
         try:
-            _ph.verify(row["pw_hash"] if row else _DUMMY, password)
-            if row is None:
-                raise VerifyMismatchError
-        except (VerifyMismatchError, InvalidHashError):
-            self.fails.setdefault(client, []).append(time.time())
-            if row is not None:  # only real accounts, so made-up names can't fill this up
-                self.fails.setdefault(account, []).append(time.time())
-            raise AuthError("Wrong username or password") from None
+            async with self.slots:  # Argon2 takes real CPU and memory: off the event loop, a few at a time
+                ok = await asyncio.to_thread(_matches, row["pw_hash"] if row else _DUMMY, password)
+                ok = ok and row is not None
+                if ok and _ph.check_needs_rehash(row["pw_hash"]):
+                    new = await asyncio.to_thread(_ph.hash, password)
+                    self.db.run("UPDATE users SET pw_hash=? WHERE id=?", (new, row["id"]))
+        finally:
+            self.waiting -= 1
+        if not ok:
+            raise AuthError("Wrong username or password")
         self.fails.pop(client, None)
-        self.fails.pop(account, None)
-        if _ph.check_needs_rehash(row["pw_hash"]):
-            self.db.run("UPDATE users SET pw_hash=? WHERE id=?", (_ph.hash(password), row["id"]))
+        if account:
+            self.fails.pop(account, None)
+        return row
+
+    async def login(self, username: str, password: str, client: str) -> str:
+        """Return a new session token, or raise AuthError."""
+        row = await self.verify(username, password, client)
         token = secrets.token_urlsafe(32)
         now = time.time()
         self.db.run("INSERT INTO sessions(token,user_id,csrf,created,last_seen) VALUES(?,?,?,?,?)",
-                    (token, row["id"], secrets.token_urlsafe(24), now, now))
+                    (_token_hash(token), row["id"], secrets.token_urlsafe(24), now, now))
         return token
+
+    # ---- first run ------------------------------------------------------------------------
+    def setup_code(self) -> str:
+        """The code that proves whoever creates the first admin can read this host's logs. Used once."""
+        if not self._setup_code:
+            self._setup_code = secrets.token_hex(8)
+            print(f"First-run setup code: {self._setup_code}", flush=True)  # noqa: T201 - for the admin, at any log level
+        return self._setup_code
+
+    def check_setup_code(self, code: str, client: str) -> None:
+        if self.locked(client):
+            raise Throttled("Too many failed attempts. Try again in a few minutes.")
+        if not secrets.compare_digest(code.strip().lower().encode(), self.setup_code().encode()):
+            self.fails.setdefault(client, []).append(time.time())
+            raise AuthError("That setup code is wrong")
+
+    def setup_done(self) -> None:
+        self._setup_code = ""
 
     def session(self, token: str | None) -> User | None:
         if not token:
             return None
         now = time.time()
         row = self.db.one("SELECT s.csrf, s.last_seen, u.id, u.username, u.role FROM sessions s "
-                          "JOIN users u ON u.id = s.user_id WHERE s.token=?", (token,))
+                          "JOIN users u ON u.id = s.user_id WHERE s.token=?", (_token_hash(token),))
         if row is None:
             return None
         if now - row["last_seen"] > SESSION_IDLE:
             self.logout(token)
             return None
         if now - row["last_seen"] > 60:
-            self.db.run("UPDATE sessions SET last_seen=? WHERE token=?", (now, token))
+            self.db.run("UPDATE sessions SET last_seen=? WHERE token=?", (now, _token_hash(token)))
         return User(row["id"], row["username"], row["role"], row["csrf"])
 
     def logout(self, token: str) -> None:
-        self.db.run("DELETE FROM sessions WHERE token=?", (token,))
+        self.db.run("DELETE FROM sessions WHERE token=?", (_token_hash(token),))
 
 
 _CREDENTIAL = re.compile(r'"(api_key|apikey|password|secret|token)": "[^"]*"')

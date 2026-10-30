@@ -70,6 +70,10 @@ MIGRATIONS: list[str] = [
     CREATE INDEX coverage_module ON coverage (site, module, end);
     ALTER TABLE check_state ADD COLUMN pending_obs REAL;
     """,
+    # 4: sessions store a hash of their token from now on; the old ones hold the token itself
+    """
+    DELETE FROM sessions;
+    """,
 ]
 
 

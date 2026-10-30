@@ -255,7 +255,9 @@ less install.sh          # please read it first; it's short
 - runs `docker compose up -d`
 
 At the end it prints the certificate's SHA-256 fingerprint. Open `https://<host>` and compare that
-fingerprint when the browser warns about the certificate (once). Then follow the setup wizard:
+fingerprint when the browser warns about the certificate (once). It also prints a one-time setup
+code the wizard asks for; to see it again, run `docker compose logs controller | grep "setup code"`.
+Then follow the setup wizard:
 1. Admin account
 2. Home name and time zone
 3. Internet probes and contracted speed

@@ -49,15 +49,15 @@ def test_parse_ookla():
     assert (r.down, r.up, r.latency) == (100.0, 10.0, 9.5)
 
 
-def test_auth_lockout(db):
+async def test_auth_lockout(db):
     a = Auth(db)
     a.create_user("admin", "correct horse battery", "admin")
     for _ in range(5):
         with pytest.raises(AuthError):
-            a.login("admin", "wrong", "10.0.0.1")
+            await a.login("admin", "wrong", "10.0.0.1")
     with pytest.raises(AuthError, match="Too many"):
-        a.login("admin", "correct horse battery", "10.0.0.1")
-    assert a.login("admin", "correct horse battery", "10.0.0.2")
+        await a.login("admin", "correct horse battery", "10.0.0.1")
+    assert await a.login("admin", "correct horse battery", "10.0.0.2")
 
 
 def test_short_password_rejected(db):
@@ -132,32 +132,32 @@ def test_audit_hides_credentials(tmp_path):
     assert redact("plain text") == "plain text"
 
 
-def test_account_lock_holds_across_addresses(db):
+async def test_account_lock_holds_across_addresses(db):
     from homewatch.auth import MAX_ACCOUNT_FAILS, Auth, AuthError
 
     auth = Auth(db)
     auth.create_user("admin", "correct horse battery", "admin")
     for i in range(MAX_ACCOUNT_FAILS):
         with pytest.raises(AuthError, match="Wrong"):
-            auth.login("admin", "nope", f"10.0.0.{i}")
+            await auth.login("admin", "nope", f"10.0.0.{i}")
     with pytest.raises(AuthError, match="Too many"):
-        auth.login("admin", "correct horse battery", "10.0.1.1")
+        await auth.login("admin", "correct horse battery", "10.0.1.1")
     assert not any(k == "account:ghost" for k in auth.fails)
     with pytest.raises(AuthError, match="Wrong"):
-        auth.login("ghost", "nope", "10.0.2.1")
+        await auth.login("ghost", "nope", "10.0.2.1")
     assert "account:ghost" not in auth.fails
 
 
-def test_account_lock_ignores_capitalization(db):
+async def test_account_lock_ignores_capitalization(db):
     from homewatch.auth import MAX_ACCOUNT_FAILS, Auth, AuthError
 
     auth = Auth(db)
     auth.create_user("admin", "correct horse battery", "admin")
     for i in range(MAX_ACCOUNT_FAILS):
         with pytest.raises(AuthError, match="Wrong"):
-            auth.login("ADMIN" if i % 2 else " Admin", "nope", f"10.0.0.{i}")
+            await auth.login("ADMIN" if i % 2 else " Admin", "nope", f"10.0.0.{i}")
     with pytest.raises(AuthError, match="Too many"):
-        auth.login("aDmIn", "correct horse battery", "10.0.1.1")
+        await auth.login("aDmIn", "correct horse battery", "10.0.1.1")
 
 
 def test_availability_counts_only_observed_time(db):
@@ -179,4 +179,49 @@ def test_availability_counts_only_observed_time(db):
     assert a.observed == 20 * H and a.coverage == 20
     assert a.down == 3 * H and a.outages == 2 and a.percent == 85
     assert availability(db, "home", 50 * H, 60 * H).percent is None
+
+
+async def test_parallel_guesses_cant_pass_the_limit(db):
+    import asyncio
+
+    from homewatch.auth import MAX_FAILS, Auth, AuthError, Throttled
+
+    auth = Auth(db)
+    auth.create_user("admin", "correct horse battery", "admin")
+    res = await asyncio.gather(*(auth.login("admin", f"guess{i}", "10.0.0.1") for i in range(20)), return_exceptions=True)
+    assert all(isinstance(r, AuthError) for r in res)
+    assert sum(not isinstance(r, Throttled) for r in res) == MAX_FAILS  # only this many were really tried
+    assert auth.waiting == 0
+
+
+async def test_too_many_at_once_are_turned_away(db):
+    import asyncio
+
+    from homewatch.auth import MAX_WAITING, Auth, AuthError, Throttled
+
+    auth = Auth(db)
+    res = await asyncio.gather(*(auth.login("ghost", "x", f"10.0.0.{i}") for i in range(MAX_WAITING + 3)), return_exceptions=True)
+    assert all(isinstance(r, AuthError) for r in res)
+    assert sum(isinstance(r, Throttled) for r in res) == 3
+
+
+async def test_the_event_loop_keeps_running_during_a_login(db):
+    import asyncio
+
+    from homewatch.auth import Auth
+
+    auth = Auth(db)
+    auth.create_user("admin", "correct horse battery", "admin")
+    ticks = 0
+
+    async def tick():
+        nonlocal ticks
+        while True:
+            ticks += 1
+            await asyncio.sleep(0.001)
+
+    t = asyncio.create_task(tick())
+    await auth.login("admin", "correct horse battery", "10.0.0.1")
+    t.cancel()
+    assert ticks > 3
 

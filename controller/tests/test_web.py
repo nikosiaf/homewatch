@@ -30,7 +30,7 @@ def setup_admin(c):
     r = c.get("/")
     assert r.url.path == "/setup"
     r = c.post("/setup", data={"csrf": csrf(r.text), "username": "admin", "password": "a-long-password",
-                               "password2": "a-long-password"})
+                               "password2": "a-long-password", "code": c.app.state.auth.setup_code()})
     assert r.url.path == "/setup/home"
     return csrf(r.text)
 
@@ -72,7 +72,7 @@ def test_csrf_required(client):
 
 def test_viewer_is_read_only(client, cfg):
     tok = setup_admin(client)
-    client.post("/users", data={"csrf": tok, "username": "family", "password": "another-long-one", "role": "viewer"})
+    client.post("/users", data={"csrf": tok, "username": "family", "password": "another-long-one", "role": "viewer", "current": "a-long-password"})
     client.post("/logout", data={"csrf": tok})
     r = client.get("/login")
     r = client.post("/login", data={"csrf": csrf(r.text), "username": "family", "password": "another-long-one"})
@@ -149,7 +149,7 @@ def test_delete_history_needs_the_word(client):
     db.run("INSERT INTO issues(site,check_key,level,worst,started) VALUES('home','internet.loss',1,1,1)")
     r = client.post("/system/reset", data={"csrf": tok, "mode": "history", "confirm": "nope"})
     assert "Type DELETE" in r.text and db.one("SELECT COUNT(*) n FROM issues")["n"] == 1
-    client.post("/system/reset", data={"csrf": tok, "mode": "history", "confirm": "DELETE"})
+    client.post("/system/reset", data={"csrf": tok, "mode": "history", "confirm": "DELETE", "current": "a-long-password"})
     assert db.one("SELECT COUNT(*) n FROM issues")["n"] == 0
     assert db.one("SELECT COUNT(*) n FROM users")["n"] == 1
 
@@ -157,7 +157,7 @@ def test_delete_history_needs_the_word(client):
 def test_reset_everything_restarts_the_wizard(client):
     tok = setup_admin(client)
     client.post("/setup/home", data={"csrf": tok, "name": "Old Home", "tz": "Europe/Athens"})
-    r = client.post("/system/reset", data={"csrf": tok, "mode": "all", "confirm": "RESET"})
+    r = client.post("/system/reset", data={"csrf": tok, "mode": "all", "confirm": "RESET", "current": "a-long-password"})
     assert r.url.path == "/setup" and "first-run setup" in r.text
     db = client.rt.db
     assert db.one("SELECT COUNT(*) n FROM users")["n"] == 0
@@ -352,6 +352,52 @@ def test_history_shows_coverage(client):
     rt.db.run("INSERT INTO coverage(site,module,start,end) VALUES(?,?,?,?)", (rt.cfg.site, "internet", now - 86400, now))
     page = client.get("/history?days=2").text
     assert "100.00 %" in page and "Monitored 50 %" in page
+
+
+def test_first_admin_needs_the_setup_code(client):
+    auth = client.app.state.auth
+    page = client.get("/setup").text
+    form = {"csrf": csrf(page), "username": "admin", "password": "a-long-password", "password2": "a-long-password"}
+    r = client.post("/setup", data={**form, "code": "wrong"})
+    assert "setup code is wrong" in r.text and not auth.has_users()
+    code = auth.setup_code()
+    r = client.post("/setup", data={**form, "code": code.upper() + " "})
+    assert r.url.path == "/setup/home" and auth.has_users()
+    assert auth.setup_code() != code  # used once
+
+
+def test_setup_code_guessing_locks_out(client):
+    page = client.get("/setup").text
+    form = {"csrf": csrf(page), "username": "admin", "password": "a-long-password", "password2": "a-long-password"}
+    for _ in range(5):
+        client.post("/setup", data={**form, "code": "wrong"})
+    r = client.post("/setup", data={**form, "code": client.app.state.auth.setup_code()})
+    assert "Too many" in r.text and not client.app.state.auth.has_users()
+
+
+def test_sensitive_actions_ask_for_the_password(client):
+    tok = setup_admin(client)
+    db = client.rt.db
+    r = client.post("/users", data={"csrf": tok, "username": "x", "password": "another-long-one", "role": "admin", "current": "nope"})
+    assert "current password is wrong" in r.text and not db.one("SELECT 1 FROM users WHERE username='x'")
+    r = client.post("/users", data={"csrf": tok, "username": "x", "password": "another-long-one", "role": "admin",
+                                    "current": "a-long-password"})
+    assert "User added" in r.text
+    uid = db.one("SELECT id FROM users WHERE username='x'")["id"]
+    r = client.post(f"/users/{uid}/delete", data={"csrf": tok})
+    assert "current password is wrong" in r.text and db.one("SELECT 1 FROM users WHERE id=?", (uid,))
+    client.post("/setup/home", data={"csrf": tok, "name": "Keep", "tz": "UTC"})
+    r = client.post("/system/reset", data={"csrf": tok, "mode": "all", "confirm": "RESET", "current": "nope"})
+    assert "current password is wrong" in r.text and db.get("home.name") == "Keep"
+    r = client.post(f"/users/{uid}/delete", data={"csrf": tok, "current": "a-long-password"})
+    assert "User removed" in r.text
+
+
+def test_sessions_are_stored_as_hashes(client):
+    setup_admin(client)
+    token = client.cookies.get("hw_session") or next(v for k, v in client.cookies.items() if k != "hw_pre")
+    stored = client.rt.db.one("SELECT token FROM sessions")["token"]
+    assert stored != token and client.app.state.auth.session(token) and not client.app.state.auth.session(stored)
 
 
 def test_message_lands_in_its_box(client):

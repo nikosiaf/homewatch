@@ -30,6 +30,8 @@ less install.sh          # please read it first; it's short
   <p>The script writes <code>.env</code> with a new master key, creates a self-signed certificate and starts the containers.
     It prints the certificate's SHA-256 fingerprint: compare it when your browser warns about the certificate at
     <code>https://&lt;host&gt;</code>.</p>
+  <p>The script also prints a one-time setup code, which the wizard asks for, so nobody else on your network can claim homewatch first.
+    To see it again, run <code>docker compose logs controller | grep "setup code"</code>.</p>
   <p style="margin-bottom:0">The setup wizard then asks for an admin account, your home's name and time zone, the internet checks and contracted
     speed, a notification channel and an optional heartbeat. Add everything else one module at a time, under Modules.</p>
 </div>
@@ -125,6 +127,7 @@ less install.sh          # please read it first; it's short
       pose as the device and capture its login.</li>
     <li>Secrets, including ntfy topic and healthchecks.io ping addresses, are encrypted at rest, never shown again after saving and
       left out of exports. Passwords are hashed with Argon2. Logins lock for 5 minutes after 5 failures from one address, or 20 on one account.</li>
+    <li>Adding or removing a user and deleting data ask for your password again. Sessions are stored only as hashes, so a copy of the database can't be used to log in.</li>
     <li>Behind a reverse proxy, name it in <code>HW_TRUSTED_PROXIES</code> in <code>.env</code>. Otherwise every visitor counts as the proxy's address for login lockouts.</li>
     <li>When an import or restore changes where a credential goes, or turns off HTTPS or certificate checks, homewatch deletes that
       credential and switches the module or channel off until you enter it again.</li>
