@@ -71,11 +71,12 @@ def forget_channel(secrets, channel_id: int) -> None:
     secrets.delete(channel_private(channel_id))
 
 
-def imported_error(kind: str, config: dict) -> str:
+def imported(kind: str, config: dict) -> tuple[dict, str]:
+    """A channel's config from an imported file, by the rules of its form: (what to store, what is wrong)."""
     mod = PROVIDERS.get(kind)
     if mod is None:
-        return f"unknown channel type {kind}"
-    return mod.check_imported(config) if hasattr(mod, "check_imported") else ""
+        return config, f"unknown channel type {kind}"
+    return mod.imported(config) if hasattr(mod, "imported") else (config, "")
 
 
 def destination(kind: str, config: dict) -> list:

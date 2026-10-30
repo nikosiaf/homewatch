@@ -101,9 +101,9 @@ class Module:
         for k in self.secret_keys():
             rt.secrets.delete(k)
 
-    def imported_error(self, settings: dict) -> str:
-        """What is wrong with settings from an imported file, by the rules of the module's form."""
-        return ""
+    def imported(self, settings: dict) -> tuple[dict, str]:
+        """Settings from an imported file, held to the rules of the module's form: (what to store, what is wrong)."""
+        return settings, ""
 
     def enabled(self, settings: dict) -> bool:
         return bool(settings.get("enabled", True))

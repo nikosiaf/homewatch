@@ -45,8 +45,10 @@ def normalize(config: dict) -> tuple[dict, str]:
             "to": ", ".join(to)}, ""
 
 
-def check_imported(config: dict) -> str:
-    return normalize(config)[1]
+def imported(config: dict) -> tuple[dict, str]:
+    if not all(isinstance(config.get(k, ""), str) for k in ("server", "username", "sender", "to")):
+        return config, "Email: server, username and addresses must be text"
+    return normalize(config)
 
 
 def build(config: dict, title: str, body: str) -> EmailMessage:

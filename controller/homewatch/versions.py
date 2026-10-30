@@ -2,7 +2,7 @@
 
 A snapshot holds what an admin configures (module settings, thresholds, timing, home, report schedule,
 channels, maintenance windows). It never holds secrets, users, sessions, snoozes or history; restoring
-leaves those as they are.
+leaves those as they are, except credentials whose destination the restored settings change.
 """
 
 from __future__ import annotations
@@ -91,16 +91,14 @@ def record(db: DB, username: str, action: str) -> int | None:
 def restore(db: DB, vid: int, before=None) -> dict | None:
     """Put version vid's configuration back. Returns its snapshot, or None when it doesn't exist.
 
-    before(snapshot), when given, runs first and may change the snapshot.
+    before(snapshot), when given, runs first, may change the snapshot, and returns what to run in its transaction.
     """
     row = db.one("SELECT data FROM config_versions WHERE id=?", (vid,))
     if row is None:
         return None
     snap = json.loads(row["data"])
     strip_secret_fields(snap)
-    if before:
-        before(snap)
-    apply(db, snap)
+    apply(db, snap, before(snap) if before else None)
     return snap
 
 
@@ -185,8 +183,11 @@ def scrub_exports(path_dir: str) -> None:
                     f.write(clean)
 
 
-def apply(db: DB, snap: dict) -> None:
-    """Replace the configuration with a (validated) snapshot; secrets, users and history stay."""
+def apply(db: DB, snap: dict, within=None) -> None:
+    """Replace the configuration with a (validated) snapshot; secrets, users and history stay.
+
+    within(), when given, runs in the same transaction: both happen, or neither.
+    """
     strip_secret_fields(snap)  # an export from an older version may still hold them
     with db.tx() as t:
         for r in t.all("SELECT key FROM settings"):
@@ -207,6 +208,8 @@ def apply(db: DB, snap: dict) -> None:
         for m in snap["maintenance"]:
             t.run(f"INSERT INTO maintenance({', '.join(MAINT_COLS)}) VALUES({', '.join('?' * len(MAINT_COLS))})",  # noqa: S608
                   tuple(m[k] for k in MAINT_COLS))
+        if within:
+            within()
 
 
 # ---- YAML export / import --------------------------------------------------------------------
@@ -256,10 +259,11 @@ def from_yaml(text: str) -> tuple[dict | None, str]:
     return snap, ""
 
 
-def imported_error(snap: dict) -> str:
-    """Hold an imported snapshot to the rules of the module and channel forms; returns what is wrong."""
+def clean_import(snap: dict) -> str:
+    """Hold an imported snapshot to the rules of the module and channel forms and put the normalized values
+    in it, so that what is checked is what gets stored. Returns what is wrong."""
     from .modules.registry import MODULES
-    from .notify import imported_error as channel_error
+    from .notify import imported as channel_imported
 
     for m in MODULES.values():
         settings = snap["settings"].get(f"module.{m.id}")
@@ -267,9 +271,12 @@ def imported_error(snap: dict) -> str:
             continue
         if not isinstance(settings, dict):
             return f"{m.name}: settings must be a mapping"
-        err = m.imported_error(settings)
+        if not isinstance(settings.get("enabled", True), bool):
+            return f"{m.name}: enabled must be true or false"
+        settings, err = m.imported(settings)
         if err:
             return f"{m.name}: {err}"
+        snap["settings"][f"module.{m.id}"] = settings
     for c in snap["channels"]:
         try:
             config = json.loads(c["config"])
@@ -277,9 +284,18 @@ def imported_error(snap: dict) -> str:
             config = None
         if not isinstance(config, dict):
             return f"channel {c['name']}: config is not valid"
-        err = channel_error(str(c["kind"]), config)
+        if isinstance(c["id"], bool) or not isinstance(c["id"], int) or c["enabled"] not in (0, 1):
+            return f"channel {c['name']}: id or enabled is not valid"
+        try:
+            levels = json.loads(c["levels"])
+        except (TypeError, ValueError):
+            levels = None
+        if not isinstance(levels, list) or not all(lv in (1, 2) for lv in levels):
+            return f"channel {c['name']}: levels are not valid"
+        config, err = channel_imported(str(c["kind"]), config)
         if err:
             return f"channel {c['name']}: {err}"
+        c["config"] = json.dumps(config)
     return ""
 
 

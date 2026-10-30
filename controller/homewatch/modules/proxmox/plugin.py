@@ -121,8 +121,16 @@ class ProxmoxModule(Module):
     def secret_keys(self) -> list[str]:
         return [SECRET]
 
-    def imported_error(self, settings: dict) -> str:
-        return "" if normalize_url(str(settings.get("url", ""))) else "address: an https:// address"
+    def imported(self, settings: dict) -> tuple[dict, str]:
+        url = settings.get("url")
+        url = normalize_url(url) if isinstance(url, str) else ""
+        if not url:
+            return settings, "address: an https:// address"
+        if not isinstance(settings.get("verify", True), bool):
+            return settings, "certificate check: must be true or false"
+        if not all(isinstance(v, int) for v in settings.get("watched", [])):
+            return settings, "watched guests: must be a list of numbers"
+        return settings | {"url": url}, ""
 
     def save(self, rt, form: dict, user) -> str:
         if form.get("remove"):

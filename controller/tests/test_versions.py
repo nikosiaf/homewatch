@@ -4,6 +4,7 @@ import json
 import base64
 import time
 
+import pytest
 import yaml
 
 from homewatch import versions
@@ -215,4 +216,54 @@ def test_import_uses_the_module_and_channel_rules(client):  # noqa: F811
     ]
     for change in bad:
         assert "Nothing imported" in _import(client, tok, _export_with(client, change)).text
+
+
+def test_failed_apply_keeps_the_credentials(client):  # noqa: F811
+    tok = setup_admin(client)
+    rt = client.rt
+    rt.db.set("module.synology", {"enabled": True, "url": "https://nas.test:5001", "username": "u", "verify": True})
+    rt.secrets.put("module.synology.secret", "pw")
+    snap = versions.snapshot(rt.db)
+    snap["settings"]["module.synology"]["url"] = "https://evil.test:5001"
+    within = rt.guard_credentials(snap)
+
+    def fail():
+        within()
+        raise RuntimeError("disk full")
+
+    with pytest.raises(RuntimeError):
+        versions.apply(rt.db, snap, fail)
+    assert rt.secrets.get("module.synology.secret") == "pw"
+    assert rt.db.get("module.synology")["url"] == "https://nas.test:5001"
+
+
+def test_import_stores_what_it_checked(client):  # noqa: F811
+    tok = setup_admin(client)
+    rt = client.rt
+    rt.db.set("module.synology", {"enabled": True, "url": "https://nas.test:5001", "username": "u", "verify": True})
+    rt.secrets.put("module.synology.secret", "pw")
+    # another way to write the same address is the same destination, and the normalized form is stored
+    r = _import(client, tok, _export_with(client, lambda d: d["settings"]["module.synology"].update(url="nas.test")))
+    assert "Imported" in r.text and rt.db.get("module.synology")["url"] == "https://nas.test:5001"
+    assert rt.secrets.has("module.synology.secret")
+    # the text "false" would read as on, and pass as "certificate check still on"
+    r = _import(client, tok, _export_with(client, lambda d: d["settings"]["module.synology"].update(verify="false")))
+    assert "Nothing imported" in r.text and rt.db.get("module.synology")["verify"] is True
+    for bad in ({"enabled": "yes"},):
+        r = _import(client, tok, _export_with(client, lambda d: d["settings"]["module.synology"].update(bad)))
+        assert "Nothing imported" in r.text
+    r = _import(client, tok, _export_with(client, lambda d: d["settings"].update({"module.ups": {"host": "h", "port": ".nan", "ups": ""}})))
+    assert "Nothing imported" in r.text
+
+
+def test_restore_message_tells_what_happened(client):  # noqa: F811
+    tok = setup_admin(client)
+    rt = client.rt
+    rt.db.set("module.synology", {"enabled": True, "url": "https://old.test:5001", "username": "u", "verify": True})
+    old = versions.record(rt.db, "t", "x")
+    rt.db.set("module.synology", {"enabled": True, "url": "https://new.test:5001", "username": "u", "verify": True})
+    versions.record(rt.db, "t", "y")
+    rt.secrets.put("module.synology.secret", "pw")
+    r = client.post(f"/system/versions/{old}/restore", data={"csrf": tok})
+    assert "credentials were deleted" in r.text and "left as they are" not in r.text
 

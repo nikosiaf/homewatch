@@ -147,3 +147,15 @@ def test_account_lock_holds_across_addresses(db):
         auth.login("ghost", "nope", "10.0.2.1")
     assert "account:ghost" not in auth.fails
 
+
+def test_account_lock_ignores_capitalization(db):
+    from homewatch.auth import MAX_ACCOUNT_FAILS, Auth, AuthError
+
+    auth = Auth(db)
+    auth.create_user("admin", "correct horse battery", "admin")
+    for i in range(MAX_ACCOUNT_FAILS):
+        with pytest.raises(AuthError, match="Wrong"):
+            auth.login("ADMIN" if i % 2 else " Admin", "nope", f"10.0.0.{i}")
+    with pytest.raises(AuthError, match="Too many"):
+        auth.login("aDmIn", "correct horse battery", "10.0.1.1")
+

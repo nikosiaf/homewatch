@@ -12,6 +12,7 @@ the Enabled switch, Remove, reading at most every `every` seconds, and the reach
 from __future__ import annotations
 
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -113,18 +114,26 @@ class ApiModule(Module):
     def secret_keys(self) -> list[str]:
         return [self.secret_key] + [self.field_secret_key(f) for f in self.fields if f.secret]
 
-    def imported_error(self, settings: dict) -> str:
+    def imported(self, settings: dict) -> tuple[dict, str]:
         form = {"enabled": "on"}
         for f in self.fields:
             if f.secret:
                 continue
             value = settings.get(f.key, f.default)
             if f.kind == "check":
+                if not isinstance(value, bool):
+                    return settings, f"{f.label}: must be true or false"
                 if value:
                     form[f.key] = "on"
+            elif isinstance(value, (list, dict, bool)) or value is None:
+                return settings, f"{f.label}: must be a plain value"
             else:
-                form[f.key] = ", ".join(map(str, value)) if isinstance(value, list) else str(value)
-        return self.validate(form, {})[1]
+                form[f.key] = str(value)
+        for k in ("chosen", "skipped"):
+            if not isinstance(settings.get(k, []), list):
+                return settings, f"{k}: must be a list"
+        out, err = self.validate(form, {})
+        return (settings, err) if err else (settings | out, "")
 
     def validate(self, form: dict, old: dict) -> tuple[dict, str]:
         """Turn the form into settings; override to normalize addresses. Returns (settings, error)."""
@@ -139,6 +148,8 @@ class ApiModule(Module):
                 try:
                     out[f.key] = float(raw)
                 except (TypeError, ValueError):
+                    return {}, f"{f.label}: a number"
+                if not math.isfinite(out[f.key]):
                     return {}, f"{f.label}: a number"
             else:
                 out[f.key] = str(raw).strip()

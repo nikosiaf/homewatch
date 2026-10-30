@@ -78,10 +78,11 @@ class Auth:
 
     def login(self, username: str, password: str, client: str) -> str:
         """Return a new session token, or raise AuthError."""
-        account = f"account:{username.strip()}"
-        if self.locked(client) or self.locked(account, limit=MAX_ACCOUNT_FAILS):
-            raise AuthError("Too many failed attempts. Try again in a few minutes.")
         row = self.db.one("SELECT * FROM users WHERE username=?", (username.strip(),))
+        # by user id: names match in any capitalization, so "ADMIN" must count against the same account
+        account = f"account:{row['id']}" if row else ""
+        if self.locked(client) or (account and self.locked(account, limit=MAX_ACCOUNT_FAILS)):
+            raise AuthError("Too many failed attempts. Try again in a few minutes.")
         try:
             _ph.verify(row["pw_hash"] if row else _DUMMY, password)
             if row is None:

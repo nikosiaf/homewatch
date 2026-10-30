@@ -39,8 +39,12 @@ def normalize(config: dict) -> tuple[dict, str]:
     return {"url": f"{server}/{topic}", "server": server, "topic": topic}, ""
 
 
-def check_imported(config: dict) -> str:
-    return normalize({"server": config.get("server") or DEFAULT_SERVER, "topic": "t"})[1]
+def imported(config: dict) -> tuple[dict, str]:
+    server = config.get("server") or DEFAULT_SERVER
+    if not isinstance(server, str):
+        return config, "ntfy: the server must be an address"
+    out, err = normalize({"server": server, "topic": "t"})  # the topic itself is never in a file
+    return (config, err) if err else ({"server": out["server"]}, "")
 
 
 async def send(http: httpx.AsyncClient, config: dict, secret: str, level: int, title: str, body: str) -> None:

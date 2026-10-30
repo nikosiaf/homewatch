@@ -65,12 +65,16 @@ class SpeedportModule(Module):
             st.pop(k, None)
         rt.db.set(STATE, st)
 
-    def imported_error(self, settings: dict) -> str:
-        if not valid_host(str(settings.get("host", ""))):
-            return "modem address: an IP address or host name"
+    def imported(self, settings: dict) -> tuple[dict, str]:
+        host = settings.get("host")
+        if not isinstance(host, str) or not valid_host(host.strip()):
+            return settings, "modem address: an IP address or host name"
         if settings.get("model", "speedport-plus-2") not in MODELS:
-            return "unknown modem model"
-        return ""
+            return settings, "unknown modem model"
+        interval = settings.get("interval_min", 15)
+        if isinstance(interval, bool) or not isinstance(interval, int) or not 5 <= interval <= 240:
+            return settings, "read interval: 5 to 240 minutes"
+        return settings | {"host": host.strip()}, ""
 
     def state(self, rt) -> dict:
         return rt.db.get(STATE) or {}

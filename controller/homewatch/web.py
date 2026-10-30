@@ -900,7 +900,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/system", err="Form expired")
         if not rt.restore_version(vid, request.state.user.username):
             return back("/system", err=f"Version {vid} no longer exists")
-        return back("/system", msg=f"Version {vid} restored. Passwords and tokens were left as they are." + _dropped_note(rt))
+        return back("/system", msg=f"Version {vid} restored." + (_dropped_note(rt) or " Passwords and tokens were left as they are."))
 
     @app.post("/system/home")
     async def system_home(request: Request):

@@ -210,16 +210,18 @@ class Runtime:
         self.wake.set()
         return warning
 
-    def guard_credentials(self, snap: dict) -> None:
+    def guard_credentials(self, snap: dict):
         """Credentials stay only with the destination they were entered for: when a snapshot changes where one
-        goes, or weakens how, delete it and switch that module or channel off. Call before applying the snapshot."""
+        goes, or weakens how, switch that module or channel off in the snapshot and return what deletes the
+        credential. Run that in the transaction that applies the snapshot, so a failure loses neither."""
         self.dropped = []
+        forget = []
         for m in MODULES.values():
             key = f"module.{m.id}"
             old, new = self.db.get(key), snap["settings"].get(key)
             if versions.same_destination(m, old, new) or not any(self.secrets.has(k) for k in m.secret_keys()):
                 continue
-            m.forget_credentials(self)
+            forget.append(lambda m=m: m.forget_credentials(self))
             if new is not None:
                 new["enabled"] = False
                 self.dropped.append(m.name)
@@ -231,10 +233,11 @@ class Runtime:
                     destination(row["kind"], json.loads(row["config"])):
                 continue
             had = self.secrets.has(channel_secret(cid)) or self.secrets.has(channel_private(cid))
-            forget_channel(self.secrets, cid)
+            forget.append(lambda cid=cid: forget_channel(self.secrets, cid))
             if c is not None and had:
                 c["enabled"] = 0
                 self.dropped.append(c["name"])
+        return lambda: [f() for f in forget]
 
     def restore_version(self, vid: int, username: str) -> bool:
         """Put an earlier configuration back and make every part of homewatch use it."""
@@ -246,12 +249,11 @@ class Runtime:
     def import_config(self, text: str, username: str) -> str:
         """Replace the configuration with an uploaded export; returns an error or ''."""
         snap, err = versions.from_yaml(text)
-        err = err or versions.imported_error(snap)
+        err = err or versions.clean_import(snap)
         if err:
             return err
         versions.record(self.db, username, "config.before-import")  # so the import can be undone
-        self.guard_credentials(snap)
-        versions.apply(self.db, snap)
+        versions.apply(self.db, snap, self.guard_credentials(snap))
         self._config_replaced(username, "config.import", f"{len(snap['settings'])} settings, "
                               f"{len(snap['checks'])} thresholds, {len(snap['channels'])} channels")
         return ""
