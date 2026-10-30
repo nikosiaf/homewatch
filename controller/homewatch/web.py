@@ -315,16 +315,16 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         return JSONResponse({"unit": unit, "x": stamps, "series": series_out})
 
     @app.get("/history")
-    async def history(request: Request, check: str = "", level: str = "", days: int = 30):
+    async def history(request: Request, module: str = "", level: str = "", days: int = 30):
         rt = rt_of(request)
         days = max(1, min(days, 400))
         since = time.time() - days * 86400
         # also issues that started earlier but ended in the period, or are still open
         q = "SELECT * FROM issues WHERE site=? AND (started>? OR resolved>? OR resolved IS NULL)"
         args: list = [rt.cfg.site, since, since]
-        if check:
-            q += " AND check_key=?"
-            args.append(check)
+        if module in MODULES:
+            q += " AND check_key LIKE ?"
+            args.append(f"{module}.%")
         if level in ("1", "2"):
             q += " AND worst=?"
             args.append(int(level))
@@ -347,8 +347,11 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
 
         down, outages = downtime(rt.db, rt.cfg.site, "internet.reachable", since, time.time())
         uptime = 100 * (1 - down / (days * 86400))
-        return page(request, "history.html", request.state.user, events=events, names=rt.names(), check=check,
-                    level=level, days=days, uptime=uptime, outages=outages, since=since, now=time.time())
+        check_names = {f"{m.id}.{c.id}": c.name for m in MODULES.values() for c in m.checks}
+        groups = [(m.name, in_module) for m in MODULES.values()
+                  if (in_module := [e for e in events if e["key"].split(".", 1)[0] == m.id])]
+        return page(request, "history.html", request.state.user, events=events, groups=groups, names=check_names,
+                    modules=[(m.id, m.name) for m in MODULES.values()], module=module, level=level, days=days, uptime=uptime, outages=outages, since=since, now=time.time())
 
     # -- internet module ------------------------------------------------------------------------
     @app.get("/internet")

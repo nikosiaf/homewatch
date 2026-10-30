@@ -559,3 +559,17 @@ def test_history_level_filter_lists_only_that_level(client):
     assert "an-error" in err and "error-over" not in err and "a-warning" not in err
     every = client.get("/history").text
     assert "warning-over" in every and "error-over" in every
+
+
+def test_history_filters_and_groups_by_module(client):
+    setup_admin(client)
+    db, now = client.rt.db, time.time()
+    add = "INSERT INTO issues(site,check_key,level,worst,started,detail) VALUES('home',?,1,1,?,?)"
+    db.run(add, ("internet.loss", now - 60, "line-event"))
+    db.run(add, ("ups.load", now - 30, "ups-event"))
+    every = client.get("/history").text
+    assert "line-event" in every and "ups-event" in every
+    assert every.index("<h2>Internet line") < every.index("line-event") < every.index("<h2>UPS") < every.index("ups-event")
+    assert '<option value="ups"' in every and 'value="ups.load"' not in every
+    one = client.get("/history?module=ups").text
+    assert "ups-event" in one and "line-event" not in one

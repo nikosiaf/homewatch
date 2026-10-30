@@ -4,8 +4,8 @@
 <h1>History</h1>
 <div class="card">
   <form class="row" method="get" action="/history" data-autosubmit>
-    <div><label for="c">Check</label><select id="c" name="check"><option value="">All checks</option>
-      {% for k, n in names.items() %}<option value="{{ k }}" {{ 'selected' if k == check }}>{{ n }}</option>{% endfor %}</select></div>
+    <div><label for="c">Module</label><select id="c" name="module"><option value="">All modules</option>
+      {% for k, n in modules %}<option value="{{ k }}" {{ 'selected' if k == module }}>{{ n }}</option>{% endfor %}</select></div>
     <div><label for="l">Worst level</label><select id="l" name="level"><option value="">Any</option>
       <option value="1" {{ 'selected' if level == '1' }}>WARNING</option><option value="2" {{ 'selected' if level == '2' }}>ERROR</option></select></div>
     <div><label for="d">Period</label><select id="d" name="days">
@@ -15,15 +15,20 @@
   <p>Internet uptime over {{ days }} day{{ 's' if days > 1 }}: <b>{{ '%.2f' | format(uptime) }} %</b> · {{ outages }} outage{{ 's' if outages != 1 }}</p>
   <p class="quiet small">Showing {{ events | length }} event{{ 's' if events | length != 1 }} since {{ since | ts }}, plus anything still open.</p>
 </div>
+{% for group, group_events in groups %}
+<h2>{{ group }} <span class="quiet small">{{ group_events | length }} event{{ 's' if group_events | length != 1 }}</span></h2>
 <div class="card scroll"><table>
   <tr><th>When</th><th>Status</th><th>Check</th><th>What happened</th><th>Duration</th></tr>
-  {% for e in events %}<tr>
+  {% for e in group_events %}<tr>
     <td style="white-space:nowrap">{{ e.ts | ts }}</td>
     <td>{% if e.kind == 'ok' %}<span class="badge s0">OK</span>{% elif e.kind == 'off' %}<span class="badge mute">OFF</span>
         {% else %}<span class="badge s{{ e.level }}">{{ LEVEL_WORD[e.level] }}</span>{% endif %}</td>
     <td>{{ names.get(e.key, e.key) }}</td>
     <td>{% if e.kind == 'ok' %}Back to OK: {% elif e.kind == 'off' %}Check switched off while open{% endif %}{{ e.detail if e.kind != 'off' }}</td>
     <td style="white-space:nowrap">{% if e.kind in ('ok', 'off') %}after {{ e.after | dur }}{% elif e.open_for is not none %}<b>still open</b>, {{ e.open_for | dur }}{% else %}lasted {{ e.after | dur }}{% endif %}</td>
-  </tr>{% else %}<tr><td colspan="5" class="quiet">No issues in this period.</td></tr>{% endfor %}
+  </tr>{% endfor %}
 </table></div>
+{% else %}
+<div class="card quiet">No issues in this period.</div>
+{% endfor %}
 {% endblock %}
