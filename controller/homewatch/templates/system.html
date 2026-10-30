@@ -44,7 +44,7 @@
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="status-page">
   {{ note("status-page") }}
   <label class="check"><input type="checkbox" name="tiles" {{ 'checked' if status_tiles }}> Show modules as tiles</label>
-  <p class="quiet small">One tile per module, coloured by its worst check. Off: a list you can unfold to see each check.</p>
+  <p class="quiet small">One tile per module, coloured by its worst check; click one to see its checks. Off: one row per module.</p>
   <button data-save>Save</button>
 </form>
 <h2>Users</h2>

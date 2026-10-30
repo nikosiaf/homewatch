@@ -25,21 +25,7 @@
       <button class="secondary">Snooze</button></form></td>{% endif %}</tr>{% endfor %}
 </table></div>
 {% endif %}
-{% if status_tiles and tile_groups %}
-<div class="tiles">
-{% for mod_id, mod_name, mod_tiles in tile_groups %}
-{% set worst = mod_tiles | map(attribute='status') | max %}
-{% set probs = mod_tiles | selectattr('status', 'gt', 0) | list %}
-{% if user.is_admin %}<a class="tile s{{ worst }}" href="/modules/{{ mod_id }}" style="text-decoration:none;color:inherit">{% else %}<div class="tile s{{ worst }}">{% endif %}
-  <div class="row" style="justify-content:space-between;align-items:center">
-    <span class="name">{{ mod_name }}</span><span class="badge s{{ worst }}">{{ LEVEL_WORD[worst] }}</span>
-  </div>
-  <div class="detail">{% if probs %}{{ probs[0].r.name }}: {{ probs[0].r.detail }}{% if probs | length > 1 %} (+{{ probs | length - 1 }} more){% endif %}
-    {% else %}{{ mod_tiles | length }} checks OK{% endif %}</div>
-{% if user.is_admin %}</a>{% else %}</div>{% endif %}
-{% endfor %}
-</div>
-{% else %}
+{% if status_tiles %}<div class="module-grid">{% endif %}
 {% for mod_id, mod_name, mod_tiles in tile_groups %}
 {% set worst = mod_tiles | map(attribute='status') | max %}
 {% set probs = mod_tiles | selectattr('status', 'gt', 0) | list %}
@@ -68,4 +54,4 @@
 {% else %}
 <p class="quiet">No results yet. The first run happens a few seconds after start, then every 2 minutes.</p>
 {% endfor %}
-{% endif %}
+{% if status_tiles %}</div>{% endif %}

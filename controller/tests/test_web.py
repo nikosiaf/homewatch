@@ -678,12 +678,12 @@ def test_status_page_can_show_modules_as_tiles(client):
     rt = client.rt
     rt.results = [CheckResult("ups.load", "Load", 0, "fine")]
     body = client.get("/partials/status").text
-    assert 'data-module="ups"' in body and 'href="/modules/ups"' not in body
+    assert 'data-module="ups"' in body and "module-grid" not in body
     assert "Show modules as tiles" in client.get("/system").text
     r = client.post("/system/status-page", data={"csrf": tok, "tiles": "on"})
     assert "Saved" in r.text and rt.db.get("status.tiles") is True
     body = client.get("/partials/status").text
-    assert 'data-module="ups"' not in body and 'href="/modules/ups"' in body and "1 checks OK" in body
+    assert "module-grid" in body and '<details class="module s0" data-module="ups">' in body and "fine" in body
     client.post("/system/status-page", data={"csrf": tok})
-    assert 'data-module="ups"' in client.get("/partials/status").text
+    assert "module-grid" not in client.get("/partials/status").text
     rt.results = []
