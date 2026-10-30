@@ -5,7 +5,9 @@ import os
 import re
 import time
 
+import httpx
 import pytest
+import respx
 from fastapi.testclient import TestClient
 
 from homewatch.modules.registry import MODULES
@@ -475,6 +477,79 @@ def test_wrong_master_key_is_named(db):
     Secrets(db, _os.urandom(32)).put("x", "y")
     with pytest.raises(WrongMasterKey):
         Secrets(db, _os.urandom(32)).get("x")
+
+
+def test_failed_save_keeps_what_was_typed_but_no_secret(client):
+    from homewatch.modules.apibase import ApiError
+
+    setup_admin(client)
+    tok = csrf(client.get("/modules/synology").text)
+    m = MODULES["synology"]
+
+    async def fail(*a):
+        raise ApiError("no such NAS")
+
+    orig, m.fetch = m.fetch, fail
+    try:
+        r = client.post("/modules/synology", data={"csrf": tok, "url": "https://typed.test:5001", "username": "typed-user",
+                                                   "secret": "the-password"})
+    finally:
+        m.fetch = orig
+    assert "no such NAS" in r.text and "typed.test" in r.text and "typed-user" in r.text and "the-password" not in r.text
+    assert not client.rt.db.get("module.synology")
+    assert "typed.test" not in client.get("/modules/synology").text  # once only
+
+
+def test_read_now_keeps_unsaved_ticks(client):
+    from homewatch.modules.apibase import Choice
+
+    setup_admin(client)
+    tok = csrf(client.get("/modules/pbs").text)
+    m = MODULES["pbs"]
+    client.rt.db.set("module.pbs", {"enabled": True, "url": "https://p.test:8007", "token_id": "a@b!c", "verify": True, "chosen": ["a"]})
+    client.rt.secrets.put("module.pbs.secret", "x")
+    m.snap, m.snap_ts = {"_summary": "s"}, 1.0
+    saved = m.fetch, m.choices, m.check, m.tables
+
+    async def read(*a):
+        return {"_summary": "s"}
+
+    m.fetch, m.choices, m.check = read, lambda snap: [Choice("a", "A"), Choice("b", "B")], lambda *a: []
+    m.tables = lambda *a: []
+    try:
+        r = client.post("/modules/pbs/refresh", data={"csrf": tok, "enabled": "on", "url": "https://p.test:8007", "choose.b": "on"})
+        assert re.search(r'name="choose.b" checked', r.text) and not re.search(r'name="choose.a" checked', r.text)
+    finally:
+        m.fetch, m.choices, m.check, m.tables = saved
+        m.snap = None
+
+
+@respx.mock
+def test_channel_test_uses_the_form_and_saves_nothing(client):
+    tok = setup_admin(client)
+    client.post("/notifications/add", data={"csrf": tok, "kind": "ntfy", "ntfy.url": "https://saved.test/topic"})
+    ch = client.rt.db.one("SELECT * FROM channels WHERE kind='ntfy'")
+    typed = respx.post("https://typed.test/other").mock(return_value=httpx.Response(200))
+    r = client.post(f"/notifications/{ch['id']}/test", data={"csrf": tok, "name": "Typed name", "url": "https://typed.test/other"})
+    assert typed.called and "test message sent" in r.text and "Typed name" in r.text
+    assert "saved.test" in client.rt.secrets.get(f"channel.{ch['id']}.private")
+    # empty: the saved address
+    saved = respx.post("https://saved.test/topic").mock(return_value=httpx.Response(200))
+    client.post(f"/notifications/{ch['id']}/test", data={"csrf": tok, "name": "n", "url": ""})
+    assert saved.called
+
+
+def test_add_channel_error_keeps_the_form(client):
+    tok = setup_admin(client)
+    r = client.post("/notifications/add", data={"csrf": tok, "kind": "telegram", "telegram.name": "My bot", "telegram.chat_id": "42"})
+    assert "bot token" in r.text and "My bot" in r.text and re.search(r'value="telegram"\s+selected', r.text)
+
+
+def test_setup_headings_fit_the_module(client):
+    setup_admin(client)
+    assert "separate account" in client.get("/modules/synology").text
+    ups = client.get("/modules/ups").text
+    assert "Before you connect" in ups and "read-only account" not in ups
 
 
 def test_message_lands_in_its_box(client):

@@ -50,6 +50,7 @@ class Runtime:
     speed_running: bool = False
     dropped: list[str] = field(default_factory=list)  # what the last import or restore cut off from its credentials
     drop_why: list[str] = field(default_factory=list)
+    drafts: dict = field(default_factory=dict)  # (user id, page): what was typed in a form that didn't save; never secrets
     speed_started: float = 0
     wake: asyncio.Event = field(default_factory=asyncio.Event)
     tasks: list[asyncio.Task] = field(default_factory=list)
@@ -280,7 +281,9 @@ class Runtime:
         """What applying this snapshot would do; changes nothing."""
         trial = copy.deepcopy(snap)
         self.guard_credentials(trial)
-        return {"changes": versions.changes(versions.snapshot(self.db), trial), "cleared": list(self.drop_why)}
+        current = versions.snapshot(self.db)
+        versions.clean_import(current)  # the same normalizing, so that a default being filled in isn't a change
+        return {"changes": versions.changes(current, trial), "cleared": list(self.drop_why)}
 
     def preview_import(self, text: str) -> tuple[dict | None, str]:
         snap, err = versions.from_yaml(text)

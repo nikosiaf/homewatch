@@ -35,6 +35,7 @@ class SynologyModule(ApiModule):
     every = 600  # each read is a DSM login; keep the connection log quiet
     description = ("Watches a Synology NAS through the DSM Web API: system temperature, CPU, memory, disks, storage "
                    "pools and volumes, and DSM updates. Nothing on the NAS is changed.")
+    setup_title = "First create a separate account for homewatch"
     setup = [
         ("text", "DSM has no read-only administrator role, and its system and storage information is only "
                  "available to administrators. So create a separate account for homewatch:"),

@@ -45,7 +45,7 @@
   {% endif %}
   <p class="row">
     <button data-save>Save</button>
-    <button class="secondary" formaction="/notifications/{{ c.id }}/test" {{ 'disabled' if not c.enabled }}>{{ 'Send a test ping' if c.kind == 'healthchecks' else 'Send a test' }}</button>
+    <button class="secondary" formaction="/notifications/{{ c.id }}/test">Test these settings</button>
     <button class="danger" formaction="/notifications/{{ c.id }}/delete" data-confirm="Remove {{ c.name }}?">Remove</button>
   </p>
 </form>

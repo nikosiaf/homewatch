@@ -258,12 +258,13 @@ class Notifier:
                     out.append(t.one("SELECT * FROM outbox WHERE id=?", (i,)))
         return out
 
-    async def deliver(self, ch, msg: Message) -> None:
+    async def deliver(self, ch, msg: Message, config: dict | None = None, secret: str | None = None) -> None:
+        """config and secret, when given, are used instead of what's saved: for testing a form before saving it."""
         mod = KINDS.get(ch["kind"])
         if mod is None:
             raise RuntimeError(f"channel type {ch['kind']} is not available yet")
-        config = full_config(self.secrets, ch)
-        secret = self.secrets.get(channel_secret(ch["id"])) or ""
+        config = full_config(self.secrets, ch) if config is None else config
+        secret = secret or self.secrets.get(channel_secret(ch["id"])) or ""
         await mod.send(self.http, config, secret, msg.level, msg.title, msg.body)
 
 

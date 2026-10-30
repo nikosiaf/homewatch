@@ -62,6 +62,7 @@ class HomeAssistantModule(ApiModule):
                    "tamper sensors, batteries, available updates and automatic backups. Only those entities are read "
                    "at each check; the full list is read every 6 hours to find new ones and updates, and isn't kept. "
                    "Nothing in Home Assistant is changed.")
+    setup_title = "First create an account and token for homewatch"
     setup = [
         ("text", "In Home Assistant: Settings → People → Users → Add user. Name it homewatch and leave "
                  "\"Administrator\" off."),

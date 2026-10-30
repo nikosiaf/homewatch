@@ -54,7 +54,7 @@
   {% if module.setup %}
   <div class="callout">
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11v6M12 7.5v.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-    <div><b>First create a read-only account for homewatch</b>
+    <div><b>{{ module.setup_title }}</b>
       {% for kind, text in module.setup %}{% if kind == 'code' %}<pre class="code">{{ text }}</pre>{% else %}<p class="small" style="margin:4px 0">{{ text }}</p>{% endif %}{% endfor %}
     </div>
   </div>
@@ -77,8 +77,7 @@
     {% if snap and (module.choices_title or module.filter_title) %}
     <p class="quiet small" style="margin-top:14px">The lists below come from the reading at {{ snap_ts | ts('%H:%M:%S') }}
       ({{ module.name }} is read every {{ read_every }}).
-      <button class="secondary" formaction="/modules/{{ module.id }}/refresh" formnovalidate
-              data-confirm="Read {{ module.name }} again now? Unsaved ticks on this page are lost.">Read now</button></p>
+      <button class="secondary" formaction="/modules/{{ module.id }}/refresh" formnovalidate>Read now</button></p>
     {% endif %}
     {% if module.choices_title %}
     <h3>{{ module.choices_title }}</h3>

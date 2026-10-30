@@ -69,6 +69,7 @@ class UPSModule(ApiModule):
     checks = CHECKS
     description = ("Watches a UPS through a NUT server (Network UPS Tools), for example on your Proxmox host or NAS: "
                    "mains power, battery charge, runtime, load and battery health. Reading needs no login.")
+    setup_title = "Before you connect"
     setup = [
         ("text", "homewatch reads from an existing NUT server; no account is needed. The NUT server must listen on "
                  "the network, not only on 127.0.0.1. In /etc/nut/upsd.conf on the NUT host, for example:"),

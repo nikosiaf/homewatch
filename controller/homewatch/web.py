@@ -214,6 +214,58 @@ def with_pre(request: Request, resp: Response, tok: str) -> Response:
     return resp
 
 
+NEVER_KEPT = {"csrf", "current", "password", "password2", "secret", "_box", "new", "new2"}
+
+
+def keep_typed(request: Request, page_key: str, form: dict, also_secret=()) -> None:
+    """Remember a form's text for the next view of its page, as the redirect would otherwise lose it."""
+    rt_of(request).drafts[(request.state.user.id, page_key)] = {
+        k: v for k, v in form.items() if isinstance(v, str) and k not in NEVER_KEPT and k not in also_secret
+        and not k.endswith(".secret")}
+
+
+def typed_over(saved: dict, draft: dict) -> dict:
+    """The settings as the form had them. Tick boxes count only if the form's other fields were sent (not greyed out)."""
+    def merge(values: dict, prefix: str) -> dict:
+        out = {}
+        for k, v in values.items():
+            name = prefix + k
+            if isinstance(v, dict):
+                out[k] = merge(v, name + ".")
+            elif isinstance(v, bool):
+                out[k] = (draft.get(name) == "on") if sent and k != "enabled" else v
+            elif isinstance(v, list):
+                out[k] = draft[name].split() if name in draft else v
+            elif isinstance(v, (str, int, float)) and name in draft:
+                out[k] = draft[name]
+            else:
+                out[k] = v
+        return out
+
+    def scalars(values: dict, prefix: str = ""):
+        for k, v in values.items():
+            if isinstance(v, dict):
+                yield from scalars(v, prefix + k + ".")
+            elif not isinstance(v, bool):
+                yield prefix + k
+
+    sent = any(name in draft for name in scalars(saved))
+    return merge(saved, "")
+
+
+def ticks_over(ctx: dict, draft: dict) -> None:
+    """Lists on a module's page as the form had them, so that a new reading or a failed save doesn't undo ticks."""
+    if "enabled" not in draft and "_filters_shown" not in draft and not any(k.startswith(("choose.", "keep.", "watch.")) for k in draft):
+        return
+    if ctx.get("choices"):
+        ctx["choices"] = [(c, "choose." + c.value in draft) for c, _ in ctx["choices"]]
+    if ctx.get("filters"):
+        shown = set(json.loads(draft.get("_filters_shown", "[]")))
+        ctx["filters"] = [(c, "keep." + c.value in draft if c.value in shown else on) for c, on in ctx["filters"]]
+    for g in ctx.get("guests", []):
+        g["watched"] = f"watch.{g['vmid']}" in draft
+
+
 def _dropped_note(rt) -> str:
     """What the last import or restore switched off because its destination changed."""
     if not rt.dropped:
@@ -448,9 +500,14 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if m is None:
             return RedirectResponse("/modules", status_code=303)
         template = getattr(m, "template", None) or f"module_{mid}.html"
-        return page(request, template, request.state.user, s=m.load(rt), csrf=request.state.user.csrf,
+        s, ctx = m.load(rt), m.page_ctx(rt)
+        draft = rt.drafts.pop((request.state.user.id, f"/modules/{mid}"), None)
+        if draft:
+            s = typed_over(s, draft)
+            ticks_over(ctx, draft)
+        return page(request, template, request.state.user, s=s, csrf=request.state.user.csrf,
                     module=m, th_rows=thresholds(rt.db, rt.cfg.site, m.id, m.checks),
-                    th_current={r.key: r for r in rt.results}, **m.page_ctx(rt))
+                    th_current={r.key: r for r in rt.results}, **ctx)
 
     @app.post("/modules/{mid}")
     async def module_save(request: Request, mid: str):
@@ -461,14 +518,17 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         form = await form_of(request, request.state.user)
         if form is None:
             return back(f"/modules/{mid}", err="Form expired, please try again")
+        secret_fields = [f.key for f in getattr(m, "fields", []) if f.secret]
         if mid == "internet" and form.get("speed.engine") == "ookla":
             err = await _ookla_ready(rt, form, request.state.user)
             if err:
+                keep_typed(request, f"/modules/{mid}", form)
                 return back(f"/modules/{mid}", err=err)
         first_connect = not form.get("remove") and hasattr(m, "configured") and not m.configured(rt)
         if hasattr(m, "prepare_save"):  # e.g. test the connection before anything is stored
             err = await m.prepare_save(rt, form)
             if err:
+                keep_typed(request, f"/modules/{mid}", form, secret_fields)
                 return back(f"/modules/{mid}", err=err)
         err = m.save(rt, form, request.state.user)
         if err:
@@ -491,6 +551,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return RedirectResponse("/modules", status_code=303)
         if form is None:
             return back(f"/modules/{mid}", err="Form expired, please try again")
+        keep_typed(request, f"/modules/{mid}", form, [f.key for f in m.fields if f.secret])  # a new reading keeps unsaved ticks
         m.snap_ts = float("-inf")  # read now, not at the module's next turn
         await m.readings(rt, m.load(rt), time.time())
         rt.wake.set()  # re-run the checks on the fresh reading
@@ -736,7 +797,14 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt = rt_of(request)
         chans = []
         for c in rt.notifier.channels(enabled_only=False, messages_only=False):
-            chans.append(dict(c) | {"config": json.loads(c["config"]), "levels": json.loads(c["levels"]),
+            config, draft = json.loads(c["config"]), rt.drafts.pop((request.state.user.id, f"/notifications/{c['id']}"), None)
+            row = dict(c)
+            if draft:  # as typed; encrypted fields stay empty
+                public = {k: draft[k] for k, _, _ in PROVIDERS[c["kind"]].FIELDS if k in draft and k not in private_fields(c["kind"])}
+                config |= public
+                row |= {"name": draft.get("name", c["name"]), "quiet_start": draft.get("quiet_start") or None,
+                        "quiet_end": draft.get("quiet_end") or None, "enabled": int(draft.get("enabled") == "on")}
+            chans.append(row | {"config": config, "levels": [lv for lv in (1, 2) if f"level{lv}" in draft] if draft else json.loads(c["levels"]),
                                     "has_private": rt.secrets.has(channel_private(c["id"])),
                                     "has_secret": rt.secrets.has(channel_secret(c["id"])),
                                     "last_ping": rt.db.get(f"heartbeat.{c['id']}.last_ok", 0)})
@@ -744,6 +812,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         return page(request, "notifications.html", request.state.user, chans=chans, providers=PROVIDERS,
                     timing=timing(rt.db), default_timing=DEFAULT_TIMING,
                     coming=COMING_SOON, csrf=request.state.user.csrf,
+                    add=rt.drafts.pop((request.state.user.id, "/notifications/add"), {}),
                     schedule=rt.db.get("report.schedule") or {"weekday": 0, "time": "08:00"},
                     queued={q["channel_id"]: q for q in queued})
 
@@ -753,7 +822,11 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if form is None:
             return back("/notifications", err="Form expired")
         err = _save_section(request, "notify", form, request.state.user)
-        return back("/notifications", err=err) if err else back("/notifications", msg="Added")
+        if err:
+            private = {f"{k}.{name}" for k in PROVIDERS for name in private_fields(k)}
+            keep_typed(request, "/notifications/add", form, private)
+            return back("/notifications", err=err)
+        return back("/notifications", msg="Added")
 
     @app.post("/notifications/report")
     async def report_save(request: Request):
@@ -791,18 +864,11 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if ch is None or ch["kind"] not in PROVIDERS:
             return back("/notifications", err="Unknown channel")
         mod = PROVIDERS[ch["kind"]]
-        saved = full_config(rt.secrets, ch)
-        config = {k: form.get(k, "").strip() or (saved.get(k, "") if k in private_fields(ch["kind"]) else "")
-                  for k, _, _ in mod.FIELDS}
-        if hasattr(mod, "normalize"):
-            config, err = mod.normalize(config)
-            if err:
-                return back("/notifications", err=err)
+        config, err = _channel_form(rt, ch, form)
+        if err:
+            keep_typed(request, f"/notifications/{cid}", form, private_fields(ch["kind"]))
+            return back("/notifications", err=err)
         config, private = split_config(ch["kind"], config)
-        if form.get("secret", "").strip() and hasattr(mod, "check_secret"):
-            err = mod.check_secret(form["secret"])
-            if err:
-                return back("/notifications", err=err)
         levels = [lv for lv in (1, 2) if form.get(f"level{lv}") == "on"]
         qs, qe = form.get("quiet_start", ""), form.get("quiet_end", "")
         if bool(qs) != bool(qe):
@@ -831,20 +897,26 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     @app.post("/notifications/{cid}/test")
     async def channel_test(request: Request, cid: int):
         rt = rt_of(request)
-        if await form_of(request, request.state.user) is None:
+        form = await form_of(request, request.state.user)
+        if form is None:
             return back("/notifications", err="Form expired")
         ch = rt.db.one("SELECT * FROM channels WHERE id=?", (cid,))
-        if ch is None:
+        if ch is None or ch["kind"] not in PROVIDERS:
             return back("/notifications", err="Unknown channel")
+        if "name" in form:  # the page stays as typed: testing saves nothing
+            keep_typed(request, f"/notifications/{cid}", form, private_fields(ch["kind"]))
+        config, err = _channel_form(rt, ch, form)
+        if err:
+            return back("/notifications", err=err)
         try:
             if ch["kind"] == "healthchecks":
-                await PROVIDERS["healthchecks"].ping(rt.notifier.http, full_config(rt.secrets, ch))
+                await PROVIDERS["healthchecks"].ping(rt.notifier.http, config)
                 rt.db.set(f"heartbeat.{cid}.last_ok", time.time())
                 return back("/notifications", msg=f"{ch['name']}: ping sent; healthchecks.io should show it as up")
             home = rt.db.get("home.name") or "Home"
             msg = Message(OK, f"✅ {home}: test message",
                           f"homewatch can reach this channel.\n{rt.db.get('home.url') or ''}")
-            await rt.notifier.deliver(ch, msg)
+            await rt.notifier.deliver(ch, msg, config, form.get("secret", "").strip() or None)
         except Exception as e:  # noqa: BLE001
             return back("/notifications", err=f"{ch['name']}: {e}")
         return back("/notifications", msg=f"{ch['name']}: test message sent")
@@ -1157,6 +1229,23 @@ def _status_ctx(request: Request) -> dict:
     return dict(module_info=info, switched_off=switched_off, unknown=unknown, tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
                 last_run=rt.last_run, last_error=rt.last_error, errors=errors, warnings=warnings,
                 setup_done=rt.db.get("setup.done", False))
+
+
+def _channel_form(rt, ch, form: dict) -> tuple[dict, str]:
+    """A channel's config from its form, with encrypted fields left empty kept as saved: (config, what is wrong)."""
+    mod = PROVIDERS[ch["kind"]]
+    saved = full_config(rt.secrets, ch)
+    config = {k: form.get(k, "").strip() or (saved.get(k, "") if k in private_fields(ch["kind"]) or k not in form else "")
+              for k, _, _ in mod.FIELDS}
+    if hasattr(mod, "normalize"):
+        config, err = mod.normalize(config)
+        if err:
+            return config, err
+    if form.get("secret", "").strip() and hasattr(mod, "check_secret"):
+        err = mod.check_secret(form["secret"])
+        if err:
+            return config, err
+    return config, ""
 
 
 def _save_section(request: Request, section: str, form: dict, user: User) -> str:

@@ -89,6 +89,7 @@ class Module:
     checks: list[CheckDef] = []
     description = ""  # shown on the Help page, with setup
     setup: list[tuple[str, str]] = []  # ("text" | "code", content)
+    setup_title = "First create a read-only account for homewatch"
     destination_keys = ("url", "host", "port", "devices")  # settings that decide where credentials go
     transport_keys = ("https", "verify")  # settings that protect them on the way, on or off
 

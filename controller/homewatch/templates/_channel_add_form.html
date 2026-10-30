@@ -2,17 +2,17 @@
 <label for="kind">Provider</label>
 <select id="kind" name="kind" data-provider-select>
   <option value="">Choose a provider…</option>
-  {% for k, mod in providers.items() if not (skip_heartbeat and k == 'healthchecks') %}<option value="{{ k }}">{{ mod.TITLE }}</option>{% endfor %}
+  {% for k, mod in providers.items() if not (skip_heartbeat and k == 'healthchecks') %}<option value="{{ k }}" {{ 'selected' if (add | default({})).get('kind') == k }}>{{ mod.TITLE }}</option>{% endfor %}
   {% for c in coming %}<option disabled>{{ c }} (coming soon)</option>{% endfor %}
 </select>
 {% for k, mod in providers.items() if not (skip_heartbeat and k == 'healthchecks') %}
 <div data-provider="{{ k }}" hidden>
   <p class="quiet small">{{ mod.DESCRIPTION }} <a href="{{ mod.LINK }}" target="_blank" rel="noopener">{{ mod.LINK | replace('https://', '') }}</a></p>
   <div class="row">
-    <div><label for="{{ k }}-name">Name</label><input id="{{ k }}-name" type="text" name="{{ k }}.name" placeholder="{{ mod.TITLE }}" maxlength="60"></div>
+    <div><label for="{{ k }}-name">Name</label><input id="{{ k }}-name" type="text" name="{{ k }}.name" value="{{ (add | default({})).get(k ~ '.name', '') }}" placeholder="{{ mod.TITLE }}" maxlength="60"></div>
     {% for f, label, hint in mod.FIELDS %}
     <div style="flex:1;min-width:260px"><label for="{{ k }}-{{ f }}">{{ label }}</label>
-      <input id="{{ k }}-{{ f }}" type="{{ 'password' if f in (mod.PRIVATE | default([])) else 'text' }}" name="{{ k }}.{{ f }}" placeholder="{{ hint }}" autocomplete="off" style="max-width:none"></div>{% endfor %}
+      <input id="{{ k }}-{{ f }}" type="{{ 'password' if f in (mod.PRIVATE | default([])) else 'text' }}" name="{{ k }}.{{ f }}" value="{{ (add | default({})).get(k ~ '.' ~ f, '') }}" placeholder="{{ hint }}" autocomplete="off" style="max-width:none"></div>{% endfor %}
     {% if mod.SECRET_LABEL %}
     <div><label for="{{ k }}-secret">{{ mod.SECRET_LABEL }}</label>
       <input id="{{ k }}-secret" type="password" name="{{ k }}.secret" autocomplete="off"></div>{% endif %}

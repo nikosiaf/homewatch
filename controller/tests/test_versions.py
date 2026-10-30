@@ -313,3 +313,12 @@ def test_restore_preview_comes_first(client):  # noqa: F811
     r = client.post(f"/system/versions/{old}/restore", data={"csrf": tok})
     assert "current password is wrong" in r.text and rt.db.get("module.synology")["url"] == "https://new.test:5001"
 
+
+def test_preview_of_an_identical_file_lists_no_changes(client):  # noqa: F811
+    tok = setup_admin(client)
+    # saved without the newer optional fields: filling in their defaults isn't a change
+    client.rt.db.set("module.mikrotik", {"enabled": True, "devices": "sw.test", "username": "u", "https": True})
+    raw = client.get("/system/export").content
+    r = client.post("/system/import", data={"csrf": tok}, files={"file": ("x.yaml", raw, "text/yaml")})
+    assert "Nothing differs" in r.text
+
