@@ -1067,3 +1067,10 @@ def test_status_tiles_start_closed(client):
     assert "module-grid" in body and 'data-module="ups">' in body and " open>" not in body
     assert "Show modules as tiles" not in client.get("/system").text
     rt.results = []
+
+
+def test_home_assistant_form_shows_full_read_default_for_old_settings(client):
+    setup_admin(client)
+    client.rt.db.set("module.homeassistant", {"enabled": True, "url": "http://ha.test:8123", "verify": False})
+    page = client.get("/modules/homeassistant").text
+    assert 'name="full_every" value="30"' in page and "From 5 to 1440" in page

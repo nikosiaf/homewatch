@@ -29,7 +29,8 @@ CHECKS = [
              help="Age of the last successful automatic backup; ERROR when the last attempt failed."),
 ]
 SETTLE = 30 * 60
-DISCOVER = 6 * 3600  # how often the full state list is read to find essential entities and updates
+FULL_EVERY = 30  # minutes between full state reads, which find essential entities and new updates
+FULL_MIN, FULL_MAX = 5, 1440
 NOT_READY = ("unavailable", "unknown")
 MAX_SINGLE = 100  # more essential entities than this: one bulk read is lighter than this many requests
 BACKUP = ("sensor.backup_last_successful_automatic_backup", "sensor.backup_last_attempted_automatic_backup")
@@ -67,7 +68,7 @@ class HomeAssistantModule(ApiModule):
     checks = CHECKS
     description = ("Watches Home Assistant through the token of a non-admin user: core state, alarm panels, safety and "
                    "tamper sensors, batteries, available updates and automatic backups. Only those entities are read "
-                   "at each check; the full list is read every 6 hours to find new ones and new updates, and isn't kept. "
+                   "at each check; the full list is read every 30 minutes (you can change this) to find new ones and new updates, and isn't kept. "
                    "Nothing in Home Assistant is changed.")
     setup_title = "First create an account and token for homewatch"
     setup = [
@@ -80,6 +81,9 @@ class HomeAssistantModule(ApiModule):
         Field("url", "Home Assistant address", "http://homeassistant.local:8123"),
         Field("verify", "Check the HTTPS certificate", kind="check", default=True,
               help=SELF_SIGNED),
+        Field("full_every", "Full read every (minutes)", "30", kind="number", default=FULL_EVERY,
+              help=f"How often the whole entity list is read, to find new updates and new essential entities. "
+                   f"From {FULL_MIN} to {FULL_MAX}; raise it on a slow Home Assistant host."),
         Field("watch_all", "Watch every entity", kind="check", default=False,
               help="Off: only the essential entities above are read. On: all of them are read at every check and "
                    "listed below, so any one that becomes unavailable can be reported (network traffic RX/TX "
@@ -108,7 +112,9 @@ class HomeAssistantModule(ApiModule):
         url = https_url(out["url"], allow_http=True)
         if not url:
             return out, "Home Assistant address: e.g. http://homeassistant.local:8123"
-        return out | {"url": url}, ""
+        if not FULL_MIN <= out["full_every"] <= FULL_MAX:
+            return out, f"Full read every: from {FULL_MIN} to {FULL_MAX} minutes"
+        return out | {"url": url, "full_every": round(out["full_every"])}, ""
 
     def notice(self, settings):
         if settings.get("url", "").startswith("http://"):
@@ -134,7 +140,7 @@ class HomeAssistantModule(ApiModule):
             config = await get("config")
             everything = bool(s.get("watch_all"))
             full = (everything or self._ids is None or self.snap_ts == float("-inf")
-                    or now - self._found_ts >= DISCOVER or len(self._ids) > MAX_SINGLE)
+                    or now - self._found_ts >= s.get("full_every", FULL_EVERY) * 60 or len(self._ids) > MAX_SINGLE)
             if full:
                 states = await get("states")
                 self._ids = [e["entity_id"] for e in states if _special(e) or e["entity_id"] in BACKUP]

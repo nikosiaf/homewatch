@@ -14,7 +14,8 @@
     {% else %}
     <div><label for="f-{{ f.key }}">{{ f.label }}</label>
       <input id="f-{{ f.key }}" type="{{ 'number' if f.kind == 'number' else 'text' }}" {{ 'step=any' if f.kind == 'number' }}
-             name="{{ f.key }}" value="{{ s[f.key] if s[f.key] is not none }}" placeholder="{{ f.placeholder }}" autocomplete="off"></div>
+             name="{{ f.key }}" value="{{ s[f.key] if s[f.key] is not none }}" placeholder="{{ f.placeholder }}" autocomplete="off">
+      {% if f.help %}<p class="quiet small" style="margin:4px 0 0">{{ f.help }}</p>{% endif %}</div>
     {% endif %}
   {% endfor %}
   {% if module.secret_label %}

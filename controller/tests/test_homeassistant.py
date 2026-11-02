@@ -192,3 +192,27 @@ def test_watch_every_entity_keeps_the_full_list_without_rx_tx(monkeypatch):
     _ha(monkeypatch, [{"entity_id": "light.a", "state": "unavailable"}, {"entity_id": "sensor.phone_tx", "state": "1"}])
     snap_all = asyncio.run(HomeAssistantModule().fetch({"url": "http://ha", "watch_all": True}, "t", NOW))
     assert [a[0] for a in snap_all["all"]] == ["light.a"] and len(snap_all["unavailable"]) == 1
+
+
+def test_full_read_interval_is_a_setting(monkeypatch):
+    import asyncio
+
+    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
+    calls = _ha(monkeypatch, [{"entity_id": "update.a", "state": "off"}])
+    m = HomeAssistantModule()
+
+    def full_read(minutes, **settings):
+        m.snap_ts = NOW
+        calls.clear()
+        asyncio.run(m.fetch({"url": "http://ha", "verify": False} | settings, "t", NOW + minutes * 60))
+        return "/api/states" in calls
+
+    assert full_read(0)  # first read
+    assert not full_read(29) and full_read(31)  # settings saved before the field existed: 30 minutes
+    assert not full_read(40, full_every=10) and full_read(41.1, full_every=10)
+
+    form = {"url": "http://ha", "enabled": "on"}
+    assert m.validate(form, {})[0]["full_every"] == 30
+    assert m.validate(form | {"full_every": "60"}, {})[0]["full_every"] == 60
+    for bad in ("4", "1441", "x"):
+        assert m.validate(form | {"full_every": bad}, {})[1]
