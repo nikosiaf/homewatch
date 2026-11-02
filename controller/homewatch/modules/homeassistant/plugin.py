@@ -30,6 +30,7 @@ CHECKS = [
 ]
 SETTLE = 30 * 60
 DISCOVER = 6 * 3600  # how often the full state list is read to find essential entities and updates
+NOT_READY = ("unavailable", "unknown")
 MAX_SINGLE = 100  # more essential entities than this: one bulk read is lighter than this many requests
 BACKUP = ("sensor.backup_last_successful_automatic_backup", "sensor.backup_last_attempted_automatic_backup")
 NOISE = re.compile(r"^sensor\..*_(rx|tx)$")  # per-client traffic counters; they drop out whenever a client sleeps
@@ -38,6 +39,12 @@ SAFETY = {"smoke", "moisture", "gas", "carbon_monoxide", "heat", "safety"}  # bi
 
 def _domain(e) -> str:
     return e["entity_id"].split(".", 1)[0]
+
+
+def _update(e) -> dict:
+    attrs = e.get("attributes", {})
+    return {"entity_id": e["entity_id"],
+            **{k: attrs.get(k) for k in ("title", "installed_version", "latest_version", "skipped_version")}}
 
 
 def _special(e) -> bool:
@@ -60,7 +67,7 @@ class HomeAssistantModule(ApiModule):
     checks = CHECKS
     description = ("Watches Home Assistant through the token of a non-admin user: core state, alarm panels, safety and "
                    "tamper sensors, batteries, available updates and automatic backups. Only those entities are read "
-                   "at each check; the full list is read every 6 hours to find new ones and updates, and isn't kept. "
+                   "at each check; the full list is read every 6 hours to find new ones and new updates, and isn't kept. "
                    "Nothing in Home Assistant is changed.")
     setup_title = "First create an account and token for homewatch"
     setup = [
@@ -131,9 +138,8 @@ class HomeAssistantModule(ApiModule):
             if full:
                 states = await get("states")
                 self._ids = [e["entity_id"] for e in states if _special(e) or e["entity_id"] in BACKUP]
-                self._updates = [{"entity_id": e["entity_id"], **{k: e.get("attributes", {}).get(k) for k in
-                                  ("title", "installed_version", "latest_version", "skipped_version")}}
-                                 for e in states if e["entity_id"].startswith("update.") and e.get("state") == "on"]
+                self._updates = [_update(e) for e in states
+                                 if e["entity_id"].startswith("update.") and e.get("state") == "on"]
                 self._total, self._found_ts = len(states), now
                 if not everything:
                     states = [e for e in states if e["entity_id"] in set(self._ids)]
@@ -145,6 +151,12 @@ class HomeAssistantModule(ApiModule):
                         return await get(f"states/{eid}", missing_ok=True)
 
                 states = [e for e in await asyncio.gather(*(one(i) for i in self._ids)) if e]
+                # Pending updates are re-read each run, so an installed one clears now, not at the next full
+                # read. Unavailable keeps the old record: a restart of Home Assistant installs nothing.
+                fresh = await asyncio.gather(*(one(u["entity_id"]) for u in self._updates))
+                self._updates = [old if e.get("state") in NOT_READY else _update(e)
+                                 for old, e in zip(self._updates, fresh, strict=True)
+                                 if e and e.get("state") != "off"]
         states = [e for e in states if not NOISE.match(e["entity_id"])]
         keep = ("entity_id", "state", "last_changed")
         snap = {"config": {k: config.get(k) for k in ("version", "state", "safe_mode", "recovery_mode", "location_name")},

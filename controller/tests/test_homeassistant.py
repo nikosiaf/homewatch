@@ -160,6 +160,31 @@ def test_only_essential_entities_are_read_after_discovery(monkeypatch):
     assert "/api/states" in calls
 
 
+def test_installed_update_clears_before_the_next_full_read(monkeypatch):
+    import asyncio
+
+    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
+    a = {"entity_id": "update.a", "state": "on", "attributes": {"title": "A", "latest_version": "2"}}
+    b = {"entity_id": "update.b", "state": "on", "attributes": {"title": "B", "latest_version": "5"}}
+    calls = _ha(monkeypatch, [a, b])
+    m = HomeAssistantModule()
+    s = {"url": "http://ha", "verify": False}
+
+    def read(minutes):
+        m.snap_ts = NOW
+        calls.clear()
+        return [u["entity_id"] for u in asyncio.run(m.fetch(s, "t", NOW + minutes * 60))["updates"]]
+
+    assert read(0) == ["update.a", "update.b"]
+    a["state"] = "unavailable"  # Home Assistant restarting installs nothing
+    assert read(2) == ["update.a", "update.b"] and "/api/states" not in calls
+    a["state"] = "off"
+    assert read(4) == ["update.b"] and "/api/states" not in calls
+    b["attributes"]["latest_version"] = "6"
+    m.snap_ts = NOW
+    assert asyncio.run(m.fetch(s, "t", NOW + 360))["updates"][0]["latest_version"] == "6"
+
+
 def test_watch_every_entity_keeps_the_full_list_without_rx_tx(monkeypatch):
     import asyncio
 
