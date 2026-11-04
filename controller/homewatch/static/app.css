@@ -109,8 +109,9 @@ details.module > summary::-webkit-details-marker { display: none; }
 details.module > summary::after { content: "▸"; margin-left: auto; color: var(--quiet); }
 details.module[open] > summary::after { content: "▾"; }
 details.module > .tiles { padding: 0 14px 14px; }
-/* "Last attempt" line of an open module: lined up with the title, close under it, clear of the tiles */
-details.module > .module-meta { padding: 0 14px; margin: -6px 0 12px; }
+/* "- Last attempt …" follows the summary text, only while the module is open */
+details.module .when-open { display: none; }
+details.module[open] .when-open { display: inline; }
 pre.code { background: var(--muted-bg); padding: 10px 12px; border-radius: 8px; overflow-x: auto; font-size: 13px; margin: 6px 0; }
 h3 { font-size: 15px; margin: 18px 0 8px; }
 details.choices { border: 1px solid var(--line); border-radius: 8px; padding: 0 12px; margin-bottom: 8px; }
