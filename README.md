@@ -7,7 +7,7 @@
 
 A small, self-hosted monitor for your home network, configured from a plain web page.
 homewatch watches **your internet line**, **your provider's DSL modem**, **your Proxmox VE host**,
-**your OPNsense firewall**, **Home Assistant**, **your Synology NAS**, **your MikroTik switches**, **UniFi**, **Proxmox Backup Server** and **your UPS**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
+**your OPNsense firewall**, **Home Assistant**, **your Synology NAS**, **your MikroTik switches**, **UniFi**, **Proxmox Backup Server**, **your UPS** and **your Docker hosts**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
 down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy.
 
 - Runs as a Docker Compose stack on any Linux host (amd64 or arm64)
@@ -207,6 +207,27 @@ Reading needs no login; the NUT server must listen on the network.
 | Load | ≥ 80 % | ≥ 95 % |
 | UPS health | replace battery | overload |
 
+### Docker hosts module (optional)
+
+Reads one or more Docker hosts through a **read-only proxy** in front of the Docker socket
+([linuxserver/socket-proxy](https://docs.linuxserver.io/images/docker-socket-proxy/) with only
+`CONTAINERS=1` and `INFO=1`; `POST=0`, so nothing can be started, stopped or changed).
+Reading containers includes their environment variables, which often hold passwords: **only homewatch
+may reach the proxy**. On homewatch's own host the proxy joins homewatch's network and publishes no
+port; on other hosts it runs with `network_mode: host` and the host firewall (ufw / nftables) allows
+port 2375 from homewatch only. The setup steps on the module page have the compose file and rules.
+
+Containers with a restart policy (`always`, `unless-stopped`, `on-failure`) are watched; untick any
+under "Containers to watch" (grouped per host and compose project).
+
+| Check | WARNING | ERROR |
+|---|---|---|
+| Hosts reachable / every host read | | a host can't be read |
+| Containers running | | a watched container is not running |
+| Restarts (watched containers, last hour) | ≥ 1 | ≥ 3 |
+| Health checks | a watched container is unhealthy | |
+| Containers removed (save the page to accept) | a watched container is gone | |
+
 ### Alerts and notifications
 
 Notification providers: **Telegram**, **ntfy** (one topic URL), **email** (any SMTP server; port
@@ -245,6 +266,7 @@ Discord (cut to 2000 characters). For Home Assistant, Node-RED or n8n use `level
 
 There are two account roles: **admin**, who can change everything, and **viewer**, who can only see
 status and history.
+
 
 ## Install
 

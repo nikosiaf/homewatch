@@ -19,6 +19,7 @@ CATALOG = [
     ("mikrotik", "MikroTik", True),
     ("unifi", "UniFi", True),
     ("ups", "UPS (NUT)", True),
+    ("docker", "Docker hosts", True),
 ]
 
 
