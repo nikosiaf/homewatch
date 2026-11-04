@@ -38,7 +38,7 @@
     <span class="quiet small">{% if probs %}{{ probs[0].r.name }}: {{ probs[0].r.detail }}{% if probs | length > 1 %} (+{{ probs | length - 1 }} more){% endif %}
       {% elif not info.observed %}Not read yet{% else %}{{ mod_tiles | length }} checks OK{% endif %}</span>
   </summary>
-  <p class="quiet small" style="margin:8px 0 0">Last attempt {{ last_run | ts('%H:%M:%S') if last_run else 'none yet' }} ·
+  <p class="quiet small module-meta">Last attempt {{ last_run | ts('%H:%M:%S') if last_run else 'none yet' }} ·
     last good reading {{ ((now - info.last_good) | dur) ~ ' ago' if info.last_good else 'none yet' }}</p>
   <div class="tiles">
   {% for t in mod_tiles %}
