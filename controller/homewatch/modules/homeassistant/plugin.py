@@ -27,6 +27,13 @@ CHECKS = [
     CheckDef("updates", "Updates", "api", help="WARNING when updates are available (skipped versions don't count)."),
     CheckDef("backups", "Automatic backups", "api", unit="h", warn=26, error=50, editable=("warn", "error"),
              help="Age of the last successful automatic backup; ERROR when the last attempt failed."),
+    CheckDef("addons", "Add-ons", "api",
+             help="ERROR when a watched add-on is not running; WARNING when its Running sensor is unavailable. "
+                  "An add-on is watched when its Running sensor is enabled in Home Assistant."),
+    CheckDef("disk", "Disk", "api", unit="%", warn=80, error=90, editable=("warn", "error"),
+             help="Disk use of the Home Assistant host, from the disk sensor chosen in the settings."),
+    CheckDef("memory", "Memory", "api", unit="%", warn=80, error=90, editable=("warn", "error"),
+             help="Memory use of the Home Assistant host, from the memory sensor chosen in the settings."),
 ]
 SETTLE = 30 * 60
 FULL_EVERY = 30  # minutes between full state reads, which find essential entities and new updates
@@ -35,7 +42,9 @@ NOT_READY = ("unavailable", "unknown")
 MAX_SINGLE = 100  # more essential entities than this: one bulk read is lighter than this many requests
 BACKUP = ("sensor.backup_last_successful_automatic_backup", "sensor.backup_last_attempted_automatic_backup")
 NOISE = re.compile(r"^sensor\..*_(rx|tx)$")  # per-client traffic counters; they drop out whenever a client sleeps
-SAFETY = {"smoke", "moisture", "gas", "carbon_monoxide", "heat", "safety"}  # binary_sensor device classes  # an entity counts as unavailable after this long (restarts and blips stay quiet)
+SAFETY = {"smoke", "moisture", "gas", "carbon_monoxide", "heat", "safety"}  # binary_sensor device classes
+# System Monitor's sensors, used when the disk / memory sensor fields are left empty
+DISK, MEMORY = "sensor.system_monitor_disk_usage", "sensor.system_monitor_memory_usage"
 
 
 def _domain(e) -> str:
@@ -48,11 +57,24 @@ def _update(e) -> dict:
             **{k: attrs.get(k) for k in ("title", "installed_version", "latest_version", "skipped_version")}}
 
 
+def _addon(e) -> bool:
+    """An add-on's Running sensor (Supervisor integration). Other integrations use the 'running' class too
+    (VM status, appliance switches), but their entity ids don't end in _running."""
+    return (e["entity_id"].startswith("binary_sensor.") and e["entity_id"].endswith("_running")
+            and e.get("attributes", {}).get("device_class") == "running")
+
+
 def _special(e) -> bool:
-    """States the alarm / safety / tamper / battery checks look at."""
+    """States the alarm / safety / tamper / battery / add-on checks look at."""
     dom, dc = e["entity_id"].split(".", 1)[0], e.get("attributes", {}).get("device_class")
     return (dom == "alarm_control_panel" or (dom == "binary_sensor" and (dc in SAFETY or dc == "tamper"))
-            or (dom == "sensor" and dc == "battery" and e.get("attributes", {}).get("unit_of_measurement") == "%"))
+            or (dom == "sensor" and dc == "battery" and e.get("attributes", {}).get("unit_of_measurement") == "%")
+            or _addon(e))
+
+
+def _sensors(s) -> dict:
+    """Host sensors to read: the chosen ones, else System Monitor's."""
+    return {"disk": s.get("disk_sensor") or DISK, "memory": s.get("memory_sensor") or MEMORY}
 
 
 def _ts(value) -> float | None:
@@ -67,7 +89,8 @@ class HomeAssistantModule(ApiModule):
     name = "Home Assistant"
     checks = CHECKS
     description = ("Watches Home Assistant through the token of a non-admin user: core state, alarm panels, safety and "
-                   "tamper sensors, batteries, available updates and automatic backups. Only those entities are read "
+                   "tamper sensors, batteries, available updates, automatic backups, add-ons and the host's disk and "
+                   "memory. Only those entities are read "
                    "at each check; the full list is read every 30 minutes (you can change this) to find new ones and new updates, and isn't kept. "
                    "Nothing in Home Assistant is changed.")
     setup_title = "First create an account and token for homewatch"
@@ -76,6 +99,11 @@ class HomeAssistantModule(ApiModule):
                  "\"Administrator\" off."),
         ("text", "Log in as homewatch (a private browser window is easiest), open its profile → Security → "
                  "Long-lived access tokens → Create token, and paste the token below."),
+        ("text", "Optional, add-ons: Settings → Devices & services → Home Assistant Supervisor → open an add-on's "
+                 "device and enable its \"Running\" sensor (disabled by default). Enable it for each add-on that must "
+                 "always run; homewatch reports it when it stops."),
+        ("text", "Optional, disk and memory: add the System Monitor integration with its disk use and memory use "
+                 "sensors, or name your own sensors below."),
     ]
     fields = [
         Field("url", "Home Assistant address", "http://homeassistant.local:8123"),
@@ -84,6 +112,10 @@ class HomeAssistantModule(ApiModule):
         Field("full_every", "Full read every (minutes)", "30", kind="number", default=FULL_EVERY,
               help=f"How often the whole entity list is read, to find new updates and new essential entities. "
                    f"From {FULL_MIN} to {FULL_MAX}; raise it on a slow Home Assistant host."),
+        Field("disk_sensor", "Disk use sensor", DISK,
+              help="A sensor giving the host's disk use in %. Empty: System Monitor's disk use sensor."),
+        Field("memory_sensor", "Memory use sensor", MEMORY,
+              help="A sensor giving the host's memory use in %. Empty: System Monitor's memory use sensor."),
         Field("watch_all", "Watch every entity", kind="check", default=False,
               help="Off: only the essential entities above are read. On: all of them are read at every check and "
                    "listed below, so any one that becomes unavailable can be reported (network traffic RX/TX "
@@ -114,6 +146,11 @@ class HomeAssistantModule(ApiModule):
             return out, "Home Assistant address: e.g. http://homeassistant.local:8123"
         if not FULL_MIN <= out["full_every"] <= FULL_MAX:
             return out, f"Full read every: from {FULL_MIN} to {FULL_MAX} minutes"
+        for k, label in (("disk_sensor", "Disk use sensor"), ("memory_sensor", "Memory use sensor")):
+            v = (out.get(k) or "").strip()
+            if v and not re.fullmatch(r"sensor\.[a-z0-9_]+", v):
+                return out, f"{label}: an entity id like sensor.disk_use_percent"
+            out[k] = v
         return out | {"url": url, "full_every": round(out["full_every"])}, ""
 
     def notice(self, settings):
@@ -143,7 +180,9 @@ class HomeAssistantModule(ApiModule):
                     or now - self._found_ts >= s.get("full_every", FULL_EVERY) * 60 or len(self._ids) > MAX_SINGLE)
             if full:
                 states = await get("states")
-                self._ids = [e["entity_id"] for e in states if _special(e) or e["entity_id"] in BACKUP]
+                host = set(_sensors(s).values())
+                self._ids = [e["entity_id"] for e in states
+                             if _special(e) or e["entity_id"] in BACKUP or e["entity_id"] in host]
                 self._updates = [_update(e) for e in states
                                  if e["entity_id"].startswith("update.") and e.get("state") == "on"]
                 self._total, self._found_ts = len(states), now
@@ -172,12 +211,16 @@ class HomeAssistantModule(ApiModule):
                 "backup": {e["entity_id"].removeprefix("sensor.backup_"): e.get("state") for e in states
                            if e["entity_id"] in BACKUP},
                 "entities": self._total,
+                "host": {k: next(([e.get("state"), e.get("attributes", {}).get("unit_of_measurement")]
+                                  for e in states if e["entity_id"] == eid), None)
+                         for k, eid in _sensors(s).items()},
                 "watch": [{"entity_id": e["entity_id"], "state": e.get("state"),
                            "dc": e.get("attributes", {}).get("device_class"),
                            "name": e.get("attributes", {}).get("friendly_name") or ""}
                           for e in states if _special(e)],
                 "all": sorted([e["entity_id"], e.get("attributes", {}).get("friendly_name") or ""] for e in states
-                              if everything or e["entity_id"] not in BACKUP)}
+                              if everything or (e["entity_id"] not in BACKUP
+                                                and e["entity_id"] not in set(_sensors(s).values())))}
         snap["_summary"] = (f"Home Assistant {config.get('version', '?')}, "
                             + (f"{len(states)} entities" if everything else f"{len(states)} of {self._total} entities read"))
         return snap
@@ -242,6 +285,19 @@ class HomeAssistantModule(ApiModule):
         else:
             age = (now - ok_ts) / 3600
             add("backups", level(age, th["backups"]), f"last automatic backup {age:.0f} h ago", age)
+
+        for cid, what in (("disk", "disk"), ("memory", "memory")):
+            st, unit = (snap.get("host") or {}).get(cid) or (None, None)
+            try:
+                v = float(st)
+            except (TypeError, ValueError):
+                v = None
+            if st is None:
+                add(cid, OK, f"no {what} sensor (see the settings)")
+            elif v is None or unit != "%":
+                add(cid, WARNING, f"{what} sensor reads {st}{' ' + unit if unit else ''}, not a percentage")
+            else:
+                add(cid, level(v, th[cid]), f"{what} {v:.0f} % used", v)
         return out
 
     def _safety(self, s, th, snap, add):
@@ -267,6 +323,24 @@ class HomeAssistantModule(ApiModule):
             group = [e for e in mine if e["entity_id"].startswith("binary_sensor.") and e["dc"] in classes]
             on = [f"{name(e)} ({e['dc'].replace('_', ' ')})" for e in group if e["state"] == "on"]
             add(cid, ERROR if on else OK, ", ".join(on) if on else f"{len(group)} {what} clear" if group else f"no {what}")
+
+        addons = [e for e in mine if e["entity_id"].startswith("binary_sensor.") and e["dc"] == "running"
+                  and e["entity_id"].endswith("_running")]
+
+        def addon(e):  # "Node-RED Running" -> "Node-RED"; translated names stay as they are
+            n = name(e)
+            return n[:-8] if n.endswith(" Running") else n
+
+        off = [addon(e) for e in addons if e["state"] == "off"]
+        lost = [addon(e) for e in addons if e["state"] not in ("on", "off")]
+        if off:
+            add("addons", ERROR, "not running: " + ", ".join(off) + (f"; unavailable: {', '.join(lost)}" if lost else ""),
+                len(off))
+        elif lost:
+            add("addons", WARNING, "unavailable: " + ", ".join(lost), 0)
+        else:
+            add("addons", OK, f"{len(addons)} watched add-ons running" if addons
+                else "no add-ons watched (enable their Running sensors)", 0)
 
         levels = []
         for e in mine:

@@ -216,3 +216,75 @@ def test_full_read_interval_is_a_setting(monkeypatch):
     assert m.validate(form | {"full_every": "60"}, {})[0]["full_every"] == 60
     for bad in ("4", "1441", "x"):
         assert m.validate(form | {"full_every": bad}, {})[1]
+
+
+def addon(eid, state, name):
+    return {"entity_id": eid, "state": state, "dc": "running", "name": name}
+
+
+def test_addons_running_stopped_and_unavailable():
+    ok = [addon("binary_sensor.mosquitto_broker_running", "on", "Mosquitto broker Running")]
+    res = run(snap(watch=ok))
+    assert res["addons"].status == OK and "1 watched" in res["addons"].detail
+    stopped = ok + [addon("binary_sensor.zigbee2mqtt_running", "off", "Zigbee2MQTT Running")]
+    res = run(snap(watch=stopped))
+    assert res["addons"].status == ERROR and res["addons"].detail == "not running: Zigbee2MQTT"
+    gone = ok + [addon("binary_sensor.zigbee2mqtt_running", "unavailable", "Zigbee2MQTT Running")]
+    assert run(snap(watch=gone))["addons"].status == WARNING
+
+
+def test_addons_unticked_and_other_running_sensors_ignored():
+    w = [addon("binary_sensor.node_red_running", "off", "Node-RED Running"),
+         addon("binary_sensor.qemu_win11_200_status", "off", "QEMU Win11 Status"),  # Proxmox VM, not an add-on
+         addon("binary_sensor.brew_switch", "off", "Brew Switch")]
+    s = {"enabled": True, "chosen": ["light.old"], "skipped": ["binary_sensor.node_red_running"]}
+    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
+    res = {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, snap(watch=w), "", NOW))}
+    assert res["addons"].status == OK and "no add-ons watched" in res["addons"].detail
+
+
+def test_disk_and_memory():
+    res = run(snap(host={"disk": ["17.7", "%"], "memory": ["85.2", "%"]}))
+    assert res["disk"].status == OK and res["disk"].value == 17.7
+    assert res["memory"].status == WARNING and "85 %" in res["memory"].detail
+    assert run(snap(host={"disk": ["95", "%"], "memory": None}))["disk"].status == ERROR
+    res = run(snap(host={"disk": None, "memory": ["12", "GB"]}))
+    assert res["disk"].status == OK and "no disk sensor" in res["disk"].detail
+    assert res["memory"].status == WARNING and "not a percentage" in res["memory"].detail
+    assert run(snap())["disk"].status == OK  # older snapshots have no host part
+
+
+def test_addon_entities_are_essential_and_sensor_fields_validated():
+    from homewatch.modules.homeassistant.plugin import _addon, _sensors, _special
+    e = {"entity_id": "binary_sensor.samba_share_running", "attributes": {"device_class": "running"}}
+    assert _addon(e) and _special(e)
+    assert not _addon({"entity_id": "binary_sensor.washer_status", "attributes": {"device_class": "running"}})
+    assert _sensors({}) == {"disk": "sensor.system_monitor_disk_usage", "memory": "sensor.system_monitor_memory_usage"}
+    base = {"url": "http://ha.local:8123", "full_every": "30"}
+    out, err = plugin.validate(base | {"disk_sensor": " sensor.my_disk ", "memory_sensor": ""}, {})
+    assert not err and out["disk_sensor"] == "sensor.my_disk" and out["memory_sensor"] == ""
+    assert "entity id" in plugin.validate(base | {"disk_sensor": "light.x"}, {})[1]
+
+
+def test_addon_and_host_sensors_read_between_full_reads(monkeypatch):
+    import asyncio
+
+    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
+    z2m = {"entity_id": "binary_sensor.zigbee2mqtt_running", "state": "on",
+           "attributes": {"device_class": "running", "friendly_name": "Zigbee2MQTT Running"}}
+    vm = {"entity_id": "binary_sensor.qemu_win11_status", "state": "off", "attributes": {"device_class": "running"}}
+    disk = {"entity_id": "sensor.system_monitor_disk_usage", "state": "17.7", "attributes": {"unit_of_measurement": "%"}}
+    mem = {"entity_id": "sensor.ram", "state": "40", "attributes": {"unit_of_measurement": "%"}}
+    calls = _ha(monkeypatch, [z2m, vm, disk, mem])
+    m = HomeAssistantModule()
+    s = {"url": "http://ha", "verify": False, "memory_sensor": "sensor.ram"}
+    first = asyncio.run(m.fetch(s, "t", NOW))
+    assert first["host"] == {"disk": ["17.7", "%"], "memory": ["40", "%"]}
+    assert [e["entity_id"] for e in first["watch"]] == ["binary_sensor.zigbee2mqtt_running"]
+    calls.clear()
+    m.snap_ts = NOW
+    z2m["state"] = "off"
+    second = asyncio.run(m.fetch(s, "t", NOW + 120))
+    assert "/api/states" not in calls and "/api/states/sensor.ram" in calls
+    assert "/api/states/binary_sensor.qemu_win11_status" not in calls
+    assert second["watch"][0]["state"] == "off" and second["host"]["disk"] == ["17.7", "%"]

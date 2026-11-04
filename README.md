@@ -122,9 +122,20 @@ Reads Home Assistant with the long-lived token of a dedicated **non-admin** user
 | Safety sensors (smoke, water / moisture, gas, CO, heat, safety) | | detecting |
 | Tamper sensors | | tampered |
 | Batteries (lowest battery sensor, %) | < 25 % | < 10 % |
+| Add-ons (watched = Running sensor enabled) | Running sensor unavailable | not running |
+| Disk use of the host (%) | ≥ 80 % | ≥ 90 % |
+| Memory use of the host (%) | ≥ 80 % | ≥ 90 % |
 
 The alarm, safety, tamper and battery checks find their sensors by Home Assistant's device class
 and follow the "Entities to watch" list: untick a phone there to keep its battery out of the check.
+
+**Add-ons** (Home Assistant OS / Supervised): a non-admin user can't read the Supervisor, so homewatch
+watches the add-ons' **Running** sensors instead. They are disabled by default: in Settings → Devices &
+services → Home Assistant Supervisor, open each add-on that must always run and enable its "Running"
+sensor. An add-on you stop on purpose: leave its sensor disabled, or untick it under "Entities to watch".
+
+**Disk and memory** come from the System Monitor integration's disk use and memory use sensors, or
+from any sensors in % you name in the settings. Without them, both checks stay OK with a note.
 
 Entities that are unavailable when you connect are ignored (you can change the list), so only
 entities that *become* unavailable are reported.
