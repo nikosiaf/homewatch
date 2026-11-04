@@ -142,9 +142,10 @@ header .menu { order: 2; }
 }
 
 /* Status page: module tiles, all the same height; an open one takes the full width */
-.module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); grid-auto-flow: dense; gap: 12px; align-items: start; }
-.module-grid details.module { margin: 0; min-width: 0; }
-.module-grid details.module[open] { grid-column: 1 / -1; --glow: var(--ok);
+/* flex-wrap, not grid: tiles grow to fill every row, the last one too; an open tile takes a whole row */
+.module-grid { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+.module-grid details.module { margin: 0; min-width: 0; flex: 1 1 220px; }
+.module-grid details.module[open] { flex-basis: 100%; --glow: var(--ok);
   box-shadow: 0 0 0 1px var(--glow), 0 0 16px 3px color-mix(in srgb, var(--glow) 55%, transparent); }
 .module-grid details.module.s1[open] { --glow: var(--warn); }
 .module-grid details.module.s2[open] { --glow: var(--err); }
@@ -154,6 +155,8 @@ header .menu { order: 2; }
 .module-grid details.module > summary { height: 112px; box-sizing: border-box; align-content: flex-start; overflow: hidden; }
 .module-grid details.module > summary > .quiet { flex-basis: 100%; order: 3; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .module-grid details.module[open] > summary { height: auto; }
+/* closed: a long module name ("Proxmox Backup Server") shortens with … so the arrow and summary keep their lines */
+.module-grid details.module:not([open]) > summary > b { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .module-grid details.module[open] > summary > .quiet { display: block; }
 label.check.filtered-out { display: none; }
 .choice-tools { align-items: center; margin-bottom: 8px; }

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Status{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/uPlot.min.css"><script src="/static/uPlot.iife.min.js"></script><script src="/static/charts.js" defer></script>{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/uPlot.min.css?v={{ version }}"><script src="/static/uPlot.iife.min.js?v={{ version }}"></script><script src="/static/charts.js?v={{ version }}" defer></script>{% endblock %}
 {% block content %}
 <div id="status-body" hx-get="/partials/status" hx-trigger="every 30s" hx-swap="innerHTML">
 {% include "_status_body.html" %}
