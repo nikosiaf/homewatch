@@ -1,0 +1,10 @@
+<div class="callout wizard-bar" role="status">
+  <div class="wizard-text">
+    <b>Setup · equipment {{ wizard.index }} of {{ wizard.total }}: {{ wizard.name }}</b><br>
+    <span class="quiet small">Follow the steps below and press Connect, or skip it for now; you can add it later under Modules.</span>
+  </div>
+  <div class="row" style="gap:8px;align-items:center">
+    <a class="button" href="{{ wizard.next_url }}">{{ ('Next: ' ~ wizard.next_name) if wizard.next_name else 'Next: notifications' }}</a>
+    <a class="button secondary" href="{{ wizard.next_url }}">Skip</a>
+  </div>
+</div>

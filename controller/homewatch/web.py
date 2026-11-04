@@ -33,7 +33,7 @@ log = logging.getLogger("homewatch.web")
 HERE = os.path.dirname(__file__)
 COOKIE = "hw_session"
 PRE = "hw_pre"
-SETUP_STEPS = ["account", "home", "internet", "notify", "healthchecks"]
+SETUP_STEPS = ["account", "home", "internet", "equipment", "notify", "healthchecks"]
 SNOOZE_CHOICES = {"1h": 3600, "4h": 4 * 3600, "24h": 24 * 3600}
 RANGES = {"24h": (24 * 3600, 300), "7d": (7 * 86400, 1800), "30d": (30 * 86400, 7200)}
 CHARTS = {
@@ -346,6 +346,13 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         set_session(resp, request, token)
         return resp
 
+    @app.get("/setup/next-module")
+    async def setup_next_module(request: Request, after: str = ""):
+        """Wizard: from one chosen module page to the next, then on to notifications."""
+        chosen = rt_of(request).db.get("setup.modules", [])
+        rest = chosen[chosen.index(after) + 1:] if after in chosen else chosen
+        return RedirectResponse(f"/modules/{rest[0]}" if rest else "/setup/notify", status_code=303)
+
     @app.get("/setup/{step}")
     async def setup_step(request: Request, step: str):
         if step not in SETUP_STEPS[1:]:
@@ -356,6 +363,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                    tzname=rt.db.get("home.tz") or os.environ.get("TZ", "UTC"),
                    providers=PROVIDERS, coming=COMING_SOON, skip_heartbeat=step == "notify",
                    hc=rt.db.one("SELECT 1 FROM channels WHERE kind='healthchecks'") is not None)
+        if step == "equipment":
+            ctx["equipment"] = _equipment_choices(rt)
         return page(request, f"setup_{step}.html", request.state.user, **ctx)
 
     @app.post("/setup/{step}")
@@ -371,6 +380,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             err = err or _save_section(request, step, form, user)
             if err:
                 return back(f"/setup/{step}", err=err)
+        if step == "equipment" and form.get("skip") is None:
+            chosen = rt_of(request).db.get("setup.modules", [])
+            if chosen:
+                return RedirectResponse(f"/modules/{chosen[0]}", status_code=303)
         if nxt:
             return RedirectResponse(f"/setup/{nxt}", status_code=303)
         rt_of(request).db.set("setup.done", True)
@@ -509,6 +522,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             s = typed_over(s, draft)
             ticks_over(ctx, draft)
         return page(request, template, request.state.user, s=s, csrf=request.state.user.csrf,
+                    wizard=_wizard_ctx(rt, mid),
                     module=m, th_rows=thresholds(rt.db, rt.cfg.site, m.id, m.checks),
                     th_current={r.key: r for r in rt.results}, **ctx)
 
@@ -1255,9 +1269,43 @@ def _channel_form(rt, ch, form: dict) -> tuple[dict, str]:
     return config, ""
 
 
+def _equipment_choices(rt) -> list[dict]:
+    """Wizard step 'Your equipment': every available module except the internet line (set up already)."""
+    chosen = set(rt.db.get("setup.modules", []))
+    out = []
+    for mid, name, available in CATALOG:
+        m = MODULES.get(mid)
+        if not available or m is None or mid == "internet":
+            continue
+        first = (getattr(m, "description", "") or "").split(". ")[0].rstrip(".") + "."
+        out.append({"id": mid, "name": name, "about": first, "ticked": mid in chosen,
+                    "connected": bool(getattr(m, "configured", lambda _rt: False)(rt))})
+    return out
+
+
+def _wizard_ctx(rt, mid: str) -> dict | None:
+    """Banner for a module page while the first-run wizard walks through the chosen modules."""
+    if rt.db.get("setup.done", False):
+        return None
+    chosen = rt.db.get("setup.modules", [])
+    if mid not in chosen:
+        return None
+    i = chosen.index(mid)
+    nxt = chosen[i + 1] if i + 1 < len(chosen) else None
+    names = {m: n for m, n, _ in CATALOG}
+    return {"index": i + 1, "total": len(chosen), "name": names.get(mid, mid),
+            "next_name": names.get(nxt, nxt) if nxt else None, "next_url": f"/setup/next-module?after={mid}"}
+
+
 def _save_section(request: Request, section: str, form: dict, user: User) -> str:
     """Shared by the wizard and the settings pages. Returns an error message or ''."""
     rt = rt_of(request)
+    if section == "equipment":
+        chosen = [mid for mid, _n, available in CATALOG
+                  if available and mid != "internet" and mid in MODULES and form.get(f"mod.{mid}") == "on"]
+        rt.db.set("setup.modules", chosen)
+        audit(rt.db, user.username, "setup", "equipment: " + (", ".join(chosen) or "none"))
+        return ""
     if section == "home":
         name = form.get("name", "").strip()[:60]
         zone = form.get("tz", "UTC")

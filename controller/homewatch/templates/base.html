@@ -52,6 +52,7 @@
   {% if flash %}<div class="flash ok" data-autohide role="status">{{ flash }}</div>{% endif %}
   {% if error %}<div class="flash err" role="alert">{{ error }}<button type="button" class="close" data-dismiss aria-label="Close">×</button></div>{% endif %}
   {% endif %}
+  {% if wizard %}{% include "_wizard_bar.html" %}{% endif %}
   {% block content %}{% endblock %}
   <p class="quiet small" style="margin-top:32px">homewatch {{ version }}</p>
 </main>

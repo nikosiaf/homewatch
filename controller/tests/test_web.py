@@ -48,6 +48,9 @@ def test_first_run_wizard(client):
                                              "dns.domain": "example.com", "speed.enabled": "on",
                                              "speed.engine": "cloudflare", "speed.interval_h": "3",
                                              "line.contract_down": "100", "line.contract_up": "10"})
+    assert r.url.path == "/setup/equipment"
+    assert "Proxmox VE" in r.text and "Docker hosts" in r.text and "mod.internet" not in r.text
+    r = client.post("/setup/equipment", data={"csrf": tok, "skip": "1"})
     assert r.url.path == "/setup/notify"
     line = client.rt.internet_settings()["line"]
     assert line == {"contract_down": 100, "contract_up": 10}
@@ -61,6 +64,25 @@ def test_first_run_wizard(client):
     assert json.loads(hc["config"]) == {}  # the ping URL is a credential
     assert json.loads(client.rt.secrets.get(f"channel.{hc['id']}.private")) == {"url": "https://hc-ping.com/abc"}
     assert client.rt.db.get("home.name") == "Test Home"
+
+
+def test_wizard_walks_through_chosen_equipment(client):
+    tok = setup_admin(client)
+    client.post("/setup/home", data={"csrf": tok, "name": "Test Home", "tz": "UTC"})
+    r = client.post("/setup/equipment", data={"csrf": tok, "mod.ups": "on", "mod.docker": "on"})
+    assert client.rt.db.get("setup.modules") == ["ups", "docker"]  # catalogue order, not form order
+    assert r.url.path == "/modules/ups"
+    assert "equipment 1 of 2: UPS (NUT)" in r.text and "Next: Docker hosts" in r.text
+    r = client.get("/setup/next-module?after=ups")
+    assert r.url.path == "/modules/docker" and "equipment 2 of 2: Docker hosts" in r.text
+    assert "Next: notifications" in r.text
+    r = client.get("/setup/next-module?after=docker")
+    assert r.url.path == "/setup/notify"
+    assert "equipment 1 of" not in client.get("/modules/proxmox").text  # not chosen: no banner
+    r = client.get("/setup/equipment")
+    assert 'name="mod.ups" checked' in r.text  # going back keeps the ticks
+    client.rt.db.set("setup.done", True)
+    assert "Setup · equipment" not in client.get("/modules/ups").text  # banner only during setup
 
 
 def test_csrf_required(client):

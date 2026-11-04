@@ -294,8 +294,11 @@ Then follow the setup wizard:
 1. Admin account
 2. Home name and time zone
 3. Internet probes and contracted speed
-4. A notification channel
-5. Heartbeat
+4. Your equipment: tick what you have (modem, firewall, switches, Wi-Fi, servers, NAS, Home Assistant,
+   UPS, Docker hosts); the wizard then opens each one's module page in turn, with its setup steps and
+   Connect, and you can skip any of them
+5. A notification channel
+6. Heartbeat
 
 ### Manual install (without install.sh)
 

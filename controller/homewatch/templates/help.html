@@ -33,7 +33,8 @@ less install.sh          # please read it first; it's short
   <p>The script also prints a one-time setup code, which the wizard asks for, so nobody else on your network can claim homewatch first.
     To see it again, run <code>docker compose logs controller | grep "setup code"</code>.</p>
   <p style="margin-bottom:0">The setup wizard then asks for an admin account, your home's name and time zone, the internet checks and contracted
-    speed, a notification channel and an optional heartbeat. Add everything else one module at a time, under Modules.</p>
+    speed, your equipment, a notification channel and an optional heartbeat. Under "Your equipment" you tick what you have;
+    the wizard then opens each module's page in turn so you can connect it, or skip it. Anything else you add later, one module at a time, under Modules.</p>
 </div>
 
 <h2 id="modules">Modules</h2>
