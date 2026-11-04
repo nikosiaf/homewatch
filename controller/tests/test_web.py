@@ -1074,3 +1074,26 @@ def test_home_assistant_form_shows_full_read_default_for_old_settings(client):
     client.rt.db.set("module.homeassistant", {"enabled": True, "url": "http://ha.test:8123", "verify": False})
     page = client.get("/modules/homeassistant").text
     assert 'name="full_every" value="30"' in page and "From 5 to 1440" in page
+
+
+def test_docker_save_refused_when_one_host_unreachable(client, monkeypatch):
+    tok = setup_admin(client)
+    from homewatch.modules.docker.plugin import plugin
+
+    async def partial(s, secret, now):
+        return {"hosts": [{"host": "socket-proxy:2375", "name": "hw", "version": "29", "containers": []}],
+                "errors": {"hosts:2375": "can't reach the Docker proxy (ConnectError)"}, "_summary": "1 host(s)"}
+
+    monkeypatch.setattr(plugin, "fetch", partial)
+    r = client.post("/modules/docker", data={"csrf": tok, "hosts": "hosts, socket-proxy"})
+    assert "Nothing saved: can&#39;t read hosts:2375" in r.text or "Nothing saved: can't read hosts:2375" in r.text
+    assert client.rt.db.get("module.docker") is None
+    assert "no password" not in client.get("/modules/docker").text  # the standing banner is gone
+
+    async def full(s, secret, now):
+        return {"hosts": [{"host": "socket-proxy:2375", "name": "hw", "version": "29", "containers": []}],
+                "errors": {}, "_summary": "1 host(s)"}
+
+    monkeypatch.setattr(plugin, "fetch", full)
+    r = client.post("/modules/docker", data={"csrf": tok, "hosts": "socket-proxy"})
+    assert "Nothing saved" not in r.text and client.rt.db.get("module.docker")["hosts"] == "socket-proxy"

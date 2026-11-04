@@ -91,10 +91,6 @@ class DockerModule(ApiModule):
             return out, "Docker hosts: IP addresses or host names (optionally :port), separated by commas"
         return out | {"hosts": ", ".join(hs)}, ""
 
-    def notice(self, settings):
-        return ("The Docker proxy has no password and uses plain HTTP: allow its port only from this homewatch host "
-                "(see the setup steps).")
-
     async def fetch(self, s, secret, now):
         out, errors = [], {}
         for host in hosts(s["hosts"]):

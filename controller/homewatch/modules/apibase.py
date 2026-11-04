@@ -250,6 +250,9 @@ class ApiModule(PinnedTLS, Module):
             except ApiError as e:
                 await self.note_changes(rt, full, str(e))
                 return f"Nothing saved: {e}"
+            if snap.get("errors"):  # several devices/hosts: every one must answer, so a typo is caught here
+                bad = "; ".join(f"{h}: {e}" for h, e in snap["errors"].items())
+                return f"Nothing saved: can't read {bad}. Fix or remove that address and save again."
             self.snap, self.snap_ts, self.error = snap, time.time(), ""
             form["_default_chosen"] = json.dumps(self.default_chosen(snap))
         form["_validated"] = json.dumps(new)
