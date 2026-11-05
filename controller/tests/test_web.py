@@ -1409,5 +1409,11 @@ def test_status_page_hero_and_module_tiles(client, monkeypatch):
     assert '<span class="mt-big num">38<small> °C</small></span>' in grid
     assert "The 24-hour lines are still filling in." in page  # just started: tell why lines are short or missing
     assert "No line yet: MikroTik." in page and "Less than 24 hours so far: UPS." in page
+    r = client.post("/status/filling/dismiss", data={"csrf": csrf(page)}, follow_redirects=False)
+    assert r.status_code == 303 and "still filling in" not in client.get("/").text  # dismissed for this user
+    uid = client.rt.db.one("SELECT id FROM users WHERE username='admin'")["id"]
+    assert client.rt.db.get(f"status.filling_seen.{uid}") == ["MikroTik", "UPS"]
+    client.rt.db.set(f"status.filling_seen.{uid}", ["MikroTik"])  # a module it hadn't listed yet: show it again
+    assert "Less than 24 hours so far: UPS." in client.get("/").text
     assert web.spark([1]) is None and web.spark([2, 2])["y"] == 17.0
     assert web._release_notes("## A\n- b\n  more\ntext") == [("h", "A"), ("li", "b more"), ("p", "text")]

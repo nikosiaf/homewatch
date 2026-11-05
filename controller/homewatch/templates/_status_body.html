@@ -22,6 +22,9 @@
       after two readings (about 10 minutes) and covers the full 24 hours after a day of readings.
       {% if filling.missing %}No line yet: {{ filling.missing | join(', ') }}.{% endif %}
       {% if filling.partial %}Less than 24 hours so far: {{ filling.partial | join(', ') }}.{% endif %}</p></div>
+  <form method="post" action="/status/filling/dismiss" class="callout-x">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    <button class="icon-btn" title="Got it, hide this note" aria-label="Got it, hide this note"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></button></form>
 </div>{% endif %}
 {% from "_note.html" import note with context %}{% from "_more.html" import more %}{{ note("status") }}
 {% if open %}

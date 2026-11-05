@@ -443,6 +443,16 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     async def status_partial(request: Request):
         return page(request, "_status_body.html", request.state.user, **await _status_full(request))
 
+    @app.post("/status/filling/dismiss")
+    async def filling_dismiss(request: Request):
+        """Hide the "lines are still filling in" note for this user, until a module not in it yet starts a line."""
+        rt = rt_of(request)
+        user = request.state.user
+        if await form_of(request, user) is None:
+            return back("/")
+        rt.db.set(f"status.filling_seen.{user.id}", sorted(n for n in (await _status_full(request))["filling_names"]))
+        return RedirectResponse("/", status_code=303)
+
     @app.get("/api/series")
     async def series(request: Request, chart: str = "latency", range: str = "24h"):  # noqa: A002
         rt = rt_of(request)
@@ -1411,7 +1421,9 @@ async def _status_full(request: Request) -> dict:
     full = SPARK_SPAN // SPARK_STEP * 0.9  # points a line has once it covers (nearly) 24 hours
     lines = {c["name"]: len(sparks.get(f"{c['id']}.{MODULES[c['id']].headline[0]}", [])) for c in cards if c["label"]}
     filling = {"missing": [n for n, k in lines.items() if k < 2], "partial": [n for n, k in lines.items() if 2 <= k < full]}
-    ctx.update(cards=cards, kpis=kpis, filling=filling if filling["missing"] or filling["partial"] else None, hero_line=spark(sparks.get("internet.latency", []), 600, 120, 0),
+    names = set(filling["missing"]) | set(filling["partial"])
+    seen = set(rt.db.get(f"status.filling_seen.{request.state.user.id}") or [])  # dismissed: show again only for new ones
+    ctx.update(cards=cards, kpis=kpis, filling=filling if names - seen else None, filling_names=names, hero_line=spark(sparks.get("internet.latency", []), 600, 120, 0),
                home_name=rt.db.get("home.name") or "Home",
                attention=len(ctx["open"]) or sum(1 for t in ctx["tiles"] if t["status"] > 0))
     return ctx

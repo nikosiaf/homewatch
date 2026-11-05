@@ -118,6 +118,11 @@ tr.running td { color: var(--quiet); }
   border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .callout svg { flex: none; color: var(--warn); margin-top: 2px; }
 .callout ul { margin: 6px 0 0 18px; padding: 0; }
+.callout.filling > div { flex: 1; min-width: 0; }
+.callout-x { margin: -4px -6px 0 auto; flex: none; }
+.callout-x .icon-btn { width: 28px; height: 28px; color: var(--ok); border-color: transparent; background: transparent; }
+.callout-x .icon-btn:hover { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.callout-x .icon-btn svg { width: 16px; height: 16px; color: var(--ok); margin: 0; }
 fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
 fieldset.plain:disabled { opacity: .5; }
 details.module { background: var(--card); border: 1px solid var(--line); border-left: 5px solid var(--ok);
