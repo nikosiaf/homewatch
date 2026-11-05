@@ -49,6 +49,7 @@ class Field:
     default: Any = ""
     help: str = ""
     secret: bool = False  # kept encrypted with the module's secret, never in settings, versions or exports
+    optional: bool = False  # a secret field that may stay empty
 
 
 @dataclass
@@ -243,7 +244,7 @@ class ApiModule(PinnedTLS, Module):
             return f"Enter the {self.secret_label.lower()}"
         full = self.with_secret_fields(rt, old | new, form)
         for f in self.fields:
-            if f.secret and not full[f.key]:
+            if f.secret and not f.optional and not full[f.key]:
                 return f"Enter the {f.label}"
         turning_off = self.configured(rt) and "enabled" not in form
         if not turning_off:

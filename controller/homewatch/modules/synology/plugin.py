@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Field, Table, https_url
+from . import snmp
 
 CHECKS = [
     CheckDef("api", "DSM reachable", "api", help="ERROR when homewatch can't log in to DSM or read it."),
@@ -19,6 +22,9 @@ CHECKS = [
     CheckDef("storage", "Pools and volumes", "api", unit="%", warn=85, error=95, editable=("warn", "error"),
              help="Fullest volume; ERROR when a pool or volume is degraded or crashed."),
     CheckDef("updates", "DSM updates", "api", help="WARNING when a DSM update is available."),
+    CheckDef("hardware", "Fans and power", "api",
+             help="Optional, over SNMPv3: ERROR when the NAS reports a failed fan, power supply or system; "
+                  "WARNING when SNMP can't be read. DSM's Web API doesn't report these."),
 ]
 DSM_ERRORS = {400: "wrong user name or password", 401: "account disabled", 402: "permission denied",
               403: "the account needs a 2-step verification code: turn 2-step verification off for it",
@@ -34,7 +40,7 @@ class SynologyModule(ApiModule):
     checks = CHECKS
     every = 600  # each read is a DSM login; keep the connection log quiet
     description = ("Watches a Synology NAS through the DSM Web API: system temperature, CPU, memory, disks, storage "
-                   "pools and volumes, and DSM updates. Nothing on the NAS is changed.")
+                   "pools and volumes, DSM updates and, over SNMPv3, fans and power supply. Nothing on the NAS is changed.")
     setup_title = "First create a separate account for homewatch"
     setup = [
         ("text", "DSM has no read-only administrator role, and its system and storage information is only "
@@ -43,12 +49,21 @@ class SynologyModule(ApiModule):
                  "and on the next pages set No access to every shared folder and Deny for every application "
                  "except DSM. If 2-step verification is enforced, exempt this account."),
         ("text", "homewatch only reads; it logs in every 10 minutes and logs out right after."),
+        ("text", "Optional, fans and power supply: Control Panel → Terminal & SNMP → SNMP → enable the SNMP "
+                 "service, tick SNMPv3, and create a user with authentication SHA and privacy AES. Enter that "
+                 "user and both passwords below. Leave the SNMP user empty to skip this check."),
     ]
     fields = [
         Field("url", "NAS address", "https://192.168.1.20:5001"),
         Field("username", "User name", "homewatch", default="homewatch"),
         Field("verify", "Check the HTTPS certificate", kind="check", default=True,
               help=SELF_SIGNED),
+        Field("snmp_user", "SNMPv3 user (optional)", "homewatch",
+              help="For the fans and power check. Empty: that check is skipped."),
+        Field("snmp_auth_protocol", "SNMPv3 authentication", "SHA", default="SHA",
+              help="SHA or SHA256, as set for the user in DSM. Privacy is always AES."),
+        Field("snmp_auth", "SNMPv3 authentication password", secret=True, optional=True),
+        Field("snmp_priv", "SNMPv3 privacy password", secret=True, optional=True),
     ]
     secret_label = "Password"
 
@@ -61,7 +76,10 @@ class SynologyModule(ApiModule):
             return out, "NAS address: e.g. https://192.168.1.20:5001"
         if not out["username"]:
             return out, "Enter the user name"
-        return out | {"url": url}, ""
+        proto = (out.get("snmp_auth_protocol") or "SHA").upper()
+        if proto not in snmp.AUTH:
+            return out, "SNMPv3 authentication: SHA or SHA256"
+        return out | {"url": url, "snmp_auth_protocol": proto}, ""
 
     async def fetch(self, s, secret, now):
         entry = f"{s['url']}/webapi/entry.cgi"
@@ -113,6 +131,16 @@ class SynologyModule(ApiModule):
             "update": None if upgrade is None else bool((upgrade.get("update") or {}).get("available")),
             "update_version": ((upgrade or {}).get("update") or {}).get("version", ""),
         }
+        snap["hw"], snap["hw_error"] = None, ""
+        if s.get("snmp_user"):
+            if not (s.get("snmp_auth") and s.get("snmp_priv")):
+                snap["hw_error"] = "enter both SNMPv3 passwords in the settings"
+            else:
+                try:
+                    snap["hw"] = await snmp.read(urlsplit(s["url"]).hostname, s["snmp_user"], s["snmp_auth"],
+                                                 s["snmp_priv"], s.get("snmp_auth_protocol") or "SHA")
+                except snmp.SnmpError as e:
+                    snap["hw_error"] = str(e)
         snap["_summary"] = f"{snap['info'].get('model', 'NAS')} {snap['info'].get('firmware_ver', '')}".strip()
         return snap
 
@@ -189,6 +217,16 @@ class SynologyModule(ApiModule):
             add("updates", WARNING if snap["update"] else OK,
                 f"update available {snap.get('update_version') or ''}".strip() if snap["update"]
                 else f"{i.get('firmware_ver', 'DSM')} is up to date")
+
+        if not s.get("snmp_user"):
+            add("hardware", OK, "not watched (no SNMPv3 user in the settings)")
+        elif snap.get("hw_error"):
+            add("hardware", WARNING, snap["hw_error"])
+        elif snap.get("hw") is not None:
+            state, texts = snmp.evaluate(snap["hw"])
+            add("hardware", ERROR if state == "failed" else OK, "; ".join(texts))
+        else:
+            add("hardware", OK, "not read yet")
         return out
 
     def tables(self, snap, s):

@@ -169,6 +169,12 @@ shared folders or applications.
 | Disks | hottest ≥ 50 °C | ≥ 60 °C, a disk not normal, SMART failing or bad sectors |
 | Pools and volumes | fullest volume ≥ 85 %, or repairing / scrubbing | ≥ 95 %, degraded or crashed |
 | DSM updates | update available | |
+| Fans and power (optional, SNMPv3) | SNMP can't be read | a fan, the power supply or the system failed |
+
+DSM's Web API doesn't report fans or the power supply; the NAS's SNMP agent does. To watch them,
+enable SNMP in Control Panel → Terminal & SNMP, tick SNMPv3 and create a user with authentication
+SHA (or SHA256) and privacy AES, then enter that user and both passwords in the module settings.
+homewatch reads UDP port 161 of the NAS at each DSM read. Leave the SNMP user empty to skip it.
 
 ### MikroTik module (optional)
 
