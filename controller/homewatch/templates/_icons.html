@@ -1,0 +1,17 @@
+{# line icons for the Status page tiles; generic shapes, no brand logos #}
+{% macro icon(name) %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{%- if name == 'globe' %}<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>
+{%- elif name == 'modem' %}<rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 16.5h.01M11 16.5h.01M8 13l-2-6M16 13l2-6"/>
+{%- elif name == 'shield' %}<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/>
+{%- elif name == 'switch' %}<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 11v2M10 11v2M13 11v2M16 11v2"/>
+{%- elif name == 'wifi' %}<path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1"/>
+{%- elif name == 'archive' %}<rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/>
+{%- elif name == 'drive' %}<rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M9 17h6"/>
+{%- elif name == 'house' %}<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>
+{%- elif name == 'battery' %}<rect x="3" y="7" width="16" height="10" rx="2"/><path d="M21 10.5v3M7 10v4M10.5 10v4"/>
+{%- elif name == 'box' %}<path d="M3 8l9-5 9 5v8l-9 5-9-5V8z"/><path d="M3 8l9 5 9-5M12 13v8"/>
+{%- else %}<rect x="4" y="3" width="16" height="7" rx="2"/><rect x="4" y="14" width="16" height="7" rx="2"/><path d="M8 6.5h.01M8 17.5h.01"/>
+{%- endif %}</svg>{% endmacro %}
+
+{% macro sparkline(sp, cls='') %}{% if sp %}<svg class="spark {{ cls }}" viewBox="0 0 {{ sp.w }} {{ sp.h }}" preserveAspectRatio="none" aria-hidden="true">
+<path class="area" d="{{ sp.area }}"/><path class="line" d="{{ sp.line }}"/>{% if not cls %}<circle cx="{{ sp.x }}" cy="{{ sp.y }}" r="2.6"/>{% endif %}</svg>{% endif %}{% endmacro %}

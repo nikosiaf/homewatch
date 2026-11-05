@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
+import re
 import secrets as pysecrets
 import time
 from contextlib import asynccontextmanager
@@ -435,11 +437,11 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     # -- status and history (viewers too) ----------------------------------------------------
     @app.get("/")
     async def status(request: Request):
-        return page(request, "status.html", request.state.user, **_status_ctx(request))
+        return page(request, "status.html", request.state.user, **await _status_full(request))
 
     @app.get("/partials/status")
     async def status_partial(request: Request):
-        return page(request, "_status_body.html", request.state.user, **_status_ctx(request))
+        return page(request, "_status_body.html", request.state.user, **await _status_full(request))
 
     @app.get("/api/series")
     async def series(request: Request, chart: str = "latency", range: str = "24h"):  # noqa: A002
@@ -1200,7 +1202,30 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if err:
             return back("/system", err=err)
         audit(rt.db, request.state.user.username, "update", f"asked the updater for {newer}")
-        return back("/system", msg=f"Updating to {newer}: homewatch restarts within a minute or two.")
+        return RedirectResponse(f"/system/update/progress?to={quote(newer)}", status_code=303)
+
+    @app.get("/system/update")
+    async def update_confirm(request: Request):
+        """Before updating: what happens, the release notes, OK or Cancel."""
+        from . import updater
+        rt = rt_of(request)
+        newer = rt.update_available()
+        if not newer or not updater.state(rt.cfg.update_dir)["ready"]:
+            return RedirectResponse("/system", status_code=303)
+        return page(request, "update.html", request.state.user, csrf=request.state.user.csrf, to=newer,
+                    notes=_release_notes(rt.db.get("updates.notes", "")))
+
+    @app.get("/system/update/progress")
+    async def update_progress(request: Request, to: str = ""):
+        if not re.fullmatch(r"\d+\.\d+\.\d+", to):
+            return RedirectResponse("/system", status_code=303)
+        return page(request, "update_progress.html", request.state.user, to=to)
+
+    @app.get("/system/updates/state")
+    async def update_state(request: Request):
+        from . import updater
+        st = updater.state(rt_of(request).cfg.update_dir)
+        return JSONResponse({"state": st["state"], "summary": st["summary"], "asked": st["asked"], "version": __version__})
 
 
 def _probe_age(rt) -> float | None:
@@ -1293,6 +1318,105 @@ def _status_ctx(request: Request) -> dict:
     return dict(module_info=info, switched_off=switched_off, unknown=unknown, tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
                 last_run=rt.last_run, last_error=rt.last_error, errors=errors, warnings=warnings,
                 setup_done=rt.db.get("setup.done", False))
+
+
+SPARK_SPAN, SPARK_STEP, SPARK_TTL = 86400, 900, 120  # the tiles' lines: 24 h in 15-minute steps, read at most every 2 min
+
+
+async def _sparks(rt) -> dict[str, list[float]]:
+    """{check key: values over 24 h} for each module's headline check."""
+    now = time.time()
+    cached = getattr(rt, "spark_cache", None)
+    if cached and now - cached[0] < SPARK_TTL:
+        return cached[1]
+    keys = [f"{m.id}.{m.headline[0]}" for m in MODULES.values() if m.headline[0]]
+    out: dict[str, list[float]] = {}
+    q = (f'avg_over_time(hw_check_value_value{{site="{rt.cfg.site}",check=~"{"|".join(keys)}"}}[{SPARK_STEP}s])')
+    try:
+        for labels, values in await rt.metrics.query_range(q, now - SPARK_SPAN, now, SPARK_STEP):
+            out[labels.get("check", "")] = [v for _, v in values]
+    except Exception as e:  # noqa: BLE001 - the lines are a nicety; the page works without them
+        log.debug("sparklines: %s", e)
+    rt.spark_cache = (now, out)
+    return out
+
+
+def spark(values, w: int = 108, h: int = 34, pad: float = 3) -> dict | None:
+    """SVG paths for a small line with its area, scaled to its own range; None with fewer than two points."""
+    vals = [v for v in values or [] if isinstance(v, (int, float)) and math.isfinite(v)]
+    if len(vals) < 2:
+        return None
+    lo, hi = min(vals), max(vals)
+    pts = [(pad + i * (w - 2 * pad) / (len(vals) - 1),
+            h / 2 if hi == lo else h - pad - (v - lo) / (hi - lo) * (h - 2 * pad)) for i, v in enumerate(vals)]
+    line = " ".join(f"{'L' if i else 'M'}{x:.1f} {y:.1f}" for i, (x, y) in enumerate(pts))
+    return {"line": line, "area": f"{line} L{w - pad:.1f} {h} L{pad:.1f} {h} Z", "x": round(pts[-1][0], 1),
+            "y": round(pts[-1][1], 1), "w": w, "h": h}
+
+
+def _fmt_value(v: float | None) -> str:
+    if v is None:
+        return "—"
+    return f"{v:.1f}" if abs(v) < 10 and not float(v).is_integer() else f"{v:.0f}"
+
+
+async def _status_full(request: Request) -> dict:
+    """The Status page: the checks, plus the hero's numbers and each module tile's headline and 24 h line."""
+    from .report import availability
+    rt = rt_of(request)
+    ctx = _status_ctx(request)
+    now = ctx["now"]
+    sparks = await _sparks(rt)
+    results = {t["r"].key: t["r"] for t in ctx["tiles"]}
+    cards = []
+    for mod_id, mod_name, mod_tiles in ctx["tile_groups"]:
+        m = MODULES[mod_id]
+        worst = max(t["status"] for t in mod_tiles)
+        key = f"{m.id}.{m.headline[0]}" if m.headline[0] else ""
+        r = results.get(key)
+        cards.append({"id": mod_id, "name": mod_name, "tiles": mod_tiles, "worst": worst, "icon": m.icon,
+                      "value": _fmt_value(r.value if r else None), "unit": (r.unit if r else "") or "",
+                      "label": m.headline[1], "spark": spark(sparks.get(key, [])),
+                      "probs": [t for t in mod_tiles if t["status"] > 0]})
+    cards.sort(key=lambda c: -c["worst"])  # problems first, in their usual order otherwise
+    kpis = []
+    inet = MODULES["internet"]
+    if inet.enabled(inet.load(rt)):
+        a = availability(rt.db, rt.cfg.site, now - 86400, now)
+        if a.percent is not None:  # nothing watched yet: no number rather than a dash
+            kpis.append((f"{a.percent:.2f}".rstrip("0").rstrip("."), "%", "Internet up, last 24 h"))
+        st = rt.db.one("SELECT down, up FROM speedtests WHERE site=? AND ok=1 ORDER BY ts DESC LIMIT 1", (rt.cfg.site,))
+        line_s = inet.load(rt).get("line") or {}
+        cd, cu = line_s.get("contract_down") or 0, line_s.get("contract_up") or 0
+        if st and st["down"] is not None:
+            kpis.append((f"{st['down']:.1f}", f"/ {st['up'] or 0:.1f}",
+                         "Last speed test, Mbit/s" + (f" (of {cd:g} / {cu:g})" if cd else "")))
+        lat, loss = results.get("internet.latency"), results.get("internet.loss")
+        if lat and lat.value is not None:
+            kpis.append((f"{lat.value:.0f}", "ms", "Latency" + (f", {loss.value:.0f} % loss" if loss and loss.value is not None else "")))
+    kpis.append((str(len(cards)), f"· {len(ctx['tiles'])} checks", "Modules watched"))
+    ctx.update(cards=cards, kpis=kpis, hero_line=spark(sparks.get("internet.latency", []), 600, 120, 0),
+               home_name=rt.db.get("home.name") or "Home",
+               attention=len(ctx["open"]) or sum(1 for t in ctx["tiles"] if t["status"] > 0))
+    return ctx
+
+
+def _release_notes(body: str) -> list[tuple[str, str]]:
+    """GitHub's release notes (Markdown) as (kind, text) lines: h, li or p; plain text, nothing rendered as HTML."""
+    out = []
+    for raw in (body or "").splitlines():
+        t = raw.strip()
+        if not t:
+            continue
+        if t.startswith("#"):
+            out.append(("h", t.lstrip("#").strip()))
+        elif t[:2] in ("- ", "* "):
+            out.append(("li", t[2:].strip()))
+        elif raw.startswith("  ") and out and out[-1][0] == "li":  # a list item that goes on
+            out[-1] = ("li", out[-1][1] + " " + t)
+        else:
+            out.append(("p", t))
+    return out[:80]
 
 
 def _channel_form(rt, ch, form: dict) -> tuple[dict, str]:

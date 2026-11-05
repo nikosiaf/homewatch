@@ -1,15 +1,20 @@
 {% if not setup_done and user.is_admin %}<div class="flash ok">Finish the <a href="/setup/home">setup steps</a> to start monitoring.</div>{% endif %}
+{% from "_icons.html" import icon, sparkline %}
 {% set blind = overall == 0 and last_run and (last_error or not tiles) %}
-<div class="banner {{ 'mute' if blind else 's' ~ overall }}" id="status">
-  {% if blind %}<span class="badge mute">UNKNOWN</span>{% else %}<span class="badge s{{ overall }}">{{ LEVEL_WORD[overall] }}</span>{% endif %}
-  <div>
-    <div class="big">{% if blind and last_error %}Status unknown: monitoring data can't be read{% elif blind %}Nothing is being checked yet{% elif overall == 0 and unknown %}No problems found, but {{ unknown | join(', ') }} not read{% elif overall == 0 %}All checks OK{% else %}{{ errors }} error{{ 's' if errors != 1 }}, {{ warnings }} warning{{ 's' if warnings != 1 }}{% endif %}</div>
-    <div class="quiet small">{% if last_run %}Last run {{ last_run | ts('%H:%M:%S') }}{% else %}Waiting for the first run…{% endif %}
+{% set state = 'mute' if blind else ('err' if overall == 2 else 'warn' if overall == 1 else 'ok') %}
+<section class="hero st-{{ state }}" id="status">
+  {{ sparkline(hero_line, 'hero-line') }}
+  <div class="orb" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    {% if state == 'ok' %}<path d="M5 12.5l4.5 4.5L19 7.5"/>{% elif state == 'mute' %}<path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 1-1 1.7M12 17v.5"/>{% else %}<path d="M12 6.5v7M12 17v.5"/>{% endif %}</svg></div>
+  <div class="hero-text">
+    <div class="eyebrow">{{ home_name }} · {% if last_run %}last check <span class="num">{{ last_run | ts('%H:%M:%S') }}</span>{% else %}waiting for the first check…{% endif %}
       {% if last_error %} · <span style="color:var(--err)">{{ last_error }}</span>{% endif %}</div>
+    <h1>{% if blind and last_error %}Status unknown: monitoring data can't be read{% elif blind %}Nothing is being checked yet{% elif overall == 0 and unknown %}No problems found, but {{ unknown | join(', ') }} not read{% elif overall == 0 %}Everything at {{ home_name }} is running fine{% else %}{{ attention }} thing{{ 's' if attention != 1 }} need{{ '' if attention != 1 else 's' }} attention at {{ home_name }}{% endif %}</h1>
+    {% if kpis %}<div class="kpis">{% for v, u, k in kpis %}<div class="kpi"><div class="v num">{{ v }}<small> {{ u }}</small></div><div class="k">{{ k }}</div></div>{% endfor %}</div>{% endif %}
   </div>
-  {% if user.is_admin %}<form method="post" action="/checks/run" style="margin-left:auto">
-    <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status"><button class="secondary" data-busy="Running…">Check now</button></form>{% endif %}
-</div>
+  {% if user.is_admin %}<form method="post" action="/checks/run" class="hero-btn">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status"><button data-busy="Running…">Check now</button></form>{% endif %}
+</section>
 {% from "_note.html" import note with context %}{% from "_more.html" import more %}{{ note("status") }}
 {% if open %}
 <div class="card scroll">
@@ -27,20 +32,20 @@
 </table></div>
 {% endif %}
 <div class="module-grid">
-{% for mod_id, mod_name, mod_tiles in tile_groups %}
-{% set worst = mod_tiles | map(attribute='status') | max %}
-{% set probs = mod_tiles | selectattr('status', 'gt', 0) | list %}
-<details class="module s{{ worst }}" data-module="{{ mod_id }}">
+{% for c in cards %}
+{% set info = module_info.get(c.id, {}) %}
+{% set unread = c.worst == 0 and not info.observed %}
+<details class="module s{{ c.worst }} {{ 'unread' if unread }}" data-module="{{ c.id }}">
   <summary>
-    {% set info = module_info.get(mod_id, {}) %}
-    {% if worst == 0 and not info.observed %}<span class="badge mute">UNKNOWN</span>{% else %}<span class="badge s{{ worst }}">{{ LEVEL_WORD[worst] }}</span>{% endif %}
-    <b title="{{ mod_name }}">{{ mod_name }}</b>
-    <span class="quiet small">{% if probs %}{{ probs[0].r.name }}: {{ probs[0].r.detail }}{% if probs | length > 1 %} (+{{ probs | length - 1 }} more){% endif %}
-      {% elif not info.observed %}Not read yet{% else %}{{ mod_tiles | length }} checks OK{% endif %}<span class="when-open"> - Last attempt {{ last_run | ts('%H:%M:%S') if last_run else 'none yet' }} ·
-      last good reading {{ ((now - info.last_good) | dur) ~ ' ago' if info.last_good else 'none yet' }}</span></span>
+    <div class="mt-top"><span class="mt-ico">{{ icon(c.icon) }}</span><b class="mt-name" title="{{ c.name }}">{{ c.name }}</b>
+      {% if unread %}<span class="badge mute">UNKNOWN</span>{% elif c.worst %}<span class="badge s{{ c.worst }}">{{ LEVEL_WORD[c.worst] }}</span>{% else %}<span class="mt-dot" title="OK"></span>{% endif %}</div>
+    {% if c.label %}<div class="mt-metric"><span class="mt-big num">{{ c.value }}<small>{{ ' ' ~ c.unit if c.unit }}</small></span>{{ sparkline(c.spark) }}</div>{% endif %}
+    <div class="mt-sub">{% if c.probs %}{{ c.probs[0].r.name }}: {{ c.probs[0].r.detail }}{% if c.probs | length > 1 %} (+{{ c.probs | length - 1 }} more){% endif %}
+      {% elif unread %}Not read yet{% elif c.label %}{{ c.label }} · {{ c.tiles | length }} checks OK{% else %}{{ c.tiles | length }} checks OK{% endif %}<span class="when-open"> - Last attempt {{ last_run | ts('%H:%M:%S') if last_run else 'none yet' }} ·
+      last good reading {{ ((now - info.last_good) | dur) ~ ' ago' if info.last_good else 'none yet' }}</span></div>
   </summary>
   <div class="tiles">
-  {% for t in mod_tiles %}
+  {% for t in c.tiles %}
     {% set r = t.r %}
     <div class="tile s{{ t.status }} {{ 'sup' if r.suppressed_by }}">
       <div class="row" style="justify-content:space-between;align-items:center">

@@ -37,6 +37,8 @@ def normalize_url(url: str) -> str:
 class ProxmoxModule(PinnedTLS, Module):
     id = checks.MODULE
     name = "Proxmox VE"
+    icon = "server"
+    headline = ("cpu", "busiest node CPU")
     description = ("Watches a Proxmox VE host or cluster through a read-only API token: nodes, guests, storage, disk "
                    "health and backups. Nothing on Proxmox is changed.")
     setup = [

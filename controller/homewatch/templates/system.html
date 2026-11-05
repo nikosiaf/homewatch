@@ -9,9 +9,7 @@
     {{ note("health") }}
     <table>
       <tr><td>homewatch version</td><td><div class="row tight" style="margin:0">{{ version }}{% if latest %} · latest release {{ latest }}{% endif %}
-        {% if update and updater.ready %}<form method="post" action="/system/updates/install" class="inline">
-          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="health">
-          <button class="danger" data-confirm="Update homewatch to {{ update }}? homewatch restarts and is away for a minute or two.">Update to {{ update }}</button></form>{% endif %}</div></td></tr>
+        {% if update and updater.ready %}<a class="button danger" href="/system/update">Update to {{ update }}</a>{% endif %}</div></td></tr>
       {% if updater.summary %}<tr><td>Last update</td><td{% if updater.state == 'failed' %} style="color:var(--err)"{% endif %}>{{ updater.summary }}</td></tr>{% endif %}
       <tr><td>VictoriaMetrics</td><td>{% if vm_ok %}<span class="badge s0">OK</span>{% else %}<span class="badge s2">unreachable</span>{% endif %}</td></tr>
       {% if last_error %}<tr><td>Last error</td><td style="color:var(--err)">{{ last_error }}</td></tr>{% endif %}
@@ -143,12 +141,4 @@
     <div class="row"><button type="button" class="secondary" data-ask-cancel>Cancel</button><button value="ok" data-ask-ok>Confirm</button></div>
   </form>
 </dialog>
-{% if updater.state == 'running' and update %}
-<dialog class="ask" id="updating" data-version="{{ update }}">
-  <h2>Updating homewatch to {{ update }}</h2>
-  <p data-updating-text><span class="spin" aria-hidden="true"></span> homewatch is restarting with the new release. This takes a minute or two;
-    this window closes by itself when it is back.</p>
-  <div class="row"><button type="button" data-updating-reload hidden>Reload</button></div>
-</dialog>
-{% endif %}
 {% endblock %}

@@ -28,6 +28,8 @@ _TOKEN = re.compile(r"^[^@\s]+@[^!\s]+![A-Za-z0-9._-]+$")
 class PBSModule(ApiModule):
     id = "pbs"
     name = "Proxmox Backup Server"
+    icon = "archive"
+    headline = ("datastores", "fullest datastore")
     checks = CHECKS
     every_min = 15  # backups run nightly
     description = ("Watches a Proxmox Backup Server through a read-only API token: datastore usage, the age of your "

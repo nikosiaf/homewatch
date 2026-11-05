@@ -326,31 +326,71 @@ document.querySelectorAll("table[data-page]").forEach(function (table) {
   dlg.querySelector("[data-ask-cancel]").addEventListener("click", function () { dlg.close("cancel"); });
 })();
 
-// System page, after Install: a window that waits until the new release answers, then reloads the page.
+// The update progress page: follows the host's updater and the restart, then goes to Status; gives up after 5 minutes.
 (function () {
-  const dlg = document.getElementById("updating");
-  if (!dlg) return;
-  const want = dlg.dataset.version;
-  const text = dlg.querySelector("[data-updating-text]");
-  const reload = dlg.querySelector("[data-updating-reload]");
-  const started = Date.now();
-  dlg.showModal();
-  reload.addEventListener("click", function () { location.reload(); });
-  function poll() {
-    fetch("/healthz", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
-      .then(function (h) {
-        if (h && String(h.version).replace(/-dev$/, "") === want) {
-          text.textContent = "homewatch " + want + " is running. Reloading…";
-          setTimeout(function () { location.replace("/system"); }, 1500);
-          return;
-        }
-        if (Date.now() - started > 5 * 60 * 1000) {
-          text.textContent = "No answer from " + want + " after 5 minutes. Reload the page to see what the updater reports.";
-          reload.hidden = false;
-          return;
-        }
-        setTimeout(poll, 3000);
-      });
+  const box = document.getElementById("update-progress");
+  if (!box) return;
+  const to = box.dataset.to, started = Date.now(), LIMIT = 5 * 60 * 1000;
+  const steps = Array.from(box.querySelectorAll(".steps li"));
+  const bar = box.querySelector(".progress"), pct = box.querySelector("[data-u-pct]");
+  const title = box.querySelector("[data-u-title]"), result = box.querySelector("[data-u-result]"), note = box.querySelector("[data-u-note]");
+  let step = 0, shown = 5, wentAway = false, over = false;
+  function setStep(n) {
+    step = Math.max(step, n);
+    steps.forEach(function (li, i) {
+      li.className = i < step ? "done" : i === step ? "now" : "";
+      li.querySelector("i").textContent = i < step ? "✓" : "";
+    });
   }
-  setTimeout(poll, 3000);
+  function setPct(p) {
+    shown = Math.max(shown, Math.min(100, Math.round(p)));
+    bar.firstElementChild.style.width = shown + "%";
+    bar.setAttribute("aria-valuenow", shown);
+    pct.textContent = shown + " %";
+  }
+  function finish(ok, text) {
+    over = true;
+    note.hidden = true;
+    if (ok) {
+      setStep(4); setPct(100);
+      title.textContent = "Update OK";
+      result.innerHTML = '<div class="result ok" role="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M7.5 12.5l3 3 6-6.5"/></svg><div><b></b><p>Taking you to the Status page in <span class="num">3</span> s…</p></div></div>';
+      result.querySelector("b").textContent = "homewatch " + to + " is running.";
+      let n = 3;
+      const t = setInterval(function () {
+        n--; result.querySelector(".num").textContent = n;
+        if (n <= 0) { clearInterval(t); location.replace("/"); }
+      }, 1000);
+    } else {
+      steps.forEach(function (li, i) { if (i === step) { li.className = "bad"; li.querySelector("i").textContent = "!"; } });
+      title.textContent = "Update failed";
+      result.innerHTML = '<div class="result bad" role="alert"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M12 7.5v5.5M12 16.5v.5"/></svg><div><b></b><p></p><p><a class="button" href="/system">Back to System</a></p></div></div>';
+      result.querySelector("b").textContent = text;
+      result.querySelector("p").textContent = "On the host, journalctl -u homewatch-update shows what the updater did.";
+    }
+  }
+  function get(url) {
+    return fetch(url, { cache: "no-store", credentials: "same-origin" })
+      .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+  }
+  function tick() {
+    if (over) return;
+    const elapsed = Date.now() - started;
+    Promise.all([get("/healthz"), get("/system/updates/state")]).then(function (res) {
+      if (over) return;
+      const health = res[0], st = res[1];
+      if (health && String(health.version).replace(/-dev$/, "") === to) { finish(true); return; }
+      if (st && st.state === "failed") { finish(false, "The update to " + to + " failed: " + (st.summary || "see the updater's log") + "."); return; }
+      if (!health) { wentAway = true; setStep(2); setPct(Math.min(80, 62 + elapsed / 10000)); }
+      else if (wentAway) { setStep(3); setPct(88); }
+      else if (st && !st.asked && st.state === "running") { setStep(1); setPct(Math.min(58, 18 + elapsed / 2500)); }
+      else { setPct(Math.min(16, 5 + elapsed / 1000)); }
+      if (elapsed > LIMIT) {
+        finish(false, to + " didn't answer within 5 minutes. homewatch " + (health ? "is still on " + health.version : "isn't answering") + ".");
+        return;
+      }
+      setTimeout(tick, 2500);
+    });
+  }
+  setTimeout(tick, 1500);
 })();

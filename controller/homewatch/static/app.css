@@ -1,22 +1,45 @@
+/* IBM Plex (SIL Open Font License, static/fonts/OFL.txt), served by homewatch itself: it works without the internet */
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400; font-display: swap; src: url(/static/fonts/plex-sans-latin-400.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400; font-display: swap; src: url(/static/fonts/plex-sans-latin-ext-400.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400; font-display: swap; src: url(/static/fonts/plex-sans-greek-400.woff2) format("woff2"); unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF; }
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 500; font-display: swap; src: url(/static/fonts/plex-sans-latin-500.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 500; font-display: swap; src: url(/static/fonts/plex-sans-latin-ext-500.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 500; font-display: swap; src: url(/static/fonts/plex-sans-greek-500.woff2) format("woff2"); unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF; }
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600; font-display: swap; src: url(/static/fonts/plex-sans-latin-600.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600; font-display: swap; src: url(/static/fonts/plex-sans-latin-ext-600.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 600; font-display: swap; src: url(/static/fonts/plex-sans-greek-600.woff2) format("woff2"); unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF; }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url(/static/fonts/plex-mono-latin-500.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url(/static/fonts/plex-mono-latin-ext-500.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 600; font-display: swap; src: url(/static/fonts/plex-mono-latin-600.woff2) format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+@font-face { font-family: "IBM Plex Mono"; font-style: normal; font-weight: 600; font-display: swap; src: url(/static/fonts/plex-mono-latin-ext-600.woff2) format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+
+/* the look: Plex Sans for words, Plex Mono for every number an instrument reads; soft cards; a deep-navy dark theme */
 :root {
   --brand: #dc2626;
-  --bg: #f6f7f9; --card: #fff; --ink: #1d2330; --quiet: #5d6676; --line: #dfe3ea;
-  --ok: #1a7f37; --warn: #b26b00; --err: #c62828; --accent: #2457c5; --muted-bg: #eef1f5;
+  --bg: #f3f5f9; --card: #fff; --ink: #142033; --quiet: #5b6880; --line: #dde3ec;
+  --ok: #138a4a; --warn: #b86e00; --err: #c7322e; --accent: #2f5bd3; --muted-bg: #eef1f6;
+  --ok-glow: rgba(19,138,74,.18); --warn-glow: rgba(184,110,0,.20); --err-glow: rgba(199,50,46,.20);
+  --shadow: 0 1px 2px rgba(20,32,51,.05), 0 6px 18px rgba(20,32,51,.06);
+  --font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 :root { color-scheme: light; }
 /* dark: when the device asks for it (unless the user picked light), or when the user picked dark */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --bg: #14171c; --card: #1d2128; --ink: #e6e9ef; --quiet: #9aa3b2; --line: #2e343e;
-          --brand: #ef4444; --ok: #4cc26a; --warn: #f0a93b; --err: #ff6b6b; --accent: #7aa2ff; --muted-bg: #252a33;
-          color-scheme: dark; }
+  :root:not([data-theme="light"]) { --bg: #0b1220; --card: #111b2e; --ink: #e5ebf5; --quiet: #93a1ba; --line: #1f2c45;
+          --brand: #ef4444; --ok: #37d07c; --warn: #ffb44a; --err: #ff6b62; --accent: #7ea2ff; --muted-bg: #17233a;
+          --ok-glow: rgba(55,208,124,.22); --warn-glow: rgba(255,180,74,.24); --err-glow: rgba(255,107,98,.24);
+          --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px rgba(0,0,0,.35); color-scheme: dark; }
 }
-:root[data-theme="dark"] { --bg: #14171c; --card: #1d2128; --ink: #e6e9ef; --quiet: #9aa3b2; --line: #2e343e;
-          --brand: #ef4444; --ok: #4cc26a; --warn: #f0a93b; --err: #ff6b6b; --accent: #7aa2ff; --muted-bg: #252a33;
-          color-scheme: dark; }
+:root[data-theme="dark"] { --bg: #0b1220; --card: #111b2e; --ink: #e5ebf5; --quiet: #93a1ba; --line: #1f2c45;
+          --brand: #ef4444; --ok: #37d07c; --warn: #ffb44a; --err: #ff6b62; --accent: #7ea2ff; --muted-bg: #17233a;
+          --ok-glow: rgba(55,208,124,.22); --warn-glow: rgba(255,180,74,.24); --err-glow: rgba(255,107,98,.24);
+          --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 8px 24px rgba(0,0,0,.35); color-scheme: dark; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; background: var(--bg); color: var(--ink);
-       font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font); }
+.num, code, pre { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+h1, h2, h3 { text-wrap: balance; font-weight: 600; letter-spacing: -.005em; }
 a { color: var(--accent); }
 header { background: var(--card); border-bottom: 1px solid var(--line); }
 header .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; padding: 10px 16px; }
@@ -27,17 +50,12 @@ header .who { margin-left: auto; color: var(--quiet); font-size: 13px; display: 
 .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
 h1 { font-size: 22px; margin: 4px 0 16px; }
 h2 { font-size: 17px; margin: 24px 0 10px; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin-bottom: 16px; box-shadow: var(--shadow); }
 .quiet { color: var(--quiet); }
 .small { font-size: 13px; }
 .flash { padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; border: 1px solid; }
 .flash.ok { border-color: var(--ok); color: var(--ok); }
 .flash.err { border-color: var(--err); color: var(--err); }
-.banner { padding: 16px; border-radius: 10px; margin-bottom: 16px; display: flex; gap: 12px; align-items: center;
-          border: 2px solid var(--line); background: var(--card); }
-.banner .big { font-size: 22px; font-weight: 700; }
-.banner.mute { border-color: var(--line); }
-.banner.s0 { border-color: var(--ok); } .banner.s1 { border-color: var(--warn); } .banner.s2 { border-color: var(--err); }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .tile { background: var(--card); border: 1px solid var(--line); border-left: 5px solid var(--ok); border-radius: 10px; padding: 12px; }
 .tile.s1 { border-left-color: var(--warn); } .tile.s2 { border-left-color: var(--err); }
@@ -60,11 +78,11 @@ input[type=time], select, textarea {
   background: var(--card); color: var(--ink); font: inherit; }
 input.num { max-width: 110px; }
 /* every button is outlined; red ones (danger) keep their colour */
-button, .button { display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent);
+button, .button { display: inline-block; padding: 8px 14px; border-radius: 9px; border: 1px solid var(--accent);
   background: transparent; color: var(--accent); font: inherit; line-height: 1.3; cursor: pointer; text-decoration: none; }
 button:not(:disabled):hover, .button:hover { background: var(--muted-bg); }
 button.secondary, .button.secondary { background: transparent; color: var(--accent); }
-button.danger { background: transparent; color: var(--err); border-color: var(--err); }
+button.danger, .button.danger { background: transparent; color: var(--err); border-color: var(--err); }
 button:disabled { opacity: .5; cursor: not-allowed; }
 .row { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: flex-end; }
 .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
@@ -143,23 +161,73 @@ header .menu { order: 2; }
   .menu-btn { display: inline-flex; }
 }
 
-/* Status page: module tiles, all the same height; an open one takes the full width */
-/* flex-wrap, not grid: tiles grow to fill every row, the last one too; an open tile takes a whole row */
-.module-grid { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
-.module-grid details.module { margin: 0; min-width: 0; flex: 1 1 220px; }
-.module-grid details.module[open] { flex-basis: 100%; --glow: var(--ok);
-  box-shadow: 0 0 0 1px var(--glow), 0 0 16px 3px color-mix(in srgb, var(--glow) 55%, transparent); }
-.module-grid details.module.s1[open] { --glow: var(--warn); }
-.module-grid details.module.s2[open] { --glow: var(--err); }
-.module-grid details.module[open] { background: color-mix(in srgb, var(--glow) 12%, var(--card)); }
-.module-grid:has(details.module[open]) details.module:not([open]) { opacity: .55; transition: opacity .15s; }
+/* Status page: the hero (an orb that breathes in the overall level, the headline and key numbers) */
+.hero { position: relative; overflow: hidden; display: grid; grid-template-columns: auto 1fr auto; gap: 24px; align-items: center;
+  padding: 26px 28px; margin-bottom: 18px; border-radius: 18px; background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow);
+  --state: var(--ok); --state-glow: var(--ok-glow); }
+.hero.st-warn { --state: var(--warn); --state-glow: var(--warn-glow); }
+.hero.st-err { --state: var(--err); --state-glow: var(--err-glow); }
+.hero.st-mute { --state: var(--quiet); --state-glow: transparent; }
+.hero .hero-line { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 62%; pointer-events: none; }
+.hero .hero-line .line { fill: none; stroke: var(--state); stroke-width: 1.4; opacity: .4; vector-effect: non-scaling-stroke; }
+.hero .hero-line .area { fill: var(--state); opacity: .06; }
+.orb { position: relative; z-index: 1; width: 104px; height: 104px; border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--state) 55%, white) 0%, var(--state) 55%, color-mix(in srgb, var(--state) 70%, black) 100%);
+  animation: breathe 4.5s ease-in-out infinite; }
+.orb svg { width: 44px; height: 44px; color: #fff; }
+.st-warn .orb, .st-err .orb { animation-duration: 2.2s; }
+.st-mute .orb { animation: none; }
+@keyframes breathe { 0%, 100% { box-shadow: 0 0 0 8px var(--state-glow), 0 0 30px var(--state-glow); }
+  50% { box-shadow: 0 0 0 16px var(--state-glow), 0 0 60px var(--state-glow); } }
+.hero-text { position: relative; z-index: 1; min-width: 0; }
+.hero .eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--quiet); }
+.hero h1 { font-size: clamp(22px, 3.2vw, 32px); line-height: 1.15; margin: 4px 0 16px; letter-spacing: -.015em; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.kpi { background: color-mix(in srgb, var(--muted-bg) 70%, transparent); border: 1px solid var(--line); border-radius: 12px; padding: 9px 13px; min-width: 0; }
+.kpi .v { font-size: 21px; font-weight: 600; white-space: nowrap; }
+.kpi .v small { font-size: 13px; color: var(--quiet); font-weight: 500; }
+.kpi .k { font-size: 12.5px; color: var(--quiet); }
+.hero-btn { position: relative; z-index: 1; align-self: start; }
+@media (max-width: 760px) {
+  .hero { grid-template-columns: auto 1fr; padding: 20px 16px; gap: 16px; }
+  .hero .hero-text { grid-column: 1 / -1; }
+  .hero-btn { grid-row: 1; grid-column: 2; justify-self: end; }
+  .orb { width: 76px; height: 76px; } .orb svg { width: 34px; height: 34px; }
+}
+
+/* Status page: module tiles with an icon, the headline number and its 24 h line; problems first; an open one takes the full width */
+.module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; align-items: start; }
+.module-grid details.module { margin: 0; min-width: 0; position: relative; overflow: hidden; border: 1px solid var(--line);
+  border-radius: 14px; box-shadow: var(--shadow); --state: var(--ok); --state-glow: var(--ok-glow); transition: transform .18s, box-shadow .18s; }
+.module-grid details.module::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--state); }
+.module-grid details.module.s1 { --state: var(--warn); --state-glow: var(--warn-glow); box-shadow: var(--shadow), 0 0 0 1px var(--warn), 0 0 24px var(--warn-glow); }
+.module-grid details.module.s2 { --state: var(--err); --state-glow: var(--err-glow); box-shadow: var(--shadow), 0 0 0 1px var(--err), 0 0 24px var(--err-glow); }
+.module-grid details.module.unread { --state: var(--quiet); --state-glow: transparent; }
+.module-grid details.module:not([open]):hover { transform: translateY(-2px); }
+.module-grid details.module[open] { grid-column: 1 / -1; background: color-mix(in srgb, var(--state) 8%, var(--card)); }
+.module-grid:has(details.module[open]) details.module:not([open]) { opacity: .6; transition: opacity .15s; }
 .module-grid:has(details.module[open]) details.module:not([open]):hover { opacity: 1; }
-.module-grid details.module > summary { height: 112px; box-sizing: border-box; align-content: flex-start; overflow: hidden; }
-.module-grid details.module > summary > .quiet { flex-basis: 100%; order: 3; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.module-grid details.module[open] > summary { height: auto; }
-/* closed: a long module name ("Proxmox Backup Server") shortens with … so the arrow and summary keep their lines */
-.module-grid details.module:not([open]) > summary > b { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.module-grid details.module[open] > summary > .quiet { display: block; }
+.module-grid details.module > summary { display: block; padding: 14px 16px 12px; cursor: pointer; list-style: none; }
+.module-grid details.module > summary::after { content: none; }
+.mt-top { display: flex; align-items: center; gap: 10px; }
+.mt-ico { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; flex: none;
+  background: color-mix(in srgb, var(--state) 14%, transparent); color: var(--state); }
+.mt-ico svg { width: 19px; height: 19px; }
+.mt-name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14.5px; }
+.mt-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--state); box-shadow: 0 0 0 4px var(--state-glow); flex: none; }
+.mt-metric { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin-top: 12px; min-height: 34px; }
+.mt-big { font-size: 26px; font-weight: 600; line-height: 1; white-space: nowrap; }
+.mt-big small { font-size: 14px; color: var(--quiet); font-weight: 500; }
+.spark { width: 108px; height: 34px; flex: none; }
+.spark .line { fill: none; stroke: var(--state, var(--accent)); stroke-width: 1.7; stroke-linejoin: round; }
+.spark .area { fill: var(--state, var(--accent)); opacity: .14; }
+.spark circle { fill: var(--state, var(--accent)); }
+.module-grid details.module.s0:not(.unread) .spark { --state: var(--accent); }
+.mt-sub { font-size: 13px; color: var(--quiet); margin-top: 8px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.module-grid details.module.s1 .mt-sub { color: var(--warn); } .module-grid details.module.s2 .mt-sub { color: var(--err); }
+.module-grid details.module[open] .mt-sub { display: block; }
+.module-grid details.module > .tiles { padding: 0 16px 16px; }
+@media (prefers-reduced-motion: reduce) { .orb { animation: none; } .module-grid details.module { transition: none; } }
 label.check.filtered-out { display: none; }
 .choice-tools { align-items: center; margin-bottom: 8px; }
 .choice-tools input[type="search"] { max-width: 280px; }
@@ -270,3 +338,28 @@ fieldset { min-width: 0; }
 /* a small whole number, up to 4 digits */
 input.digits4 { width: 4.8em; max-width: 4.8em; text-align: right; }
 label.legend { display: inline; margin: 0; font-size: inherit; color: inherit; }
+/* the update pages */
+.update-page { max-width: 760px; margin: 8px auto 16px; }
+.update-page .eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--quiet); }
+.update-page h1 { margin: 4px 0 14px; }
+.update-page .callout { margin: 0 0 16px; }
+.notes li { margin: 4px 0 4px 18px; }
+.notes h3 { margin: 12px 0 4px; }
+.progress { height: 12px; border-radius: 99px; background: var(--muted-bg); border: 1px solid var(--line); overflow: hidden; margin: 18px 0 8px; }
+.progress div { height: 100%; border-radius: 99px; transition: width .6s ease;
+  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 55%, var(--ok))); }
+.steps { list-style: none; padding: 0; margin: 12px 0 0; display: grid; gap: 9px; }
+.steps li { display: flex; gap: 10px; align-items: center; color: var(--quiet); }
+.steps li i { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); flex: none; display: grid; place-items: center;
+  font-style: normal; font-size: 11px; font-weight: 700; }
+.steps li.now { color: var(--ink); } .steps li.now i { border-color: var(--accent); border-top-color: transparent; animation: spin .9s linear infinite; }
+.steps li.done { color: var(--ink); } .steps li.done i { border-color: var(--ok); background: var(--ok); color: var(--card); }
+.steps li.bad i { border-color: var(--err); background: var(--err); color: var(--card); }
+@keyframes spin { to { transform: rotate(360deg); } }
+.result { display: flex; gap: 14px; align-items: flex-start; padding: 14px 16px; border-radius: 12px; margin-top: 18px; }
+.result.ok { border: 1px solid var(--ok); background: color-mix(in srgb, var(--ok) 9%, var(--card)); }
+.result.bad { border: 1px solid var(--err); background: color-mix(in srgb, var(--err) 8%, var(--card)); }
+.result svg { width: 26px; height: 26px; flex: none; }
+.result.ok svg { color: var(--ok); } .result.bad svg { color: var(--err); }
+.result p { margin: 4px 0 0; }
+@media (prefers-reduced-motion: reduce) { .steps li.now i { animation: none; } .progress div { transition: none; } }

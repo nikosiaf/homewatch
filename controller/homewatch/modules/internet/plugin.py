@@ -20,6 +20,8 @@ def _float(v, default=None):
 class InternetModule(Module):
     id = checks.MODULE
     name = "Internet line"
+    icon = "globe"
+    headline = ("latency", "latency")
     checks = checks.CHECKS
     description = ("Watches your internet line: public ping, gateway ping, DNS lookup and an optional speed test, so a "
                    "router or LAN problem can be told apart from the line being down.")

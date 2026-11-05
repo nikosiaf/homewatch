@@ -1245,12 +1245,22 @@ def test_update_check_and_install_from_the_home_box(client, monkeypatch, tmp_pat
     (upd / "ask").mkdir(parents=True)
     object.__setattr__(client.rt.cfg, "update_dir", str(upd))
     health = client.get("/system").text.split('id="health"')[1].split('id="home"')[0]
-    assert '<button class="danger" data-confirm="Update homewatch to 9.9.9?' in health and "Update to 9.9.9</button>" in health
-    r = client.post("/system/updates/install", data={"csrf": tok})
-    assert "Updating to 9.9.9" in r.text and os.path.exists(upd / "ask" / "request")
+    assert '<a class="button danger" href="/system/update">Update to 9.9.9</a>' in health
+    client.rt.db.set("updates.notes", "## New\n- Status orb\n- Tiles with <b>lines</b>\nThanks")
+    confirm = client.get("/system/update").text  # the warning, the release notes, OK and Cancel
+    assert "homewatch restarts during the update" in confirm and "<li>Status orb</li>" in confirm
+    assert "<li>Tiles with &lt;b&gt;lines&lt;/b&gt;</li>" in confirm and "<h3>New</h3>" in confirm  # notes are text, never HTML
+    assert 'href="/system">Cancel</a>' in confirm and "OK, update now</button>" in confirm
+    r = client.post("/system/updates/install", data={"csrf": tok}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/system/update/progress?to=9.9.9"
+    assert os.path.exists(upd / "ask" / "request")
+    prog = client.get("/system/update/progress?to=9.9.9").text
+    assert 'id="update-progress" data-to="9.9.9"' in prog and "Waiting for 9.9.9 to answer" in prog
+    assert client.get("/system/update/progress?to=x;y", follow_redirects=False).status_code == 303
+    st = client.get("/system/updates/state").json()
+    assert st["state"] == "running" and st["asked"] is True
     page = client.get("/system").text
     assert "<td>Last update</td><td>requested, waiting for the updater</td>" in page
-    assert '<dialog class="ask" id="updating" data-version="9.9.9">' in page  # the waiting window
     os.remove(upd / "ask" / "request")
     (upd / "status").write_text("1700000000 failed installing 9.9.9 failed, still on 0.28.0\n")
     st = updater.state(str(upd))
@@ -1374,3 +1384,28 @@ def test_limit_boxes_are_three_digits_unless_a_value_needs_four(client):
     loss = page.split('name="internet.loss.warn"')[0].rsplit("<input", 1)[1]
     assert 'class="num "' in loss
     assert '<h2 class="card-title">Checks and limits</h2>' in page and '<h2 class="card-title">Speed tests</h2>' in page
+
+
+def test_status_page_hero_and_module_tiles(client, monkeypatch):
+    setup_admin(client)
+    from homewatch.modules import CheckResult
+    from homewatch import web
+    client.rt.results = [CheckResult("mikrotik.api", "Devices reachable", 0, "2 devices"),
+                         CheckResult("mikrotik.temp", "Temperature", 0, "38 °C", 38.0, "°C"),
+                         CheckResult("mikrotik.ports", "Ports up", 1, "ether9 (Cam3) down"),
+                         CheckResult("ups.api", "NUT server reachable", 0, "ok"),
+                         CheckResult("ups.battery", "Battery charge", 0, "100 %", 100.0, "%")]
+    client.rt.db.run("INSERT INTO check_state(site, check_key, status) VALUES (?,?,?)", (client.rt.cfg.site, "mikrotik.ports", 1))
+    client.rt.last_run = time.time()
+
+    async def sparks(rt):
+        return {"ups.battery": [100, 99, 100, 100], "internet.latency": [18, 20, 17]}
+    monkeypatch.setattr(web, "_sparks", sparks)
+    page = client.get("/").text
+    assert 'class="hero st-warn"' in page and "1 thing needs attention at Home" in page
+    grid = page.split('class="module-grid"')[1]
+    assert grid.index('data-module="mikrotik"') < grid.index('data-module="ups"')  # problems first
+    assert '<span class="mt-big num">100<small> %</small></span>' in grid and '<svg class="spark' in grid
+    assert '<span class="mt-big num">38<small> °C</small></span>' in grid
+    assert web.spark([1]) is None and web.spark([2, 2])["y"] == 17.0
+    assert web._release_notes("## A\n- b\n  more\ntext") == [("h", "A"), ("li", "b more"), ("p", "text")]

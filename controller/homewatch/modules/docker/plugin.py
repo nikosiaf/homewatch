@@ -37,6 +37,8 @@ def hosts(value: str) -> list[str]:
 class DockerModule(ApiModule):
     id = "docker"
     name = "Docker hosts"
+    icon = "box"
+    headline = ("restarts", "restarts in the last hour")
     checks = CHECKS
     description = ("Watches containers on one or more Docker hosts through a read-only proxy in front of the Docker "
                    "socket: containers that stop, crash loops, failing health checks and removed containers. "

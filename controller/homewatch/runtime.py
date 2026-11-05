@@ -6,6 +6,7 @@ import asyncio
 import copy
 import json
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass, field
@@ -178,6 +179,10 @@ class Runtime:
             await self.metrics.write([
                 line("hw_check_status", {"site": self.cfg.site, "module": r.key.split(".")[0], "check": r.key},
                      {"value": r.effective}, now) for r in results
+            ] + [  # the measured values, for the Status page's 24 h lines
+                line("hw_check_value", {"site": self.cfg.site, "module": r.key.split(".")[0], "check": r.key},
+                     {"value": float(r.value)}, now) for r in results
+                if isinstance(r.value, (int, float)) and not isinstance(r.value, bool) and math.isfinite(r.value)
             ] + [line("hw_run", {"site": self.cfg.site}, {"ok": 1, "duration_seconds": time.time() - now}, now)])
         except MetricsError as e:
             log.warning("%s", e)
@@ -404,8 +409,10 @@ class Runtime:
         except httpx.HTTPError:
             return
         if r.status_code == 200:
-            tag = r.json().get("tag_name", "").lstrip("v")
+            rel = r.json()
+            tag = rel.get("tag_name", "").lstrip("v")
             self.db.set("updates.latest", tag)
+            self.db.set("updates.notes", str(rel.get("body") or "")[:20000])  # shown before updating
         else:
             self.db.set("updates.latest", "")
 

@@ -37,6 +37,8 @@ BUSY = ("repairing", "expanding", "migrating", "data_scrubbing", "parity_checkin
 class SynologyModule(ApiModule):
     id = "synology"
     name = "Synology NAS"
+    icon = "drive"
+    headline = ("system", "system temperature")
     checks = CHECKS
     every_min = 10  # each read is a DSM login; keep the connection log quiet
     description = ("Watches a Synology NAS through the DSM Web API: system temperature, CPU, memory, disks, storage "

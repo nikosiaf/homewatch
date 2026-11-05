@@ -93,6 +93,8 @@ class Module:
     setup_title = "First create a read-only account for homewatch"
     destination_keys = ("url", "host", "port", "devices")  # settings that decide where credentials go
     transport_keys = ("https", "verify")  # settings that protect them on the way, on or off
+    icon = "server"  # the Status page tile's line icon (static/icons in _icons.html)
+    headline: tuple[str, str] = ("", "")  # (check id, label): the number the Status tile shows big, with its 24 h line
 
     def load(self, rt) -> dict:
         raise NotImplementedError

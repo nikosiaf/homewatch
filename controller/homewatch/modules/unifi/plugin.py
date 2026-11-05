@@ -35,6 +35,8 @@ _SITE = re.compile(r"^[a-zA-Z0-9_-]+$")
 class UniFiModule(ApiModule):
     id = "unifi"
     name = "UniFi"
+    icon = "wifi"
+    headline = ("cpu", "CPU")
     checks = CHECKS
     description = ("Watches the devices of a UniFi Network application (UniFi OS Server or a UniFi console) with a "
                    "view-only local user: devices online, Wi-Fi health, restarts and firmware updates.")

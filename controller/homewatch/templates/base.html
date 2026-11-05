@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}homewatch{% endblock %} · {{ home }}</title>
   <link rel="icon" type="image/svg+xml" href="/static/homewatch-icon.svg">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/homewatch-icon.svg">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="homewatch">
+  <meta name="theme-color" content="#f3f5f9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
   <link rel="stylesheet" href="/static/app.css?v={{ version }}">
   <script src="/static/theme.js?v={{ version }}"></script>
   <script src="/static/htmx.min.js?v={{ version }}"></script>
@@ -47,7 +54,7 @@
 </div></header>
 {% endif %}
 <main class="wrap">
-  {% if update and user and user.is_admin %}<div class="flash ok">homewatch {{ update }} is available. See System for how to update.</div>{% endif %}
+  {% if update and user and user.is_admin and request.url.path not in ('/system/update', '/system/update/progress') %}<div class="flash ok">homewatch {{ update }} is available: <a href="/system">update it on the System page</a>.</div>{% endif %}
   {% if not box_id %}
   {% if flash %}<div class="flash ok" data-autohide role="status">{{ flash }}</div>{% endif %}
   {% if error %}<div class="flash err" role="alert">{{ error }}<button type="button" class="close" data-dismiss aria-label="Close">×</button></div>{% endif %}

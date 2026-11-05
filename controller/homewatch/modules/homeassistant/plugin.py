@@ -97,6 +97,8 @@ def _ts(value) -> float | None:
 class HomeAssistantModule(ApiModule):
     id = "homeassistant"
     name = "Home Assistant"
+    icon = "house"
+    headline = ("cpu", "host CPU")
     every_min = 2  # fast: alarms, safety sensors and power events must be reported quickly
     checks = CHECKS
     description = ("Watches Home Assistant through the token of a non-admin user: core state, alarm panels, safety and "

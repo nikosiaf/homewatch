@@ -358,14 +358,17 @@ docker compose up -d
 
 ## Update
 
-The Home box on the System page says when a newer release exists (it checks GitHub once a day, or
-when you press Check now). With the updater installed, press **Install**: homewatch restarts with the
-new release within a minute or two.
+The System page says when a newer release exists (it checks GitHub once a day, or when you press
+Check now). With the updater installed, press **Update to x.y.z** under Health. A page shows what
+happens and the release notes; after **OK, update now** a progress page follows the update and opens
+the Status page when the new release answers. After 5 minutes without an answer it says the update
+failed.
 
 The updater is a systemd unit on the host (`homewatch-update.path`) that runs `update.sh`. homewatch
 gets no Docker access for it: the button only leaves a request file in `update/ask/`. The script never
 reads what is in the file. It asks GitHub for the latest release itself, sets `HW_VERSION` in `.env`,
-then pulls and restarts. If that fails, it puts `.env` back. It reports to `update/status`, which the
+then pulls and restarts. If the download fails, or the new release isn't healthy within 3 minutes,
+it puts `.env` back and starts the previous release again. It reports to `update/status`, which the
 System page shows. It doesn't update `docker-compose.yml`: when a release changes that file, its release
 notes say so. To add the updater to an existing install, put `update.sh` from the release next to
 `install.sh` and run `./install.sh` again (it keeps `.env` and the certificate). To remove it:
@@ -462,4 +465,5 @@ cd deploy && ./install.sh --dev      # builds the controller from source
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The IBM Plex fonts in `controller/homewatch/static/fonts` are under the SIL Open
+Font License (`OFL.txt` there).

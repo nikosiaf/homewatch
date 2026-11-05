@@ -42,6 +42,8 @@ CPU_WINDOW = 600  # seconds the CPU check averages over
 class OPNsenseModule(ApiModule):
     id = "opnsense"
     name = "OPNsense"
+    icon = "shield"
+    headline = ("cpu", "CPU")
     checks = CHECKS
     description = ("Watches an OPNsense firewall through a read-only API key: gateways, CPU, memory, disk, "
                    "services, HAProxy servers, certificates and firmware updates. Nothing on OPNsense is changed.")

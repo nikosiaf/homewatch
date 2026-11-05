@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Update{% endblock %}
+{% block content %}
+<div class="card update-page">
+  <div class="eyebrow">System · Update</div>
+  <h1>Update homewatch to {{ to }}</h1>
+  <div class="callout" role="note">
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19L12 3z"/><path d="M12 10v4.5M12 17.5v.5"/></svg>
+    <div><b>homewatch restarts during the update.</b>
+      <p class="small" style="margin:4px 0 0">It is away for one to two minutes: no checks run and no alerts are sent meanwhile.
+        Settings, history and users are kept. If {{ to }} doesn't start, the updater goes back to {{ version }}.</p></div>
+  </div>
+  <fieldset class="reading notes"><legend>What's new in {{ to }}</legend>
+    {% for kind, text in notes %}{% if kind == 'h' %}<h3>{{ text }}</h3>{% elif kind == 'li' %}<li>{{ text }}</li>{% else %}<p>{{ text }}</p>{% endif %}
+    {% else %}<p class="quiet">No release notes were published with this release.</p>{% endfor %}
+    <p class="small quiet">On GitHub: <a href="https://github.com/nikosiaf/homewatch/releases/tag/v{{ to }}" target="_blank" rel="noopener">homewatch v{{ to }}</a></p>
+  </fieldset>
+  <form method="post" action="/system/updates/install" class="row buttons" style="justify-content:flex-end">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="health">
+    <a class="button" href="/system">Cancel</a><button class="danger">OK, update now</button>
+  </form>
+</div>
+{% endblock %}

@@ -36,6 +36,8 @@ MODELS = {
 class SpeedportModule(Module):
     id = checks.MODULE
     name = "ISP modem"
+    icon = "modem"
+    headline = ("snr", "SNR margin")
     description = ("Reads the DSL line from your provider's modem: sync rate, attainable rate, SNR margin, attenuation, "
                    "line uptime and resyncs. Values are only read, never changed.")
     setup = [

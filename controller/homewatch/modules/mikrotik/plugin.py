@@ -40,6 +40,8 @@ def hosts(value: str) -> list[str]:
 class MikroTikModule(ApiModule):
     id = "mikrotik"
     name = "MikroTik"
+    icon = "switch"
+    headline = ("temp", "hottest device")
     checks = CHECKS
     description = ("Watches MikroTik switches and routers (RouterOS 7) through the REST API with a read-only user: "
                    "CPU, memory, temperature, ports, port errors, reboots and RouterBOOT firmware.")
