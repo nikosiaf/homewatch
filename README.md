@@ -271,7 +271,10 @@ status and history.
 ## Install
 
 You need a Linux host with Docker Engine and the Compose plugin
-(2 CPU, 2 GB RAM and 10 GB disk are plenty).
+(2 CPU, 2 GB RAM and 10 GB disk are plenty). No Docker yet? Install it from Docker's own repository,
+following https://docs.docker.com/engine/install/ for your distribution (Debian:
+https://docs.docker.com/engine/install/debian/), then add your user to the `docker` group
+(`sudo usermod -aG docker $USER`) and log in again.
 
 ```sh
 mkdir homewatch && cd homewatch
