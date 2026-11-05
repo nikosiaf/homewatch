@@ -1192,7 +1192,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt = rt_of(request)
         if await form_of(request, request.state.user) is None:
             return back("/system", err="Form expired")
-        _box.set("home")
+        _box.set("health")
         newer = rt.update_available()
         if not newer:
             return back("/system", err="No newer release to install")
@@ -1200,7 +1200,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if err:
             return back("/system", err=err)
         audit(rt.db, request.state.user.username, "update", f"asked the updater for {newer}")
-        return back("/system", msg=f"Installing {newer}: homewatch restarts within a minute or two. Reload this page then.")
+        return back("/system", msg=f"Updating to {newer}: homewatch restarts within a minute or two.")
 
 
 def _probe_age(rt) -> float | None:

@@ -85,7 +85,7 @@ disk health and backups. Nothing on Proxmox is changed.</p>
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="more"><input type="hidden" name="_part" value="more">
   <h2 style="margin-top:0">Additional configuration</h2>
   {{ note("more") }}
-  <h3>Guests to watch</h3>
+  <fieldset class="reading"><legend>Guests to watch</legend>
     <p class="quiet small">Choose the guests homewatch should keep an eye on, then press Save. It alerts when a chosen
       guest stops running, and checks that it is backed up when one of your Proxmox backup jobs includes it.
       Guests you don't choose are only listed here.</p>
@@ -101,6 +101,7 @@ disk health and backups. Nothing on Proxmox is changed.</p>
           {% elif g.backup_ok %}{{ g.backup_ok | ts }}{% else %}<span class="quiet">none in 8 days</span>{% endif %}</td>
       </tr>{% else %}<tr><td colspan="6" class="quiet">No reading yet; it appears after the next check run.</td></tr>{% endfor %}
     </table></div>
+  </fieldset>
   <p><button data-save>Save</button></p>
 </form>
 {% endif %}

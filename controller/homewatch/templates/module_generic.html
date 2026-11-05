@@ -44,7 +44,7 @@
   {% set fs = module.fields | selectattr('section', 'equalto', section) | rejectattr('key', 'in', placed) | list %}
   {% set plain = fs | rejectattr('kind', 'in', ('check', 'lines')) | rejectattr('own_line') | rejectattr('key', 'equalto', 'every_min') | list %}
   {% set every = fs | selectattr('key', 'equalto', 'every_min') | list %}
-  {% if section == 'more' and plain and module.more_fields_title %}<h3>{{ module.more_fields_title }}</h3>{% endif %}
+  {% if section == 'more' and plain %}<fieldset class="reading">{% if module.more_fields_title %}<legend>{{ module.more_fields_title }}</legend>{% endif %}{% endif %}
   {% if plain or every or (section == '' and module.secret_label and '_secret' not in placed) %}
   <div class="row fields">
   {% for f in plain %}{{ field_cell(f, s) }}{% endfor %}
@@ -52,16 +52,17 @@
   {% for f in every %}{{ field_cell(f, s) }}{% endfor %}{# how often to read: next to the password #}
   </div>
   {% endif %}
+  {% if section == 'more' and plain %}</fieldset>{% endif %}
   {% for f in fs if f.kind == 'lines' %}
-    <div style="margin-top:12px">{% if section == 'more' %}<h3><label for="f-{{ f.key }}">{{ f.label }}</label></h3>{% else %}<label for="f-{{ f.key }}">{{ f.label }}</label>{% endif %}
+    <div style="margin-top:12px">{% if section == 'more' %}<fieldset class="reading"><legend><label for="f-{{ f.key }}" class="legend">{{ f.label }}</label></legend>{% else %}<label for="f-{{ f.key }}">{{ f.label }}</label>{% endif %}
       <textarea id="f-{{ f.key }}" name="{{ f.key }}" rows="6" spellcheck="false" placeholder="{{ f.placeholder }}"
                 style="width:100%;max-width:none;font-family:var(--mono, monospace)">{{ s[f.key] if s[f.key] is not none }}</textarea>
-      {% if f.help %}<p class="quiet small" style="margin:4px 0 0">{{ f.help }}</p>{% endif %}</div>
+      {% if f.help %}<p class="quiet small" style="margin:4px 0 0">{{ f.help }}</p>{% endif %}{% if section == 'more' %}</fieldset>{% endif %}</div>
   {% endfor %}
   {% if section == '' %}{{ check_fields(fs) }}{% endif %}
   {% for f in fs if f.own_line %}
   <div class="row tight one-line"><label for="f-{{ f.key }}">{{ f.label }}</label>
-    <input id="f-{{ f.key }}" type="{{ 'number' if f.kind == 'number' else 'text' }}" class="digits5" name="{{ f.key }}"
+    <input id="f-{{ f.key }}" type="{{ 'number' if f.kind == 'number' else 'text' }}" class="digits4" name="{{ f.key }}"
            value="{{ s[f.key] | num if f.kind == 'number' else s[f.key] }}" placeholder="{{ f.placeholder }}" autocomplete="off">
     {% if f.help %}<span class="quiet small">{{ f.help }}</span>{% endif %}</div>
   {% endfor %}
@@ -77,27 +78,30 @@
 {# the lists, and on the second box the fields after them: entities to watch, ones to ignore, sensors, rules #}
 {% macro filter_block() %}
     {% if module.filter_title %}
-    <h3>{{ module.filter_title }}</h3>
+    <fieldset class="reading"><legend>{{ module.filter_title }}</legend>
     {% if module.filter_help %}<p class="quiet small">{{ module.filter_help }}</p>{% endif %}
     {% if module.more_title %}{{ check_fields(module.fields | selectattr('section', 'equalto', 'more') | list) }}{% endif %}
     {% if filters %}<input type="hidden" name="_filters_shown" value="{{ filters_shown }}">
     {{ choice_list(filters, "keep.", "watched") }}{% else %}<p class="quiet">Appears after the first reading.</p>{% endif %}
+    </fieldset>
     {% endif %}
 {% endmacro %}
 
 {% macro choices_block() %}
     {% if module.choices_title %}
-    <h3>{{ module.choices_title }}</h3>
+    <fieldset class="reading"><legend>{{ module.choices_title }}</legend>
     {% if module.choices_help %}<p class="quiet small">{{ module.choices_help }}</p>{% endif %}
     {% if not choices and snap and module.choices_empty %}<p class="empty-note">{{ module.choices_empty }}</p>
     {% else %}{{ choice_list(choices, "choose.", "ticked") }}{% endif %}
+    </fieldset>
     {% endif %}
 {% endmacro %}
 
 {# the lists; on the second box the fields follow them #}
-{% macro lists_html() %}
-    {% if snap and (module.choices_title or module.filter_title) %}
-    <p class="quiet small" style="margin-top:14px">The lists come from the last reading ({{ snap_ts | ts('%d %b %H:%M:%S') }}).</p>
+{% macro lists_html(help='') %}
+    {% set from_reading = snap and (module.choices_title or module.filter_title) %}
+    {% if help or from_reading %}
+    <p class="quiet small">{{ help }}{% if from_reading %}{{ ' ' if help }}The lists come from the last reading ({{ snap_ts | ts('%d %b %H:%M:%S') }}).{% endif %}</p>
     {% endif %}
     {% if module.filters_first %}{{ filter_block() }}{{ choices_block() }}{% else %}{{ choices_block() }}{{ filter_block() }}{% endif %}
 {% endmacro %}
@@ -189,8 +193,7 @@
   <input type="hidden" name="_part" value="more">
   <h2 style="margin-top:0">{{ module.more_title }}</h2>
   {{ note("more") }}
-  {% if module.more_help %}<p class="quiet small">{{ module.more_help }}</p>{% endif %}
-  {{ lists_html() }}
+  {{ lists_html(module.more_help) }}
   {{ fields_html(s, 'more') }}
   <p><button data-save>Save</button></p>
 </form>

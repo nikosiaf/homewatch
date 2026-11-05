@@ -1169,7 +1169,7 @@ def test_module_pages_connect_first_then_the_details(client, monkeypatch):
     main = page.split('id="settings"')[1].split("</form>")[0]
     assert 'id="f-full_every"' in main and 'id="f-rules"' not in main and "Entities to watch" not in main
     line = main.split('class="row tight one-line"')[1].split("</div>")[0]  # label, box and help on one line
-    assert 'class="digits5"' in line and "Full read every" in line and "(5 to 1440)" in line
+    assert 'class="digits4"' in line and "Full read every" in line and "(5 to 1440)" in line
     assert page.index('id="overview"') < page.index('id="more"')
     more = page.split('id="more"')[1].split("</form>")[0]
     order = [more.index(k) for k in ("Entities to watch", 'name="watch_all"', "Unavailable entities to ignore",
@@ -1224,7 +1224,9 @@ def test_update_check_and_install_from_the_home_box(client, monkeypatch, tmp_pat
     page = client.get("/system").text
     home = page.split('id="home"')[1].split("</form>")[0]
     assert 'name="check"' in home and "Check now" in home and "Last checked not yet" in home
-    assert '<button disabled title="No newer release">Install</button>' in home and "This is" not in home
+    assert "Update to" not in page and "This is" not in home
+    grid = home.split('class="updates-grid"')[1].split("</div>")[0]
+    assert grid.index('name="check"') < grid.index("Check now") < grid.index("Last checked") < grid.index("Save")
     client.post("/system/home", data={"csrf": tok, "_box": "home", "name": "Home", "tz": "UTC", "_updates": "1"})
     assert client.rt.db.get("updates.check") is False  # unticked, saved by the Home box's Save
     client.post("/system/home", data={"csrf": tok, "name": "Home", "tz": "UTC"})  # the wizard's step: untouched
@@ -1238,14 +1240,14 @@ def test_update_check_and_install_from_the_home_box(client, monkeypatch, tmp_pat
     monkeypatch.setattr(client.rt, "update_available", lambda: "9.9.9")
     assert "homewatch 9.9.9 is available" in client.post("/system/updates/check", data={"csrf": tok}).text
     page = client.get("/system").text
-    assert "Install 9.9.9" not in page and "HW_VERSION=9.9.9" in page  # no updater on this host: the command
-    assert 'title="The updater is not installed on this host">Install</button>' in page
+    assert "Update to 9.9.9" not in page and "HW_VERSION=9.9.9" in page  # no updater on this host: the command
     upd = tmp_path / "update"
     (upd / "ask").mkdir(parents=True)
     object.__setattr__(client.rt.cfg, "update_dir", str(upd))
-    assert "Install 9.9.9" in client.get("/system").text
+    health = client.get("/system").text.split('id="health"')[1].split('id="home"')[0]
+    assert '<button class="danger" data-confirm="Update homewatch to 9.9.9?' in health and "Update to 9.9.9</button>" in health
     r = client.post("/system/updates/install", data={"csrf": tok})
-    assert "Installing 9.9.9" in r.text and os.path.exists(upd / "ask" / "request")
+    assert "Updating to 9.9.9" in r.text and os.path.exists(upd / "ask" / "request")
     page = client.get("/system").text
     assert "<td>Last update</td><td>requested, waiting for the updater</td>" in page
     assert '<dialog class="ask" id="updating" data-version="9.9.9">' in page  # the waiting window
@@ -1337,6 +1339,8 @@ def test_mikrotik_connect_first_then_ports_in_their_own_box(client, monkeypatch)
     assert "Ports that should be up" not in main
     more = page.split('id="more"')[1].split("</form>")[0]
     assert "Ports that should be up" in more and "data-choice-search" not in more  # 19 ports, no search line
+    assert '<fieldset class="reading"><legend>Ports that should be up</legend>' in more  # each list in its own box
+    assert "After connecting: the ports homewatch watches. The lists come from the last reading (" in more  # one line
     assert page.index('id="overview"') < page.index('id="more"')
     overview = page.split('id="overview"')[1].split("</form>")[0]
     assert 'action="/modules/mikrotik/refresh"' in overview and "Read now" in overview

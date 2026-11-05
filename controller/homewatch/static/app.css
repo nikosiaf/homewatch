@@ -260,3 +260,13 @@ fieldset.reading table { margin: 0; }
 fieldset.reading tr:last-child td { border-bottom: 0; }
 /* buttons in a row with room around them */
 .row.buttons { gap: 12px; margin: 14px 0 4px; align-items: center; }
+/* System, Updates: the tick box with Check now, Last checked with Save; both buttons as wide */
+.updates-grid { display: grid; grid-template-columns: 1fr auto; gap: 10px 16px; align-items: center; margin: 6px 0 4px; }
+.updates-grid button { width: 100%; }
+/* boxes never grow wider than their card: a long table scrolls inside */
+fieldset { min-width: 0; }
+/* the charts keep their distance from the module tiles above */
+#charts, .card.charts { margin-top: 16px; }
+/* a small whole number, up to 4 digits */
+input.digits4 { width: 4.8em; max-width: 4.8em; text-align: right; }
+label.legend { display: inline; margin: 0; font-size: inherit; color: inherit; }

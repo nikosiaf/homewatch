@@ -5,7 +5,7 @@
 <div id="status-body" hx-get="/partials/status" hx-trigger="every 30s" hx-swap="innerHTML">
 {% include "_status_body.html" %}
 </div>
-<div class="card">
+<div class="card charts">
   <h2 class="card-title">Charts</h2>
   <div class="row charttabs" style="justify-content:space-between">
     <div>{% for c, label in [('latency','Latency'),('loss','Packet loss'),('jitter','Jitter'),('speed','Speed')] + ([('sync','DSL sync'),('snr','SNR margin')] if dsl else []) %}

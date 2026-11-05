@@ -8,7 +8,10 @@
     <h2 style="margin-top:0">Health</h2>
     {{ note("health") }}
     <table>
-      <tr><td>homewatch version</td><td>{{ version }}{% if latest %} · latest release {{ latest }}{% endif %}</td></tr>
+      <tr><td>homewatch version</td><td><div class="row tight" style="margin:0">{{ version }}{% if latest %} · latest release {{ latest }}{% endif %}
+        {% if update and updater.ready %}<form method="post" action="/system/updates/install" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="health">
+          <button class="danger" data-confirm="Update homewatch to {{ update }}? homewatch restarts and is away for a minute or two.">Update to {{ update }}</button></form>{% endif %}</div></td></tr>
       {% if updater.summary %}<tr><td>Last update</td><td{% if updater.state == 'failed' %} style="color:var(--err)"{% endif %}>{{ updater.summary }}</td></tr>{% endif %}
       <tr><td>VictoriaMetrics</td><td>{% if vm_ok %}<span class="badge s0">OK</span>{% else %}<span class="badge s2">unreachable</span>{% endif %}</td></tr>
       {% if last_error %}<tr><td>Last error</td><td style="color:var(--err)">{{ last_error }}</td></tr>{% endif %}
@@ -34,16 +37,15 @@
       name (for example over Tailscale).</p>
     <h3>Updates</h3>
     <input type="hidden" name="_updates" value="1">
-    <label class="check"><input type="checkbox" name="check" {{ 'checked' if updates }}> Check GitHub once a day for a newer release</label>
+    <div class="updates-grid">
+      <label class="check"><input type="checkbox" name="check" {{ 'checked' if updates }}> Check GitHub once a day for a newer release</label>
+      <button formaction="/system/updates/check" formnovalidate>Check now</button>
+      <span class="quiet small">Last checked {{ checked | ts('%d %b %H:%M') if checked else 'not yet' }}</span>
+      <button data-save>Save</button>
+    </div>
     {% if update and not updater.ready %}<p class="small">{{ update }} is available. To update: set <code>HW_VERSION={{ update }}</code> in <code>.env</code>, then
       <code>docker compose pull && docker compose up -d</code>. Or run <code>install.sh</code> again once: it adds the
-      updater, and the Install button installs new releases from then on.</p>{% endif %}
-    <p class="quiet small" style="margin:10px 0 0">Last checked {{ checked | ts('%d %b %H:%M') if checked else 'not yet' }}</p>
-    <div class="row buttons"><button data-save>Save</button>
-      <button formaction="/system/updates/check" formnovalidate>Check now</button>
-      {% if update and updater.ready %}<button formaction="/system/updates/install" formnovalidate
-        data-confirm="Install homewatch {{ update }}? homewatch restarts and is away for a minute or two.">Install {{ update }}</button>
-      {% else %}<button disabled title="{{ 'No newer release' if not update else 'The updater is not installed on this host' }}">Install</button>{% endif %}</div>
+      updater, and an Update button installs new releases from then on.</p>{% endif %}
   </form>
 </div>
 <div class="card scroll" id="users">
@@ -143,7 +145,7 @@
 </dialog>
 {% if updater.state == 'running' and update %}
 <dialog class="ask" id="updating" data-version="{{ update }}">
-  <h2>Installing homewatch {{ update }}</h2>
+  <h2>Updating homewatch to {{ update }}</h2>
   <p data-updating-text><span class="spin" aria-hidden="true"></span> homewatch is restarting with the new release. This takes a minute or two;
     this window closes by itself when it is back.</p>
   <div class="row"><button type="button" data-updating-reload hidden>Reload</button></div>
