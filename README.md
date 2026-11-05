@@ -125,6 +125,7 @@ Reads Home Assistant with the long-lived token of a dedicated **non-admin** user
 | Add-ons (watched = Running sensor enabled) | Running sensor unavailable | not running |
 | Disk use of the host (%) | ≥ 80 % | ≥ 90 % |
 | Memory use of the host (%) | ≥ 80 % | ≥ 90 % |
+| Entity rules (your own) | a rule set to warning fires; a rule matches no entity | a rule set to error fires |
 
 The alarm, safety, tamper and battery checks find their sensors by Home Assistant's device class
 and follow the "Entities to watch" list: untick a phone there to keep its battery out of the check.
@@ -136,6 +137,21 @@ sensor. An add-on you stop on purpose: leave its sensor disabled, or untick it u
 
 **Disk and memory** come from the System Monitor integration's disk use and memory use sensors, or
 from any sensors in % you name in the settings. Without them, both checks stay OK with a note.
+
+**Entity rules** cover anything without a device class: an alarm panel's trouble sensors, a tank level,
+a link status. One rule per line in the settings:
+
+```
+binary_sensor.panel_troubles_* is on warning
+binary_sensor.panel_zone_*_tamper is on error
+sensor.panel_link is not online error
+sensor.heating_oil below 200 warning
+sensor.heating_oil below 100 error
+```
+
+`is` / `is not` compare the state as text, `below` / `above` as a number; `*` and `?` match any text
+in an entity id. When several rules fire on one entity, the worst counts. A rule that matches no
+entity (a typo, or the entity was renamed) is a WARNING, so it doesn't go quiet unnoticed.
 
 Entities that are unavailable when you connect are ignored (you can change the list), so only
 entities that *become* unavailable are reported.
@@ -292,7 +308,8 @@ less install.sh          # please read it first; it's short
 
 At the end it prints the certificate's SHA-256 fingerprint. Open `https://<host>` and compare that
 fingerprint when the browser warns about the certificate (once). It also prints a one-time setup
-code the wizard asks for; to see it again, run `docker compose logs controller | grep "setup code"`.
+code the wizard asks for. A new code is made each time homewatch restarts or is reset, and only the
+newest works; to see it, run `docker compose logs controller | grep "setup code" | tail -1`.
 Then follow the setup wizard:
 1. Admin account
 2. Home name and time zone

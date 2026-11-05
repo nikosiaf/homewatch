@@ -7,7 +7,7 @@
 
 {% macro fields_html(s) %}
   <div class="row">
-  {% for f in module.fields if f.kind != 'check' %}
+  {% for f in module.fields if f.kind not in ('check', 'lines') %}
     {% if f.secret %}
     <div><label for="f-{{ f.key }}">{{ f.label }} · {{ 'set' if secret_fields_set[f.key] else 'not set' }}</label>
       <input id="f-{{ f.key }}" type="password" name="{{ f.key }}" placeholder="{{ 'leave empty to keep' if secret_fields_set[f.key] else f.placeholder }}" autocomplete="new-password"></div>
@@ -23,6 +23,12 @@
       <input id="f-secret" type="password" name="secret" placeholder="{{ 'leave empty to keep' if has_secret else module.secret_placeholder }}" autocomplete="new-password"></div>
   {% endif %}
   </div>
+  {% for f in module.fields if f.kind == 'lines' %}
+    <div style="margin-top:12px"><label for="f-{{ f.key }}">{{ f.label }}</label>
+      <textarea id="f-{{ f.key }}" name="{{ f.key }}" rows="6" spellcheck="false" placeholder="{{ f.placeholder }}"
+                style="width:100%;font-family:var(--mono, monospace)">{{ s[f.key] if s[f.key] is not none }}</textarea>
+      {% if f.help %}<p class="quiet small" style="margin:4px 0 0">{{ f.help }}</p>{% endif %}</div>
+  {% endfor %}
   {% for f in module.fields if f.kind == 'check' %}
     <label class="check"><input type="checkbox" name="{{ f.key }}" {{ 'checked' if s[f.key] }}> {{ f.label }}</label>
     {% if f.help %}<p class="quiet small" style="margin:0 0 0 26px">{{ f.help }}</p>{% endif %}

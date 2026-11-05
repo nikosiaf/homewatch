@@ -45,7 +45,7 @@ class Field:
     key: str
     label: str
     placeholder: str = ""
-    kind: str = "text"  # text | number | check | url
+    kind: str = "text"  # text | number | check | url | lines (several lines of text)
     default: Any = ""
     help: str = ""
     secret: bool = False  # kept encrypted with the module's secret, never in settings, versions or exports
@@ -158,6 +158,8 @@ class ApiModule(PinnedTLS, Module):
                     return {}, f"{f.label}: a number"
                 if not math.isfinite(out[f.key]):
                     return {}, f"{f.label}: a number"
+            elif f.kind == "lines":
+                out[f.key] = "\n".join(x.strip() for x in str(raw).splitlines()).rstrip("\n")  # line numbers as typed
             else:
                 out[f.key] = str(raw).strip()
         return out, ""

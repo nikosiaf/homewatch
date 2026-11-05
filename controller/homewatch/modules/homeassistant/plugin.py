@@ -11,6 +11,7 @@ import httpx
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
+from . import rules as entity_rules
 
 CHECKS = [
     CheckDef("api", "HA reachable", "api", help="ERROR when homewatch can't read Home Assistant's API."),
@@ -34,6 +35,9 @@ CHECKS = [
              help="Disk use of the Home Assistant host, from the disk sensor chosen in the settings."),
     CheckDef("memory", "Memory", "api", unit="%", warn=80, error=90, editable=("warn", "error"),
              help="Memory use of the Home Assistant host, from the memory sensor chosen in the settings."),
+    CheckDef("rules", "Entity rules", "api",
+             help="Your own rules on any entity (see Entity rules in the settings); the worst rule that fires sets "
+                  "the level. WARNING when a rule matches no entity or a number rule gets no number."),
 ]
 SETTLE = 30 * 60
 FULL_EVERY = 30  # minutes between full state reads, which find essential entities and new updates
@@ -90,7 +94,7 @@ class HomeAssistantModule(ApiModule):
     checks = CHECKS
     description = ("Watches Home Assistant through the token of a non-admin user: core state, alarm panels, safety and "
                    "tamper sensors, batteries, available updates, automatic backups, add-ons and the host's disk and "
-                   "memory. Only those entities are read "
+                   "memory, plus your own rules on any entity. Only those entities are read "
                    "at each check; the full list is read every 30 minutes (you can change this) to find new ones and new updates, and isn't kept. "
                    "Nothing in Home Assistant is changed.")
     setup_title = "First create an account and token for homewatch"
@@ -116,6 +120,12 @@ class HomeAssistantModule(ApiModule):
               help="A sensor giving the host's disk use in %. Empty: System Monitor's disk use sensor."),
         Field("memory_sensor", "Memory use sensor", MEMORY,
               help="A sensor giving the host's memory use in %. Empty: System Monitor's memory use sensor."),
+        Field("rules", "Entity rules", "binary_sensor.alarm_panel_trouble_* is on warning\nsensor.heating_oil below 200 warning",
+              kind="lines",
+              help="One rule per line: <entity or pattern> is | is not | below | above <value> warning | error. "
+                   "* and ? match any text in an entity id. Lines starting with # are notes. Examples: "
+                   "binary_sensor.panel_zone_*_tamper is on error · sensor.panel_link is not online error · "
+                   "sensor.oil_level below 100 error."),
         Field("watch_all", "Watch every entity", kind="check", default=False,
               help="Off: only the essential entities above are read. On: all of them are read at every check and "
                    "listed below, so any one that becomes unavailable can be reported (network traffic RX/TX "
@@ -151,6 +161,9 @@ class HomeAssistantModule(ApiModule):
             if v and not re.fullmatch(r"sensor\.[a-z0-9_]+", v):
                 return out, f"{label}: an entity id like sensor.disk_use_percent"
             out[k] = v
+        _, problem = entity_rules.parse(out.get("rules", ""))
+        if problem:
+            return out, problem
         return out | {"url": url, "full_every": round(out["full_every"])}, ""
 
     def notice(self, settings):
@@ -175,6 +188,7 @@ class HomeAssistantModule(ApiModule):
                 return r.json()
 
             config = await get("config")
+            rules, _ = entity_rules.parse(s.get("rules", ""))
             everything = bool(s.get("watch_all"))
             full = (everything or self._ids is None or self.snap_ts == float("-inf")
                     or now - self._found_ts >= s.get("full_every", FULL_EVERY) * 60 or len(self._ids) > MAX_SINGLE)
@@ -182,7 +196,8 @@ class HomeAssistantModule(ApiModule):
                 states = await get("states")
                 host = set(_sensors(s).values())
                 self._ids = [e["entity_id"] for e in states
-                             if _special(e) or e["entity_id"] in BACKUP or e["entity_id"] in host]
+                             if _special(e) or e["entity_id"] in BACKUP or e["entity_id"] in host
+                             or entity_rules.wanted(rules, e["entity_id"])]
                 self._updates = [_update(e) for e in states
                                  if e["entity_id"].startswith("update.") and e.get("state") == "on"]
                 self._total, self._found_ts = len(states), now
@@ -218,6 +233,10 @@ class HomeAssistantModule(ApiModule):
                            "dc": e.get("attributes", {}).get("device_class"),
                            "name": e.get("attributes", {}).get("friendly_name") or ""}
                           for e in states if _special(e)],
+                "ruled": [{"entity_id": e["entity_id"], "state": e.get("state"),
+                           "unit": e.get("attributes", {}).get("unit_of_measurement") or "",
+                           "name": e.get("attributes", {}).get("friendly_name") or ""}
+                          for e in states if entity_rules.wanted(rules, e["entity_id"])],
                 "all": sorted([e["entity_id"], e.get("attributes", {}).get("friendly_name") or ""] for e in states
                               if everything or (e["entity_id"] not in BACKUP
                                                 and e["entity_id"] not in set(_sensors(s).values())))}
@@ -298,6 +317,13 @@ class HomeAssistantModule(ApiModule):
                 add(cid, WARNING, f"{what} sensor reads {st}{' ' + unit if unit else ''}, not a percentage")
             else:
                 add(cid, level(v, th[cid]), f"{what} {v:.0f} % used", v)
+
+        rules, problem = entity_rules.parse(s.get("rules", ""))
+        if problem:
+            add("rules", WARNING, problem)
+        else:
+            st, detail, n = entity_rules.evaluate(rules, snap.get("ruled", []))
+            add("rules", st, detail, n)
         return out
 
     def _safety(self, s, th, snap, add):

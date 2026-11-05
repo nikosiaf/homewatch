@@ -288,3 +288,90 @@ def test_addon_and_host_sensors_read_between_full_reads(monkeypatch):
     assert "/api/states" not in calls and "/api/states/sensor.ram" in calls
     assert "/api/states/binary_sensor.qemu_win11_status" not in calls
     assert second["watch"][0]["state"] == "off" and second["host"]["disk"] == ["17.7", "%"]
+
+
+RULES = """# alarm panel
+binary_sensor.panel_troubles_* is on warning
+binary_sensor.panel_zone_*_tamper is on error
+sensor.panel_link is not online error
+sensor.oil below 200 warning
+sensor.oil below 100 error"""
+
+
+def ruled(eid, state, name="", unit=""):
+    return {"entity_id": eid, "state": state, "name": name, "unit": unit}
+
+
+def run_rules(entities, rules=RULES):
+    s = {"enabled": True, "chosen": [], "rules": rules}
+    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
+    res = {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, snap(ruled=entities), "", NOW))}
+    return res["rules"]
+
+
+QUIET = [ruled("binary_sensor.panel_troubles_ac", "off"), ruled("binary_sensor.panel_troubles_phone", "off"),
+         ruled("binary_sensor.panel_zone_kitchen_tamper", "off"), ruled("sensor.panel_link", "online"),
+         ruled("sensor.oil", "640", "Heating oil", "L")]
+
+
+def test_entity_rules_all_fine():
+    r = run_rules(QUIET)
+    assert r.status == OK and r.detail == "5 rules, 5 entities fine"
+
+
+def test_entity_rules_fire_with_the_worst_rule_per_entity():
+    ents = [dict(e) for e in QUIET]
+    ents[1]["state"] = "on"      # a trouble -> warning
+    ents[4]["state"] = "80"      # below 200 and below 100 -> one line, error
+    r = run_rules(ents)
+    assert r.status == ERROR and r.value == 2
+    assert r.detail.startswith("Heating oil 80 L (below 100)") and "binary_sensor.panel_troubles_phone on (is on)" in r.detail
+    assert "below 200" not in r.detail
+
+
+def test_entity_rules_is_not_counts_an_unavailable_link():
+    ents = [dict(e) for e in QUIET]
+    ents[3]["state"] = "unavailable"
+    r = run_rules(ents)
+    assert r.status == ERROR and "is not online" in r.detail
+
+
+def test_entity_rules_warn_on_no_match_and_no_number():
+    ents = [e for e in QUIET if e["entity_id"] != "sensor.panel_link"]
+    ents[-1] = ruled("sensor.oil", "unknown")
+    r = run_rules(ents)
+    assert r.status == WARNING
+    assert "no entity matches sensor.panel_link" in r.detail and "sensor.oil: no reading (unknown)" in r.detail
+
+
+def test_entity_rules_empty_and_bad_lines():
+    assert run_rules([], rules="").status == OK
+    base = {"url": "http://ha.local:8123", "full_every": "30"}
+    out, err = plugin.validate(base | {"rules": "sensor.oil below lots warning"}, {})
+    assert "line 1" in err and "number" in err
+    out, err = plugin.validate(base | {"rules": "\n# note\nsensor.oil is low\n"}, {})
+    assert "line 3" in err
+    out, err = plugin.validate(base | {"rules": " sensor.oil  below 100   ERROR \r\n\r\nsensor.x is not on warning"}, {})
+    assert not err and out["rules"] == "sensor.oil  below 100   ERROR\n\nsensor.x is not on warning"
+
+
+def test_rule_entities_are_read_between_full_reads(monkeypatch):
+    import asyncio
+
+    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
+    trouble = {"entity_id": "binary_sensor.panel_troubles_ac", "state": "off", "attributes": {"friendly_name": "AC loss"}}
+    oil = {"entity_id": "sensor.oil", "state": "300", "attributes": {"unit_of_measurement": "L"}}
+    other = {"entity_id": "sensor.other", "state": "1"}
+    calls = _ha(monkeypatch, [trouble, oil, other])
+    m = HomeAssistantModule()
+    s = {"url": "http://ha", "verify": False, "rules": RULES}
+    first = asyncio.run(m.fetch(s, "t", NOW))
+    assert sorted(e["entity_id"] for e in first["ruled"]) == ["binary_sensor.panel_troubles_ac", "sensor.oil"]
+    assert first["ruled"][0]["name"] == "AC loss" and first["ruled"][1]["unit"] == "L"
+    calls.clear()
+    m.snap_ts = NOW
+    trouble["state"] = "on"
+    second = asyncio.run(m.fetch(s, "t", NOW + 120))
+    assert "/api/states" not in calls and "/api/states/binary_sensor.panel_troubles_ac" in calls
+    assert "/api/states/sensor.other" not in calls
+    assert next(e for e in second["ruled"] if e["entity_id"].startswith("binary"))["state"] == "on"

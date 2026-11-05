@@ -1119,3 +1119,25 @@ def test_docker_save_refused_when_one_host_unreachable(client, monkeypatch):
     monkeypatch.setattr(plugin, "fetch", full)
     r = client.post("/modules/docker", data={"csrf": tok, "hosts": "socket-proxy"})
     assert "Nothing saved" not in r.text and client.rt.db.get("module.docker")["hosts"] == "socket-proxy"
+
+
+def test_entity_rules_field_is_a_text_box_and_keeps_lines(client, monkeypatch):
+    tok = setup_admin(client)
+    from homewatch.modules.homeassistant.plugin import plugin
+    from tests.test_homeassistant import snap
+
+    async def good(*a, **k):
+        return snap(ruled=[{"entity_id": "sensor.oil", "state": "80", "name": "Oil", "unit": "L"}])
+
+    monkeypatch.setattr(plugin, "fetch", good)
+    rules = "# tank\r\nsensor.oil below 100 error\r\nsensor.oil below 200 warning"
+    client.post("/modules/homeassistant", data={"csrf": tok, "url": "http://ha:8123", "secret": "t", "rules": rules})
+    s = client.rt.db.get("module.homeassistant")
+    assert s["rules"] == "# tank\nsensor.oil below 100 error\nsensor.oil below 200 warning"
+    page = client.get("/modules/homeassistant").text
+    assert '<textarea id="f-rules"' in page and "sensor.oil below 100 error" in page
+    r = client.post("/modules/homeassistant", data={"csrf": tok, "enabled": "on", "url": "http://ha:8123",
+                                                    "rules": "sensor.oil under 5 warning"})
+    assert "line 1" in r.text
+    assert client.rt.db.get("module.homeassistant")["rules"] == s["rules"]
+    plugin.snap = None
