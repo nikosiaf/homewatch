@@ -574,6 +574,7 @@ def test_status_isnt_green_when_it_cant_tell(client):
     rt.last_error = ""
     page = client.get("/").text
     assert "Nothing is being checked yet" in page and "All checks OK" not in page
+    assert '<div class="callout waiting" role="note">' in page and "<b>No results yet.</b>" in page  # a warning note, not grey text
 
 
 def test_history_says_when_it_is_cut_off(client, monkeypatch):

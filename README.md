@@ -16,6 +16,73 @@ down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy.
 
 ![homewatch's Status page: the overall status, today's key numbers and one tile per module with its 24-hour line](homewatch.png)
 
+## Contents
+
+- [Install](#install): Docker Compose stack on any Linux host, set up from a web wizard
+- [Internet line](#internet-line-module): pings public servers and your router, DNS lookups, speed tests against your contract
+- [ISP modem](#isp-modem-module-optional): DSL link, sync rate, noise margin, resyncs and PPP session from your provider's modem
+- [Proxmox VE](#proxmox-ve-module-optional): nodes, CPU and memory, guests, storage, disk health and backups through a read-only API token
+- [OPNsense](#opnsense-module-optional): gateways, CPU, services, HAProxy servers, certificates and firmware updates
+- [Home Assistant](#home-assistant-module-optional): core, unavailable entities, updates, backups, add-ons, alarm, safety, tamper and battery entities
+- [Synology NAS](#synology-nas-module-optional): system, CPU and memory, disks, pools and volumes and DSM updates over the DSM Web API
+- [MikroTik](#mikrotik-module-optional): ports up, port errors, CPU and memory, reboots and RouterBOOT over the REST API
+- [UniFi](#unifi-module-optional): devices online, CPU, Wi-Fi, restarts and firmware updates, as a view-only user
+- [Proxmox Backup Server](#proxmox-backup-server-module-optional): datastores, recent backups, verify/prune/garbage-collection jobs and updates
+- [UPS](#ups-module-optional): mains power, battery charge, runtime, load and UPS health from a NUT server
+- [Docker hosts](#docker-hosts-module-optional): containers running, restarts, health checks and removed containers, through a read-only socket proxy
+- [Alerts and notifications](#alerts-and-notifications): Telegram, ntfy, email, webhook and a healthchecks.io heartbeat
+- [Update](#update) · [Back up](#back-up) · [Security notes](#security-notes) · [Development](#development)
+
+## Install
+
+You need a Linux host with Docker Engine and the Compose plugin
+(2 CPU, 2 GB RAM and 10 GB disk are plenty). No Docker yet? Install it from Docker's own repository,
+following https://docs.docker.com/engine/install/ for your distribution (Debian:
+https://docs.docker.com/engine/install/debian/), then add your user to the `docker` group
+(`sudo usermod -aG docker $USER`) and log in again.
+
+```sh
+mkdir homewatch && cd homewatch
+for f in docker-compose.yml Caddyfile env.example install.sh update.sh; do
+  curl -fsSLO "https://github.com/nikosiaf/homewatch/releases/latest/download/$f"
+done
+chmod +x install.sh update.sh
+less install.sh
+./install.sh
+```
+
+Please read `install.sh` before running it (`less install.sh`, `q` to quit); it's short.
+
+`install.sh` does four things:
+- writes `.env` with a new master key, the host's time zone, and its gateway and DNS server as defaults
+- creates a self-signed certificate in `certs/`
+- offers the updater (asks first, needs sudo once): a systemd unit that installs the latest release when
+  you press Update on the System page (see [Update](#update))
+- runs `docker compose up -d`
+
+At the end it prints the certificate's SHA-256 fingerprint. Open `https://<host>` and compare that
+fingerprint when the browser warns about the certificate (once). Create the admin account right
+away: until it exists (after an install or a reset), whoever opens the page first creates it.
+Then follow the setup wizard:
+1. Admin account
+2. Home name and time zone
+3. Internet probes and contracted speed
+4. Your equipment: tick what you have (modem, firewall, switches, Wi-Fi, servers, NAS, Home Assistant,
+   UPS, Docker hosts); the wizard then opens each one's module page in turn, with its setup steps and
+   Connect, and you can skip any of them
+5. A notification channel
+6. Heartbeat
+
+### Manual install (without install.sh)
+
+```sh
+cp env.example .env && chmod 600 .env    # .env.example in a git checkout
+openssl rand -base64 32          # put it in .env as HW_MASTER_KEY=…; also set TZ
+mkdir certs && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+  -keyout certs/key.pem -out certs/cert.pem -subj "/CN=homewatch" -addext "subjectAltName=IP:<host ip>"
+docker compose up -d
+```
+
 ## What homewatch does
 
 ### Internet line module
@@ -310,53 +377,6 @@ Discord (cut to 2000 characters). For Home Assistant, Node-RED or n8n use `level
 There are two account roles: **admin**, who can change everything, and **viewer**, who can only see
 status and history.
 
-
-## Install
-
-You need a Linux host with Docker Engine and the Compose plugin
-(2 CPU, 2 GB RAM and 10 GB disk are plenty). No Docker yet? Install it from Docker's own repository,
-following https://docs.docker.com/engine/install/ for your distribution (Debian:
-https://docs.docker.com/engine/install/debian/), then add your user to the `docker` group
-(`sudo usermod -aG docker $USER`) and log in again.
-
-```sh
-mkdir homewatch && cd homewatch
-# download docker-compose.yml, Caddyfile, env.example, install.sh and update.sh from the latest release
-# https://github.com/nikosiaf/homewatch/releases
-chmod +x install.sh
-less install.sh          # please read it first; it's short
-./install.sh
-```
-
-`install.sh` does four things:
-- writes `.env` with a new master key, the host's time zone, and its gateway and DNS server as defaults
-- creates a self-signed certificate in `certs/`
-- offers the updater (asks first, needs sudo once): a systemd unit that installs the latest release when
-  you press Install on the System page (see Update)
-- runs `docker compose up -d`
-
-At the end it prints the certificate's SHA-256 fingerprint. Open `https://<host>` and compare that
-fingerprint when the browser warns about the certificate (once). Create the admin account right
-away: until it exists (after an install or a reset), whoever opens the page first creates it.
-Then follow the setup wizard:
-1. Admin account
-2. Home name and time zone
-3. Internet probes and contracted speed
-4. Your equipment: tick what you have (modem, firewall, switches, Wi-Fi, servers, NAS, Home Assistant,
-   UPS, Docker hosts); the wizard then opens each one's module page in turn, with its setup steps and
-   Connect, and you can skip any of them
-5. A notification channel
-6. Heartbeat
-
-### Manual install (without install.sh)
-
-```sh
-cp env.example .env && chmod 600 .env    # .env.example in a git checkout
-openssl rand -base64 32          # put it in .env as HW_MASTER_KEY=…; also set TZ
-mkdir certs && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
-  -keyout certs/key.pem -out certs/cert.pem -subj "/CN=homewatch" -addext "subjectAltName=IP:<host ip>"
-docker compose up -d
-```
 
 ## Update
 

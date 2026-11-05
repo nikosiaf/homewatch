@@ -3,7 +3,7 @@
 #   1. creates .env from .env.example with a new master key, this host's time zone and
 #      its gateway / DNS server as defaults for the setup wizard (skipped if .env exists)
 #   2. creates a self-signed HTTPS certificate in ./certs (skipped if one exists)
-#   3. offers the updater: a systemd unit that runs update.sh when the System page's "Install" button asks
+#   3. offers the updater: a systemd unit that runs update.sh when the System page's "Update" button asks
 #      (needs sudo once; homewatch itself gets no Docker access, it only leaves a file in update/ask/)
 #   4. pulls the images and starts the stack with docker compose
 # Usage: ./install.sh               (release images from ghcr.io)

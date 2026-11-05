@@ -71,7 +71,11 @@
   </div>
 </details>
 {% else %}
-<p class="quiet">No results yet. The first run happens a few seconds after start, then every 2 minutes.</p>
+<div class="callout waiting" role="note">
+  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+  <div><b>No results yet.</b>
+    <p class="small" style="margin:4px 0 0">The first run happens a few seconds after start, then every 2 minutes.</p></div>
+</div>
 {% endfor %}
 </div>
 {% if switched_off %}<p class="quiet small">Switched off, so not watched: {{ switched_off | join(', ') }}.</p>{% endif %}
