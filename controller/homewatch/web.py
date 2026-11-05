@@ -1320,7 +1320,12 @@ def _status_ctx(request: Request) -> dict:
                 setup_done=rt.db.get("setup.done", False))
 
 
-SPARK_SPAN, SPARK_STEP, SPARK_TTL = 86400, 900, 120  # the tiles' lines: 24 h in 15-minute steps, read at most every 2 min
+SPARK_SPAN, SPARK_STEP, SPARK_TTL = 86400, 300, 120  # the tiles' lines: 24 h in 5-minute steps, read at most every 2 min
+# lines with a longer history than the check values (stored since 0.34.0): the probes and the modem's own readings
+SPARK_HISTORY = {
+    "internet.latency": 'min(avg_over_time(ping_average_response_ms{{site="{s}",role="public"}}[{w}s]))',
+    "speedport.snr": 'last_over_time(hw_dsl_snr_down_db{{site="{s}"}}[20m])',
+}
 
 
 async def _sparks(rt) -> dict[str, list[float]]:
@@ -1331,12 +1336,20 @@ async def _sparks(rt) -> dict[str, list[float]]:
         return cached[1]
     keys = [f"{m.id}.{m.headline[0]}" for m in MODULES.values() if m.headline[0]]
     out: dict[str, list[float]] = {}
-    q = (f'avg_over_time(hw_check_value_value{{site="{rt.cfg.site}",check=~"{"|".join(keys)}"}}[{SPARK_STEP}s])')
-    try:
-        for labels, values in await rt.metrics.query_range(q, now - SPARK_SPAN, now, SPARK_STEP):
-            out[labels.get("check", "")] = [v for _, v in values]
-    except Exception as e:  # noqa: BLE001 - the lines are a nicety; the page works without them
-        log.debug("sparklines: %s", e)
+    site = rt.cfg.site
+    queries = [(None, f'avg_over_time(hw_check_value_value{{site="{site}",check=~"{"|".join(keys)}"}}[{SPARK_STEP}s])')]
+    queries += [(k, q.format(s=site, w=SPARK_STEP)) for k, q in SPARK_HISTORY.items()]
+    answers = await asyncio.gather(*(rt.metrics.query_range(q, now - SPARK_SPAN, now, SPARK_STEP) for _, q in queries),
+                                   return_exceptions=True)
+    for (key, _), rows in zip(queries, answers, strict=True):
+        if isinstance(rows, Exception):  # the lines are a nicety; the page works without them
+            log.debug("sparklines: %s", rows)
+            continue
+        for labels, values in rows:
+            vals = [v for _, v in values]
+            k = key or labels.get("check", "")
+            if key or len(vals) > len(out.get(k, [])):  # the longer history wins
+                out[k] = vals
     rt.spark_cache = (now, out)
     return out
 
@@ -1395,7 +1408,10 @@ async def _status_full(request: Request) -> dict:
         if lat and lat.value is not None:
             kpis.append((f"{lat.value:.0f}", "ms", "Latency" + (f", {loss.value:.0f} % loss" if loss and loss.value is not None else "")))
     kpis.append((str(len(cards)), f"· {len(ctx['tiles'])} checks", "Modules watched"))
-    ctx.update(cards=cards, kpis=kpis, hero_line=spark(sparks.get("internet.latency", []), 600, 120, 0),
+    full = SPARK_SPAN // SPARK_STEP * 0.9  # points a line has once it covers (nearly) 24 hours
+    lines = {c["name"]: len(sparks.get(f"{c['id']}.{MODULES[c['id']].headline[0]}", [])) for c in cards if c["label"]}
+    filling = {"missing": [n for n, k in lines.items() if k < 2], "partial": [n for n, k in lines.items() if 2 <= k < full]}
+    ctx.update(cards=cards, kpis=kpis, filling=filling if filling["missing"] or filling["partial"] else None, hero_line=spark(sparks.get("internet.latency", []), 600, 120, 0),
                home_name=rt.db.get("home.name") or "Home",
                attention=len(ctx["open"]) or sum(1 for t in ctx["tiles"] if t["status"] > 0))
     return ctx

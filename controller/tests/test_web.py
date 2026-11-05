@@ -1407,5 +1407,7 @@ def test_status_page_hero_and_module_tiles(client, monkeypatch):
     assert grid.index('data-module="mikrotik"') < grid.index('data-module="ups"')  # problems first
     assert '<span class="mt-big num">100<small> %</small></span>' in grid and '<svg class="spark' in grid
     assert '<span class="mt-big num">38<small> °C</small></span>' in grid
+    assert "The 24-hour lines are still filling in." in page  # just started: tell why lines are short or missing
+    assert "No line yet: MikroTik." in page and "Less than 24 hours so far: UPS." in page
     assert web.spark([1]) is None and web.spark([2, 2])["y"] == 17.0
     assert web._release_notes("## A\n- b\n  more\ntext") == [("h", "A"), ("li", "b more"), ("p", "text")]
