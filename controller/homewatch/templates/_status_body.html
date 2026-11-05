@@ -12,8 +12,8 @@
 </div>
 {% from "_note.html" import note with context %}{% from "_more.html" import more %}{{ note("status") }}
 {% if open %}
-<h2>Needs attention</h2>
-<div class="card scroll"><table class="attention">
+<div class="card scroll">
+  <h2 class="card-title">Needs attention</h2><table class="attention">
   <tr><th>Level</th><th>Check</th><th>Why</th><th>Since</th><th>For</th>{% if user.is_admin %}<th></th>{% endif %}</tr>
   {% for i in open %}<tr>
     <td><span class="badge s{{ i.level }}">{{ LEVEL_WORD[i.level] }}</span></td>

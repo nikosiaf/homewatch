@@ -9,6 +9,7 @@
     {{ note("health") }}
     <table>
       <tr><td>homewatch version</td><td>{{ version }}{% if latest %} · latest release {{ latest }}{% endif %}</td></tr>
+      {% if updater.summary %}<tr><td>Last update</td><td{% if updater.state == 'failed' %} style="color:var(--err)"{% endif %}>{{ updater.summary }}</td></tr>{% endif %}
       <tr><td>VictoriaMetrics</td><td>{% if vm_ok %}<span class="badge s0">OK</span>{% else %}<span class="badge s2">unreachable</span>{% endif %}</td></tr>
       {% if last_error %}<tr><td>Last error</td><td style="color:var(--err)">{{ last_error }}</td></tr>{% endif %}
       <tr><td>Telegraf (ping and DNS probes)</td><td>{% if probe_age is none %}<span class="badge s2">no data</span>
@@ -34,20 +35,19 @@
     <h3>Updates</h3>
     <input type="hidden" name="_updates" value="1">
     <label class="check"><input type="checkbox" name="check" {{ 'checked' if updates }}> Check GitHub once a day for a newer release</label>
-    {% if updater.status %}<p class="small {{ 'flash err' if updater.state == 'failed' }}" style="margin:8px 0">Updater: {{ updater.status }}</p>{% endif %}
     {% if update and not updater.ready %}<p class="small">{{ update }} is available. To update: set <code>HW_VERSION={{ update }}</code> in <code>.env</code>, then
       <code>docker compose pull && docker compose up -d</code>. Or run <code>install.sh</code> again once: it adds the
       updater, and the Install button installs new releases from then on.</p>{% endif %}
-    <p class="row tight"><button data-save>Save</button>
+    <p class="quiet small" style="margin:10px 0 0">Last checked {{ checked | ts('%d %b %H:%M') if checked else 'not yet' }}</p>
+    <div class="row buttons"><button data-save>Save</button>
       <button formaction="/system/updates/check" formnovalidate>Check now</button>
       {% if update and updater.ready %}<button formaction="/system/updates/install" formnovalidate
         data-confirm="Install homewatch {{ update }}? homewatch restarts and is away for a minute or two.">Install {{ update }}</button>
-      {% else %}<button disabled title="{{ 'No newer release' if not update else 'The updater is not installed on this host' }}">Install</button>{% endif %}
-      <span class="quiet small">Last checked {{ checked | ts('%d %b %H:%M') if checked else 'not yet' }}</span></p>
+      {% else %}<button disabled title="{{ 'No newer release' if not update else 'The updater is not installed on this host' }}">Install</button>{% endif %}</div>
   </form>
 </div>
-<h2>Users</h2>
 <div class="card scroll" id="users">
+  <h2 class="card-title">Users</h2>
   {{ note("users") }}
   <table><tr><th>User</th><th>Role</th><th>Created</th><th></th></tr>
   {% for u in users %}<tr><td>{{ u.username }}</td><td>{{ u.role }}</td><td>{{ u.created | ts }}</td>
@@ -90,8 +90,8 @@
     </div>
   </form>
 </div>
-<h2>Configuration versions</h2>
 <div class="card scroll" id="versions">
+  <h2 class="card-title">Configuration versions</h2>
   {{ note("versions") }}
   <p class="quiet small">homewatch keeps the last 200 versions of its settings: modules, thresholds, timing, home,
     weekly report, channels and maintenance windows. Restoring one is saved as a new version, so it can be undone.
@@ -127,8 +127,8 @@
     <p><button class="danger" data-confirm="Reset homewatch completely? Everyone is logged out and all data is deleted.">Reset everything</button></p>
   </form>
 </div>
-<h2>Audit log</h2>
-<div class="card scroll"><table data-page="20">
+<div class="card scroll">
+  <h2 class="card-title">Audit log</h2><table data-page="20">
   <tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr>
   {% for a in log %}<tr><td>{{ a.ts | ts('%d %b %H:%M') }}</td><td>{{ a.username }}</td><td>{{ a.action }}</td><td class="small">{{ a.detail }}</td></tr>
   {% else %}<tr><td colspan="4" class="quiet">Nothing yet.</td></tr>{% endfor %}
@@ -141,4 +141,12 @@
     <div class="row"><button type="button" class="secondary" data-ask-cancel>Cancel</button><button value="ok" data-ask-ok>Confirm</button></div>
   </form>
 </dialog>
+{% if updater.state == 'running' and update %}
+<dialog class="ask" id="updating" data-version="{{ update }}">
+  <h2>Installing homewatch {{ update }}</h2>
+  <p data-updating-text><span class="spin" aria-hidden="true"></span> homewatch is restarting with the new release. This takes a minute or two;
+    this window closes by itself when it is back.</p>
+  <div class="row"><button type="button" data-updating-reload hidden>Reload</button></div>
+</dialog>
+{% endif %}
 {% endblock %}

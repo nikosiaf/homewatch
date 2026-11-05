@@ -197,8 +197,9 @@ h3.section { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 2
 .choice-grid .cd { flex: 0 1000 auto; }  /* the detail gives way first; a long name then shortens too */
 /* Checks and limits: the unit stays next to its box */
 /* the limit columns: a fixed width, header on one line, the box centred with its unit beside it */
-th.lim, td.lim { white-space: nowrap; width: 112px; text-align: center; }
-td.lim input.num { width: 58px; text-align: right; }
+th.lim, td.lim { white-space: nowrap; width: 104px; text-align: center; }
+td.lim input.num { width: 48px; text-align: right; }
+td.lim input.num.w4 { width: 58px; }  /* a limit with 4 digits (e.g. 1000 ms) */
 td.lim .unit { display: inline-block; min-width: 2.2em; text-align: left; }
 /* long texts: the first part, the rest on click */
 details.more { display: inline; }
@@ -209,7 +210,6 @@ details.more[open] > summary { display: none; }
 .row.fields { align-items: flex-start; }  /* boxes line up even when their help texts differ in length */
 #thresholds td:nth-child(2) { min-width: 150px; }
 .row.fields > .fcell:not(.w-wide) { max-width: 420px; }  /* a long help text wraps under its box */
-.row.fields > .fcell.w-narrow { min-width: min(300px, 100%); }  /* room for its help text beside the small box */
 
 /* a list with nothing in it says so plainly */
 .empty-note { padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; color: var(--quiet); margin: 6px 0; }
@@ -251,3 +251,12 @@ input.digits5 { width: 5.5em; max-width: 5.5em; text-align: right; }
 /* limit boxes: no spinner arrows, so four digits fit the narrow box */
 td.lim input.num { -moz-appearance: textfield; appearance: textfield; padding-left: 6px; padding-right: 6px; }
 td.lim input.num::-webkit-inner-spin-button, td.lim input.num::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* a section's title inside its card, like "Trusted certificates" */
+h2.card-title { margin: 0 0 12px; }
+/* each table of a reading in its own rounded box, its title in the border (like "Your line") */
+fieldset.reading { margin: 12px 0 0; padding: 4px 12px 8px; }
+fieldset.reading table { margin: 0; }
+fieldset.reading tr:last-child td { border-bottom: 0; }
+/* buttons in a row with room around them */
+.row.buttons { gap: 12px; margin: 14px 0 4px; align-items: center; }

@@ -62,6 +62,9 @@ class OPNsenseModule(ApiModule):
     ]
     secret_label = "API secret"
     secret_placeholder = "the secret= line of the downloaded file"
+    more_title = "Additional configuration"
+    more_help = "After connecting: the services that must run and the HAProxy servers to watch."
+    filters_first = False
     choices_title = "Services that must run"
     choices_help = "homewatch alerts when one of these stops. The ones running when you connected are ticked."
     filter_title = "HAProxy servers to watch"

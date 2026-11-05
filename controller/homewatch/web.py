@@ -73,9 +73,12 @@ templates.env.filters["dur"] = _fmt_dur
 
 def _fmt_num(v) -> str:
     """180.0 -> "180", 2.5 -> "2.5": a limit as the admin typed it."""
-    if v is None:
+    if v is None or v == "":
         return ""
-    f = float(v)
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)  # as typed, e.g. a form sent back with an error
     return str(int(f)) if f.is_integer() else f"{f:g}"
 
 
@@ -574,13 +577,16 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt = rt_of(request)
         m = MODULES.get(mid)
         form = await form_of(request, request.state.user)
-        if m is None or not hasattr(m, "fetch"):
+        if m is None or not (hasattr(m, "fetch") or mid == "proxmox"):
             return RedirectResponse("/modules", status_code=303)
         if form is None:
             return back(f"/modules/{mid}", err="Form expired, please try again")
         if set(form) - {"csrf", "_box"}:  # sent from a settings form: the new reading keeps its unsaved ticks
-            keep_typed(request, f"/modules/{mid}", form, [f.key for f in m.fields if f.secret])
-        m.snap_ts = float("-inf")  # read now, not at the module's next turn
+            keep_typed(request, f"/modules/{mid}", form, [f.key for f in getattr(m, "fields", []) if f.secret])
+        if hasattr(m, "reread"):  # read now, not at the module's next turn
+            m.reread()
+        else:
+            m.stale = True
         await m.readings(rt, m.load(rt), time.time())
         rt.wake.set()  # re-run the checks on the fresh reading
         return back(f"/modules/{mid}", err=f"Can't read {m.name}: {m.error}") if m.error else \

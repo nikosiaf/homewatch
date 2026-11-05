@@ -66,6 +66,7 @@ async def nut(host: str, port: int, commands: list[str], timeout: float = 6) -> 
 class UPSModule(ApiModule):
     id = "ups"
     name = "UPS"
+    every_min = 2  # fast: alarms, safety sensors and power events must be reported quickly
     checks = CHECKS
     description = ("Watches a UPS through a NUT server (Network UPS Tools), for example on your Proxmox host or NAS: "
                    "mains power, battery charge, runtime, load and battery health. Reading needs no login.")

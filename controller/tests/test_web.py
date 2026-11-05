@@ -792,9 +792,20 @@ def test_add_proxmox_tests_before_saving(client, monkeypatch):
     s = client.rt.db.get("module.proxmox")
     assert s["url"] == "https://192.168.1.10:8006" and s["watched"] == []  # nothing pre-selected
     assert "No guests chosen yet" in r.text and client.rt.secrets.get("module.proxmox.token") == "x"
-    r = client.post("/modules/proxmox", data={"csrf": tok, "enabled": "on", "url": "https://192.168.1.10:8006",
-                                              "token_id": "homewatch@pve!monitor", "watch.100": "on"})
-    assert client.rt.db.get("module.proxmox")["watched"] == [100]
+    page = r.text
+    assert "Proxmox Virtual Environment" in page and 'name="every_min"' in page.split('id="settings"')[1].split("</form>")[0]
+    more = page.split('id="more"')[1].split("</form>")[0]
+    assert "Guests to watch" in more and 'name="_part" value="more"' in more
+    r = client.post("/modules/proxmox", data={"csrf": tok, "_part": "more", "watch.100": "on"})
+    s = client.rt.db.get("module.proxmox")
+    assert s["watched"] == [100] and s["url"] == "https://192.168.1.10:8006" and s["every_min"] == 5
+    r = client.post("/modules/proxmox", data={"csrf": tok, "_part": "main", "enabled": "on", "url": "https://192.168.1.10:8006",
+                                              "token_id": "homewatch@pve!monitor", "every_min": "10"})
+    s = client.rt.db.get("module.proxmox")
+    assert s["watched"] == [100] and s["every_min"] == 10  # each box keeps the other's settings
+    r = client.post("/modules/proxmox", data={"csrf": tok, "_part": "main", "enabled": "on", "url": "https://192.168.1.10:8006",
+                                              "token_id": "homewatch@pve!monitor", "every_min": "0"})
+    assert "Read every: from 1 to 1440 minutes" in r.text
     r = client.post("/modules/proxmox", data={"csrf": tok, "remove": "1"})
     assert "Removed" in r.text and client.rt.db.get("module.proxmox") is None
     plugin.snap = None
@@ -1235,11 +1246,16 @@ def test_update_check_and_install_from_the_home_box(client, monkeypatch, tmp_pat
     assert "Install 9.9.9" in client.get("/system").text
     r = client.post("/system/updates/install", data={"csrf": tok})
     assert "Installing 9.9.9" in r.text and os.path.exists(upd / "ask" / "request")
-    assert "update requested" in client.get("/system").text
+    page = client.get("/system").text
+    assert "<td>Last update</td><td>requested, waiting for the updater</td>" in page
+    assert '<dialog class="ask" id="updating" data-version="9.9.9">' in page  # the waiting window
     os.remove(upd / "ask" / "request")
     (upd / "status").write_text("1700000000 failed installing 9.9.9 failed, still on 0.28.0\n")
     st = updater.state(str(upd))
     assert st["state"] == "failed" and "still on 0.28.0" in st["status"]
+    assert st["summary"].startswith("update to 9.9.9 failed on ") and st["summary"].endswith("still on 0.28.0")
+    (upd / "status").write_text("1700000000 ok 9.9.9 installed (was 0.28.0)\n")
+    assert updater.state(str(upd))["summary"].startswith("0.28.0 → 9.9.9 on ")
     (upd / "status").write_text("1700000000 running installing 9.9.9\n")
     assert updater.state(str(upd), now=1700000000 + 3600)["state"] == "failed"  # stuck for an hour
 
@@ -1287,7 +1303,7 @@ def test_system_page_one_line_export_and_paged_audit_log(client):
     export = page.split("<b>Export</b>")[1].split("</form>")[0]
     assert export.index("Download the configuration now") < export.index('href="/system/export"') \
         < export.index("Download an earlier one") < export.index('name="name"') < export.index("Download</button>")
-    assert page.split("<h2>Audit log</h2>")[1].lstrip().startswith('<div class="card scroll"><table data-page="20">')
+    assert '<div class="card scroll">\n  <h2 class="card-title">Audit log</h2><table data-page="20">' in page
     imp = page.split('action="/system/import"')[1].split("</form>")[0]
     assert '<div class="row tight"><input id="imf" type="file"' in imp and "Preview import…</button></div>" in imp
     assert 'class="card col"' in page and page.count('<div class="card-foot">') == 2  # last lines at the bottom
@@ -1329,3 +1345,28 @@ def test_mikrotik_connect_first_then_ports_in_their_own_box(client, monkeypatch)
     client.post("/modules/mikrotik", data={"csrf": tok, "_part": "more", "choose.mt1/ether1": "on"})
     assert client.rt.db.get("module.mikrotik")["chosen"] == ["mt1/ether1"]
     plugin.snap = None
+
+
+def test_read_every_box_per_module_with_its_default(client):
+    setup_admin(client)
+    from homewatch.modules.registry import MODULES
+    want = {"mikrotik": 5, "unifi": 5, "opnsense": 5, "docker": 5, "pbs": 15, "synology": 10, "homeassistant": 2, "ups": 2}
+    for mid, n in want.items():
+        m = MODULES[mid]
+        assert m.field("every_min").default == n and m.every_s({}) == n * 60, mid
+    page = client.get("/modules/mikrotik").text
+    assert page.index('id="f-secret"') < page.index('id="f-every_min"')  # next to the password
+    out, err = MODULES["mikrotik"].validate({"devices": "10.0.0.2", "username": "u", "every_min": "0"}, {})
+    assert err == "Read every: from 1 to 1440 minutes"
+    out, err = MODULES["mikrotik"].validate({"devices": "10.0.0.2", "username": "u", "every_min": "7"}, {})
+    assert not err and out["every_min"] == 7 and MODULES["mikrotik"].every_s(out) == 420
+
+
+def test_limit_boxes_are_three_digits_unless_a_value_needs_four(client):
+    setup_admin(client)
+    page = client.get("/modules/internet").text
+    dns = page.split('name="internet.dns.warn"')[0].rsplit("<input", 1)[1]
+    assert 'class="num w4"' in dns  # 1000 ms
+    loss = page.split('name="internet.loss.warn"')[0].rsplit("<input", 1)[1]
+    assert 'class="num "' in loss
+    assert '<h2 class="card-title">Checks and limits</h2>' in page and '<h2 class="card-title">Speed tests</h2>' in page

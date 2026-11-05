@@ -14,7 +14,8 @@ from .client import ApiError, Client, Snapshot
 KEY = "module.proxmox"
 SECRET = "module.proxmox.token"
 DISK_EVERY = 3600  # SMART data changes slowly; reading it calls smartctl on the host
-DEFAULTS = {"enabled": True, "url": "", "token_id": "homewatch@pve!monitor", "verify": True, "watched": []}
+DEFAULTS = {"enabled": True, "url": "", "token_id": "homewatch@pve!monitor", "verify": True, "watched": [], "every_min": 5}
+EVERY_MAX = 1440
 SETUP_COMMANDS = [
     'pveum user add homewatch@pve --comment "homewatch, read-only"',
     "pveum acl modify / --users homewatch@pve --roles PVEAuditor",
@@ -53,6 +54,13 @@ class ProxmoxModule(PinnedTLS, Module):
         self.snap_ts = 0.0
         self.error = ""
         self.disks_ts = 0.0
+        self.stale = False  # read again at the next run, whatever the time
+
+    def every_s(self, s) -> float:
+        try:
+            return max(1.0, float(s.get("every_min") or DEFAULTS["every_min"])) * 60
+        except (TypeError, ValueError):
+            return DEFAULTS["every_min"] * 60
 
     def load(self, rt) -> dict:
         return {**DEFAULTS, **(rt.db.get(KEY) or {})}
@@ -88,7 +96,9 @@ class ProxmoxModule(PinnedTLS, Module):
             await self.note_changes(rt, s, str(e))
 
     async def readings(self, rt, settings, now):
-        await self.read(rt, settings, now)
+        if self.snap is None or self.stale or now - self.snap_ts >= self.every_s(settings):
+            self.stale = False
+            await self.read(rt, settings, now)
         return checks.State(now=now, snap=self.snap, error=self.error, watched=settings.get("watched", []))
 
     def evaluate(self, settings, thresholds, readings):
@@ -106,9 +116,15 @@ class ProxmoxModule(PinnedTLS, Module):
 
     async def prepare_save(self, rt, form: dict) -> str:
         """Before saving: remove, or test the connection with what was entered."""
-        if form.get("remove"):
+        if form.get("remove") or form.get("_part") == "more":  # the guests box changes nothing of the connection
             return ""
         old = self.load(rt)
+        try:
+            every = float(form.get("every_min", old.get("every_min", DEFAULTS["every_min"])))
+        except (TypeError, ValueError):
+            every = 0
+        if not 1 <= every <= EVERY_MAX:
+            return f"Read every: from 1 to {EVERY_MAX} minutes"
         url = normalize_url(form.get("url", old["url"]))
         if not url:
             return "Proxmox address: e.g. https://192.168.1.10:8006"
@@ -142,6 +158,9 @@ class ProxmoxModule(PinnedTLS, Module):
             return settings, "certificate check: must be true or false"
         if not all(isinstance(v, int) for v in settings.get("watched", [])):
             return settings, "watched guests: must be a list of numbers"
+        every = settings.get("every_min", DEFAULTS["every_min"])
+        if isinstance(every, bool) or not isinstance(every, (int, float)) or not 1 <= every <= EVERY_MAX:
+            return settings, f"read every: from 1 to {EVERY_MAX} minutes"
         return settings | {"url": url}, ""
 
     def save(self, rt, form: dict, user) -> str:
@@ -155,21 +174,28 @@ class ProxmoxModule(PinnedTLS, Module):
             return ""
         old = self.load(rt)
         first = not self.configured(rt)
+        if form.get("_part") == "more":  # the guests box: only the ticks
+            new = {k: old[k] for k in DEFAULTS} | {"watched": sorted(
+                int(k.split(".", 1)[1]) for k in form if k.startswith("watch.") and k.split(".", 1)[1].isdigit())}
+            rt.db.set(KEY, new)
+            audit(rt.db, user.username, "proxmox", f"watched={new['watched']}")
+            self.stale = True
+            rt.wake.set()
+            return ""
         # nothing is watched until the admin ticks guests and saves (none are pre-selected)
-        watched = [] if first else sorted(
-            int(k.split(".", 1)[1]) for k in form if k.startswith("watch.") and k.split(".", 1)[1].isdigit())
         new = {"enabled": True if first else form.get("enabled") == "on",
                "url": normalize_url(form.get("url", old["url"])) or old["url"],
                "token_id": form.get("token_id", old["token_id"]).strip(),
                "verify": form.get("verify") == "on",
-               "watched": watched if watched is not None else old["watched"]}
+               "every_min": round(float(form.get("every_min", old["every_min"]))),
+               "watched": [] if first else old["watched"]}
         if not first and "url" not in form:  # fields greyed out (module off): keep them
-            new.update(url=old["url"], token_id=old["token_id"], verify=old["verify"])
+            new.update(url=old["url"], token_id=old["token_id"], verify=old["verify"], every_min=old["every_min"])
         rt.db.set(KEY, new)
         if form.get("secret", "").strip():
             rt.secrets.put(SECRET, form["secret"].strip())
         audit(rt.db, user.username, "proxmox", f"enabled={new['enabled']} url={new['url']} "
-                                               f"token={new['token_id']} watched={new['watched']}")
+                                               f"token={new['token_id']} every={new['every_min']} min")
         rt.wake.set()
         return ""
 
@@ -187,6 +213,7 @@ class ProxmoxModule(PinnedTLS, Module):
                                "backup_error": b.get("error", "")})
         return {"cert_rows": self.cert_rows(rt), "configured": self.configured(rt), "has_secret": rt.secrets.has(SECRET), "snap": snap,
                 "snap_ts": self.snap_ts, "pve_error": self.error, "guests": guests,
+                "read_every": f"{max(self.every_s(s), 0) / 60:.0f} min",
                 "setup_commands": SETUP_COMMANDS}
 
 

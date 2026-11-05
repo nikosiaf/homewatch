@@ -88,7 +88,20 @@ class ApiModule(PinnedTLS, Module):
     fields: list[Field] = []
     secret_label = ""  # empty: no secret
     secret_placeholder = ""
-    every = 0  # seconds between reads; 0 = every check run
+    every_min = 5  # default minutes between reads; the admin can change it (the "Read every" box)
+    EVERY_MAX = 1440
+
+    def __init_subclass__(cls, **kw):
+        super().__init_subclass__(**kw)
+        if not any(f.key == "every_min" for f in cls.fields):
+            cls.fields = list(cls.fields) + [Field("every_min", "Read every (minutes)", str(cls.every_min), kind="number",
+                                                   default=cls.every_min, width="narrow")]
+
+    def every_s(self, settings: dict) -> float:
+        try:
+            return max(1.0, float(settings.get("every_min") or self.every_min)) * 60
+        except (TypeError, ValueError):
+            return self.every_min * 60
     choices_title = ""  # e.g. "Ports that should be up"; empty: no choice list
     choices_help = ""
     filter_title = ""  # e.g. "Domains to watch": a list that is ticked by default; unticked values go to "skipped"
@@ -104,6 +117,7 @@ class ApiModule(PinnedTLS, Module):
     more_fields_title = ""  # heading over the second section's plain fields
     choices_empty = ""  # shown when the choice list has nothing in it
     list_search = True  # long tick lists get a search box and "only ticked"
+    filters_first = True  # in the second box: the filter list (e.g. entities to watch) before the choice list
 
     def field(self, key: str) -> Field:
         return next(f for f in self.fields if f.key == key)
@@ -200,6 +214,10 @@ class ApiModule(PinnedTLS, Module):
                 out[f.key] = "\n".join(x.strip() for x in str(raw).splitlines()).rstrip("\n")  # line numbers as typed
             else:
                 out[f.key] = str(raw).strip()
+        if "every_min" in out:
+            if not 1 <= out["every_min"] <= self.EVERY_MAX:
+                return {}, f"Read every: from 1 to {self.EVERY_MAX} minutes"
+            out["every_min"] = round(out["every_min"])
         return out, ""
 
     def field_secret_key(self, f: Field) -> str:
@@ -234,7 +252,7 @@ class ApiModule(PinnedTLS, Module):
         return []
 
     async def readings(self, rt, settings, now):
-        if self.snap is None or self.stale or now - self.snap_ts >= self.every:
+        if self.snap is None or self.stale or now - self.snap_ts >= self.every_s(settings):
             self.stale = False
             try:
                 full = await self.pin_settings(rt, self.with_secret_fields(rt, settings))
@@ -355,8 +373,8 @@ class ApiModule(PinnedTLS, Module):
 
     def page_ctx(self, rt) -> dict:
         from ..engine import timing
-        every = max(self.every, timing(rt.db)["interval"])
         s = self.load(rt)
+        every = max(self.every_s(s), timing(rt.db)["interval"])
         snap = self.snap
         chosen, skipped = set(s.get("chosen", [])), set(s.get("skipped", []))
         filters = self.filters(snap) if snap and self.filter_title else []

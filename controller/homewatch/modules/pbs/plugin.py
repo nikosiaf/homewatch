@@ -29,7 +29,7 @@ class PBSModule(ApiModule):
     id = "pbs"
     name = "Proxmox Backup Server"
     checks = CHECKS
-    every = 300
+    every_min = 15  # backups run nightly
     description = ("Watches a Proxmox Backup Server through a read-only API token: datastore usage, the age of your "
                    "backups, verify / prune / garbage collection / sync results and package updates.")
     setup = [
@@ -48,6 +48,8 @@ class PBSModule(ApiModule):
     ]
     secret_label = "Token secret"
     secret_placeholder = "xxxxxxxx-xxxx-…"
+    more_title = "Additional configuration"
+    more_help = "After connecting: the backups homewatch checks."
     choices_title = "VMs, containers and hosts to watch"
     choices_help = ("homewatch checks that each of these gets a fresh backup. When you connect, the ones backed up in "
                     "the last 26 hours are ticked; old backups of guests you no longer back up are left unticked.")

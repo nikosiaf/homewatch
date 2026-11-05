@@ -12,6 +12,7 @@ disk health and backups. Nothing on Proxmox is changed.</p>
     <div><label for="pt">Token ID</label><input id="pt" type="text" name="token_id" value="{{ s.token_id }}" autocomplete="off"></div>
     <div><label for="ps">Token secret · {{ 'set' if has_secret else 'not set' }}</label>
       <input id="ps" type="password" name="secret" placeholder="{{ 'leave empty to keep' if has_secret else 'xxxxxxxx-xxxx-…' }}" autocomplete="new-password"></div>
+    <div><label for="pe">Read every (minutes)</label><input id="pe" class="num" type="number" min="1" max="1440" name="every_min" value="{{ s.every_min | num }}"></div>
   </div>
   <label class="check"><input type="checkbox" name="verify" {{ 'checked' if s.verify }}> Check the HTTPS certificate (untick only for a self-signed one: homewatch then can't tell the real host from an impostor on your network)</label>
 {% endmacro %}
@@ -37,14 +38,54 @@ disk health and backups. Nothing on Proxmox is changed.</p>
 <form method="post" action="/modules/proxmox" class="card {{ 'off' if not s.enabled }}" id="settings">
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="settings">
   <div class="row" style="justify-content:space-between">
-    <h2 style="margin:0">{{ s.url }}</h2>
+    <h2 style="margin:0">Proxmox Virtual Environment</h2>
     <label class="check"><input type="checkbox" name="enabled" data-enable-toggle {{ 'checked' if s.enabled }}> Enabled</label>
   </div>
   {{ note("settings") }}
   {% if pve_error %}<p class="flash err">{{ pve_error }}</p>{% endif %}
   <fieldset data-enable-target class="plain" {{ 'disabled' if not s.enabled }}>
+    <input type="hidden" name="_part" value="main">
     {{ fields(s) }}
-    <h3>Guests to watch</h3>
+  </fieldset>
+  <p class="row" style="justify-content:space-between"><button data-save>Save</button>
+    <button class="danger" name="remove" value="1" data-confirm="Remove this Proxmox host and its token from homewatch?" formnovalidate>Remove host</button></p>
+</form>
+
+{% if s.enabled and snap %}
+<div class="card" id="overview">
+  <form method="post" action="/modules/proxmox/refresh" class="row tight" style="justify-content:space-between;margin-top:0">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="overview">
+    <h2 style="margin:0">Last reading <span class="quiet small">{{ snap_ts | ts('%d %b %H:%M:%S') }} · read every {{ read_every }}</span></h2>
+    <button>Read now</button></form>
+  <fieldset class="reading"><legend>Nodes</legend><div class="scroll"><table>
+    <tr><th>Node</th><th>Status</th><th>CPU</th><th>Memory</th><th>Root disk</th><th>Up for</th></tr>
+    {% for n in snap.nodes %}<tr><td>{{ n.node }}</td><td>{{ n.status }}</td>
+      <td>{{ '%.0f %%' | format((n.cpu or 0) * 100) }} of {{ n.maxcpu }}</td>
+      <td>{{ '%.0f %%' | format(100 * n.mem / n.maxmem) if n.maxmem }}</td>
+      <td>{{ '%.0f %%' | format(100 * n.disk / n.maxdisk) if n.maxdisk }}</td>
+      <td>{{ n.uptime | dur if n.uptime }}</td></tr>{% endfor %}
+  </table></div></fieldset>
+  <fieldset class="reading"><legend>Storage</legend><div class="scroll"><table>
+    <tr><th>Storage</th><th>Type</th><th>Status</th><th>Used</th></tr>
+    {% for x in snap.storages | sort(attribute='storage') %}<tr><td>{{ x.storage }}</td><td>{{ x.plugintype }}</td><td>{{ x.status }}</td>
+      <td>{% if x.maxdisk %}{{ '%.0f %%' | format(100 * x.disk / x.maxdisk) }} of {{ '%.0f' | format(x.maxdisk / 1e9) }} GB{% endif %}</td></tr>{% endfor %}
+  </table></div></fieldset>
+  {% for node, disks in snap.disks.items() if disks %}
+  <fieldset class="reading"><legend>Disks on {{ node }}</legend><div class="scroll"><table>
+    <tr><th>Device</th><th>Model</th><th>Type</th><th>SMART</th><th>Life left</th></tr>
+    {% for d in disks %}<tr><td>{{ d.devpath }}</td><td>{{ d.model }}</td><td>{{ d.type }}</td><td>{{ d.health }}</td>
+      <td>{{ (d.wearout ~ ' %') if d.wearout not in (none, 'N/A') else '—' }}</td></tr>{% endfor %}
+  </table></div></fieldset>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if s.enabled %}
+<form method="post" action="/modules/proxmox" class="card" id="more">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="more"><input type="hidden" name="_part" value="more">
+  <h2 style="margin-top:0">Additional configuration</h2>
+  {{ note("more") }}
+  <h3>Guests to watch</h3>
     <p class="quiet small">Choose the guests homewatch should keep an eye on, then press Save. It alerts when a chosen
       guest stops running, and checks that it is backed up when one of your Proxmox backup jobs includes it.
       Guests you don't choose are only listed here.</p>
@@ -60,37 +101,8 @@ disk health and backups. Nothing on Proxmox is changed.</p>
           {% elif g.backup_ok %}{{ g.backup_ok | ts }}{% else %}<span class="quiet">none in 8 days</span>{% endif %}</td>
       </tr>{% else %}<tr><td colspan="6" class="quiet">No reading yet; it appears after the next check run.</td></tr>{% endfor %}
     </table></div>
-  </fieldset>
-  <p class="row" style="justify-content:space-between"><button data-save>Save</button>
-    <button class="danger" name="remove" value="1" data-confirm="Remove this Proxmox host and its token from homewatch?" formnovalidate>Remove host</button></p>
+  <p><button data-save>Save</button></p>
 </form>
-
-{% if s.enabled and snap %}
-<div class="card scroll" id="overview">
-  <h2 style="margin-top:0">Last reading <span class="quiet small">{{ snap_ts | ts('%H:%M:%S') }}</span></h2>
-  <table>
-    <tr><th>Node</th><th>Status</th><th>CPU</th><th>Memory</th><th>Root disk</th><th>Up for</th></tr>
-    {% for n in snap.nodes %}<tr><td>{{ n.node }}</td><td>{{ n.status }}</td>
-      <td>{{ '%.0f %%' | format((n.cpu or 0) * 100) }} of {{ n.maxcpu }}</td>
-      <td>{{ '%.0f %%' | format(100 * n.mem / n.maxmem) if n.maxmem }}</td>
-      <td>{{ '%.0f %%' | format(100 * n.disk / n.maxdisk) if n.maxdisk }}</td>
-      <td>{{ n.uptime | dur if n.uptime }}</td></tr>{% endfor %}
-  </table>
-  <h3>Storage</h3>
-  <table>
-    <tr><th>Storage</th><th>Type</th><th>Status</th><th>Used</th></tr>
-    {% for x in snap.storages | sort(attribute='storage') %}<tr><td>{{ x.storage }}</td><td>{{ x.plugintype }}</td><td>{{ x.status }}</td>
-      <td>{% if x.maxdisk %}{{ '%.0f %%' | format(100 * x.disk / x.maxdisk) }} of {{ '%.0f' | format(x.maxdisk / 1e9) }} GB{% endif %}</td></tr>{% endfor %}
-  </table>
-  {% for node, disks in snap.disks.items() if disks %}
-  <h3>Disks on {{ node }}</h3>
-  <table>
-    <tr><th>Device</th><th>Model</th><th>Type</th><th>SMART</th><th>Life left</th></tr>
-    {% for d in disks %}<tr><td>{{ d.devpath }}</td><td>{{ d.model }}</td><td>{{ d.type }}</td><td>{{ d.health }}</td>
-      <td>{{ (d.wearout ~ ' %') if d.wearout not in (none, 'N/A') else '—' }}</td></tr>{% endfor %}
-  </table>
-  {% endfor %}
-</div>
 {% endif %}
 {% endif %}
 {% include "_cert.html" %}

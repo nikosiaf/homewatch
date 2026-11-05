@@ -19,7 +19,7 @@
   {% else %}
     <div {{ cell_attrs(f) }}><label for="f-{{ f.key }}">{{ f.label }}</label>
       <input id="f-{{ f.key }}" type="{{ 'number' if f.kind == 'number' else 'text' }}" {{ 'step=any' if f.kind == 'number' }} {{ 'class=num' if f.width == 'narrow' }}
-             name="{{ f.key }}" value="{{ s[f.key] if s[f.key] is not none }}" placeholder="{{ f.placeholder }}" autocomplete="off">
+             name="{{ f.key }}" value="{{ (s[f.key] | num) if f.kind == 'number' else (s[f.key] if s[f.key] is not none) }}" placeholder="{{ f.placeholder }}" autocomplete="off">
       {% if f.help %}<p class="quiet small" style="margin:4px 0 0">{{ f.help }}</p>{% endif %}</div>
   {% endif %}
 {% endmacro %}
@@ -42,12 +42,14 @@
   </div>
   {% endif %}
   {% set fs = module.fields | selectattr('section', 'equalto', section) | rejectattr('key', 'in', placed) | list %}
-  {% set plain = fs | rejectattr('kind', 'in', ('check', 'lines')) | rejectattr('own_line') | list %}
+  {% set plain = fs | rejectattr('kind', 'in', ('check', 'lines')) | rejectattr('own_line') | rejectattr('key', 'equalto', 'every_min') | list %}
+  {% set every = fs | selectattr('key', 'equalto', 'every_min') | list %}
   {% if section == 'more' and plain and module.more_fields_title %}<h3>{{ module.more_fields_title }}</h3>{% endif %}
-  {% if plain or (section == '' and module.secret_label and '_secret' not in placed) %}
+  {% if plain or every or (section == '' and module.secret_label and '_secret' not in placed) %}
   <div class="row fields">
   {% for f in plain %}{{ field_cell(f, s) }}{% endfor %}
   {% if section == '' and module.secret_label and '_secret' not in placed %}{{ secret_cell() }}{% endif %}
+  {% for f in every %}{{ field_cell(f, s) }}{% endfor %}{# how often to read: next to the password #}
   </div>
   {% endif %}
   {% for f in fs if f.kind == 'lines' %}
@@ -73,29 +75,31 @@
 {% endmacro %}
 
 {# the lists, and on the second box the fields after them: entities to watch, ones to ignore, sensors, rules #}
-{% macro lists_html() %}
-    {% if snap and (module.choices_title or module.filter_title) %}
-    <p class="quiet small" style="margin-top:14px">The lists come from the last reading ({{ snap_ts | ts('%d %b %H:%M:%S') }}).</p>
-    {% endif %}
-    {% if module.more_title and module.filter_title %}
+{% macro filter_block() %}
+    {% if module.filter_title %}
     <h3>{{ module.filter_title }}</h3>
     {% if module.filter_help %}<p class="quiet small">{{ module.filter_help }}</p>{% endif %}
-    {{ check_fields(module.fields | selectattr('section', 'equalto', 'more') | list) }}
+    {% if module.more_title %}{{ check_fields(module.fields | selectattr('section', 'equalto', 'more') | list) }}{% endif %}
     {% if filters %}<input type="hidden" name="_filters_shown" value="{{ filters_shown }}">
     {{ choice_list(filters, "keep.", "watched") }}{% else %}<p class="quiet">Appears after the first reading.</p>{% endif %}
     {% endif %}
+{% endmacro %}
+
+{% macro choices_block() %}
     {% if module.choices_title %}
     <h3>{{ module.choices_title }}</h3>
     {% if module.choices_help %}<p class="quiet small">{{ module.choices_help }}</p>{% endif %}
     {% if not choices and snap and module.choices_empty %}<p class="empty-note">{{ module.choices_empty }}</p>
     {% else %}{{ choice_list(choices, "choose.", "ticked") }}{% endif %}
     {% endif %}
-    {% if not module.more_title and module.filter_title and filters %}
-    <h3>{{ module.filter_title }}</h3>
-    {% if module.filter_help %}<p class="quiet small">{{ module.filter_help }}</p>{% endif %}
-    <input type="hidden" name="_filters_shown" value="{{ filters_shown }}">
-    {{ choice_list(filters, "keep.", "watched") }}
+{% endmacro %}
+
+{# the lists; on the second box the fields follow them #}
+{% macro lists_html() %}
+    {% if snap and (module.choices_title or module.filter_title) %}
+    <p class="quiet small" style="margin-top:14px">The lists come from the last reading ({{ snap_ts | ts('%d %b %H:%M:%S') }}).</p>
     {% endif %}
+    {% if module.filters_first %}{{ filter_block() }}{{ choices_block() }}{% else %}{{ choices_block() }}{{ filter_block() }}{% endif %}
 {% endmacro %}
 
 {% macro choice_label(c, prefix, on) %}
@@ -163,18 +167,18 @@
 </form>
 
 {% if s.enabled and snap %}
-<div class="card scroll" id="overview">
+<div class="card" id="overview">
   <form method="post" action="/modules/{{ module.id }}/refresh" class="row tight" style="justify-content:space-between;margin-top:0">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="overview">
     <h2 style="margin:0">Last reading <span class="quiet small">{{ snap_ts | ts('%d %b %H:%M:%S') }} · read every {{ read_every }}</span></h2>
     <button>Read now</button></form>
   {% for t in tables %}
-  {% if t.title %}<h3>{{ t.title }}</h3>{% endif %}
-  <table>
+  <fieldset class="reading">{% if t.title %}<legend>{{ t.title }}</legend>{% endif %}
+  <div class="scroll"><table>
     <tr>{% for h in t.head %}<th>{{ h }}</th>{% endfor %}</tr>
     {% for r in t.rows %}<tr>{% for c in r %}<td>{{ c if c is not none else '—' }}</td>{% endfor %}</tr>
     {% else %}<tr><td colspan="{{ t.head | length }}" class="quiet">nothing</td></tr>{% endfor %}
-  </table>
+  </table></div></fieldset>
   {% endfor %}
 </div>
 {% endif %}

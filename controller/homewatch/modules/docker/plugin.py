@@ -73,6 +73,8 @@ class DockerModule(ApiModule):
         Field("hosts", "Docker hosts", "192.168.1.20, 192.168.1.21:2375",
               help=f"Addresses of the proxies, separated by commas; port {PORT} when none is given."),
     ]
+    more_title = "Additional configuration"
+    more_help = "After connecting: the containers homewatch watches."
     filter_title = "Containers to watch"
     filter_help = ("Containers with a restart policy, per host, with their compose project. Unticked ones are not checked. "
                    "New containers with a restart policy are watched.")

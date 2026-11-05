@@ -1,20 +1,20 @@
 {% from "_note.html" import note with context %}
 {% from "_more.html" import more %}
 {% set WHOLE_UNITS = ("h", "min", "s", "°C", "days") %}
-<h2>Checks and limits</h2>
 <form method="post" action="/modules/{{ module.id }}/thresholds" class="card" id="thresholds">
+  <h2 class="card-title">Checks and limits</h2>
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="thresholds">
   {{ note("thresholds") }}
   <div class="scroll"><table>
     <tr><th>On</th><th>Check</th><th>Now</th><th class="lim">WARNING at</th><th class="lim">ERROR at</th></tr>
-    {% for d in module.checks %}{% set key = module.id ~ '.' ~ d.id %}{% set t = th_rows[d.id] %}{% set c = th_current.get(key) %}
+    {% for d in module.checks %}{% set key = module.id ~ '.' ~ d.id %}{% set t = th_rows[d.id] %}{% set c = th_current.get(key) %}{% set w4 = [t.warn | num, t.error | num, d.warn | num, d.error | num] | map('length') | max > 3 %}
     <tr>
       <td><input type="checkbox" name="{{ key }}.enabled" {{ 'checked' if t.enabled }} aria-label="enable {{ d.name }}"></td>
       <td><b>{{ d.name }}</b><div class="quiet small">{{ d.help }}</div></td>
       <td>{% if c %}<span class="badge s{{ c.effective }}">{{ LEVEL_WORD[c.effective] }}</span>
           <div class="quiet small">{{ more(c.detail) }}</div>{% else %}<span class="quiet">—</span>{% endif %}</td>
-      <td class="lim">{% if 'warn' in d.editable %}<input class="num" type="number" step="{{ 1 if d.unit in WHOLE_UNITS else 'any' }}" {{ 'min=0 max=100' if d.unit == '%' }} name="{{ key }}.warn" value="{{ t.warn | num }}"> <span class="unit">{{ d.unit }}</span>{% else %}<span class="quiet">fixed</span>{% endif %}</td>
-      <td class="lim">{% if 'error' in d.editable %}<input class="num" type="number" step="{{ 1 if d.unit in WHOLE_UNITS else 'any' }}" {{ 'min=0 max=100' if d.unit == '%' }} name="{{ key }}.error" value="{{ t.error | num }}"> <span class="unit">{{ d.unit }}</span>{% else %}<span class="quiet">fixed</span>{% endif %}</td>
+      <td class="lim">{% if 'warn' in d.editable %}<input class="num {{ 'w4' if w4 }}" type="number" step="{{ 1 if d.unit in WHOLE_UNITS else 'any' }}" {{ 'min=0 max=100' if d.unit == '%' }} name="{{ key }}.warn" value="{{ t.warn | num }}"> <span class="unit">{{ d.unit }}</span>{% else %}<span class="quiet">fixed</span>{% endif %}</td>
+      <td class="lim">{% if 'error' in d.editable %}<input class="num {{ 'w4' if w4 }}" type="number" step="{{ 1 if d.unit in WHOLE_UNITS else 'any' }}" {{ 'min=0 max=100' if d.unit == '%' }} name="{{ key }}.error" value="{{ t.error | num }}"> <span class="unit">{{ d.unit }}</span>{% else %}<span class="quiet">fixed</span>{% endif %}</td>
     </tr>{% endfor %}
   </table></div>
   <p class="quiet small">Empty a field to switch that level off. "fixed" checks are ERROR when their condition is met.</p>

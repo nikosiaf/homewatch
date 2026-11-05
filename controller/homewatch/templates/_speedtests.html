@@ -1,6 +1,7 @@
 {# Polls every 2 s while a test runs; the running row turns into the result when it finishes. #}
 <div id="speedtests" class="card"
      {% if running %}hx-get="/modules/internet/speedtests" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 class="card-title">Speed tests</h2>
   <form method="post" action="/modules/internet/speedtest" hx-post="/modules/internet/speedtest"
         hx-target="#speedtests" hx-swap="outerHTML" class="row" style="align-items:center">
     <input type="hidden" name="csrf" value="{{ csrf }}">

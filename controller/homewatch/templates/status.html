@@ -5,8 +5,8 @@
 <div id="status-body" hx-get="/partials/status" hx-trigger="every 30s" hx-swap="innerHTML">
 {% include "_status_body.html" %}
 </div>
-<h2>Charts</h2>
 <div class="card">
+  <h2 class="card-title">Charts</h2>
   <div class="row charttabs" style="justify-content:space-between">
     <div>{% for c, label in [('latency','Latency'),('loss','Packet loss'),('jitter','Jitter'),('speed','Speed')] + ([('sync','DSL sync'),('snr','SNR margin')] if dsl else []) %}
       <button class="secondary" data-chart="{{ c }}">{{ label }}</button>{% endfor %}</div>

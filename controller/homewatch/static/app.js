@@ -325,3 +325,32 @@ document.querySelectorAll("table[data-page]").forEach(function (table) {
   });
   dlg.querySelector("[data-ask-cancel]").addEventListener("click", function () { dlg.close("cancel"); });
 })();
+
+// System page, after Install: a window that waits until the new release answers, then reloads the page.
+(function () {
+  const dlg = document.getElementById("updating");
+  if (!dlg) return;
+  const want = dlg.dataset.version;
+  const text = dlg.querySelector("[data-updating-text]");
+  const reload = dlg.querySelector("[data-updating-reload]");
+  const started = Date.now();
+  dlg.showModal();
+  reload.addEventListener("click", function () { location.reload(); });
+  function poll() {
+    fetch("/healthz", { cache: "no-store" }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; })
+      .then(function (h) {
+        if (h && String(h.version).replace(/-dev$/, "") === want) {
+          text.textContent = "homewatch " + want + " is running. Reloading…";
+          setTimeout(function () { location.replace("/system"); }, 1500);
+          return;
+        }
+        if (Date.now() - started > 5 * 60 * 1000) {
+          text.textContent = "No answer from " + want + " after 5 minutes. Reload the page to see what the updater reports.";
+          reload.hidden = false;
+          return;
+        }
+        setTimeout(poll, 3000);
+      });
+  }
+  setTimeout(poll, 3000);
+})();

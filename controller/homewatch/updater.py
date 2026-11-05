@@ -9,6 +9,7 @@ to <update dir>/status as "<unix time> <running|ok|failed> <text>".
 from __future__ import annotations
 
 import os
+import re
 import time
 
 STALE = 15 * 60  # "running" for longer than this: the updater is gone or stuck
@@ -18,7 +19,7 @@ def state(update_dir: str, now: float | None = None) -> dict:
     """{ready, state, status}: ready = the updater is installed and homewatch may ask it."""
     ask = os.path.join(update_dir, "ask")
     ready = os.path.isdir(ask) and os.access(ask, os.W_OK)
-    out = {"ready": ready, "state": "", "status": "", "asked": os.path.exists(os.path.join(ask, "request"))}
+    out = {"ready": ready, "state": "", "status": "", "summary": "", "asked": os.path.exists(os.path.join(ask, "request"))}
     try:
         with open(os.path.join(update_dir, "status"), encoding="utf-8") as f:
             raw = f.read(500).strip()
@@ -30,10 +31,25 @@ def state(update_dir: str, now: float | None = None) -> dict:
         now = now or time.time()
         if st == "running" and now - ts > STALE:
             st, text = "failed", f"{text}, no answer since then (see journalctl -u homewatch-update)"
-        out |= {"state": st, "status": f"{text} ({time.strftime('%d %b %H:%M', time.localtime(ts))})"}
+        when = time.strftime('%d %b %H:%M', time.localtime(ts))
+        out |= {"state": st, "status": f"{text} ({when})", "summary": summary(st, text, when)}
     if out["asked"] and out["state"] != "running":
-        out |= {"state": "running", "status": "update requested, waiting for the updater"}
+        out |= {"state": "running", "status": "update requested, waiting for the updater",
+                "summary": "requested, waiting for the updater"}
     return out
+
+
+def summary(st: str, text: str, when: str) -> str:
+    """The last update in a few words, from the updater's own text."""
+    if m := re.fullmatch(r"(\S+) installed \(was (\S+)\)", text):
+        return f"{m[2]} → {m[1]} on {when}"
+    if m := re.fullmatch(r"(\S+) is already installed", text):
+        return f"{m[1]} was already installed ({when})"
+    if m := re.fullmatch(r"installing (\S+) \(was (\S+)\)", text):
+        return f"installing {m[1]} (from {m[2]}), started {when}"
+    if m := re.fullmatch(r"installing (\S+) failed, still on (\S+)(.*)", text, re.S):
+        return f"update to {m[1]} failed on {when}, still on {m[2]}{m[3]}"
+    return f"{text} ({when})"
 
 
 def ask(update_dir: str, version: str, username: str) -> str:

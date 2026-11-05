@@ -38,7 +38,7 @@ class SynologyModule(ApiModule):
     id = "synology"
     name = "Synology NAS"
     checks = CHECKS
-    every = 600  # each read is a DSM login; keep the connection log quiet
+    every_min = 10  # each read is a DSM login; keep the connection log quiet
     description = ("Watches a Synology NAS through the DSM Web API: system temperature, CPU, memory, disks, storage "
                    "pools and volumes, DSM updates and, over SNMPv3, fans and power supply. Nothing on the NAS is changed.")
     setup_title = "First create a separate account for homewatch"
@@ -48,19 +48,19 @@ class SynologyModule(ApiModule):
         ("text", "Control Panel → User & Group → Create: name it homewatch, add it to the administrators group, "
                  "and on the next pages set No access to every shared folder and Deny for every application "
                  "except DSM. If 2-step verification is enforced, exempt this account."),
-        ("text", "homewatch only reads; it logs in every 10 minutes and logs out right after."),
+        ("text", "homewatch only reads; it logs in at each read (every 10 minutes unless you change it) and logs out right after."),
         ("text", "Optional, fans and power supply: Control Panel → Terminal & SNMP → SNMP → enable the SNMP "
                  "service, tick SNMPv3 and create a user (authentication SHA, privacy AES are the safe choices). "
                  "Then tick SNMPv3 below and enter the same user, protocols and passwords."),
     ]
     # line 1 the DSM login; lines 2 and 3 SNMPv3, their protocols and passwords in the same columns
     layout = [
-        ["url", "username", None, "_secret"],
+        ["url", "username", "every_min", "_secret"],
         ["snmp_on", "snmp_user", "snmp_auth_protocol", "snmp_auth"],
         [None, "snmp_priv_on", "snmp_priv_protocol", "snmp_priv"],
     ]
     # tick boxes sit at the right of their cell, next to what they switch on
-    layout_cols = "minmax(0, 240px) minmax(0, 1fr) 96px minmax(0, 1fr)"
+    layout_cols = "minmax(0, 240px) minmax(0, 1fr) 112px minmax(0, 1fr)"
     fields = [
         Field("url", "NAS address", "https://192.168.1.20:5001"),
         Field("username", "User name", "homewatch", default="homewatch"),

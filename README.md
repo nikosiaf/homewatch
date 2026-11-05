@@ -161,7 +161,7 @@ entities that *become* unavailable are reported.
 
 ### Synology NAS module (optional)
 
-Reads DSM through its Web API every 10 minutes (log in, read, log out). DSM has no read-only
+Reads DSM through its Web API every 10 minutes by default (log in, read, log out). DSM has no read-only
 administrator role, so the setup asks for a separate `homewatch` administrator with no access to
 shared folders or applications.
 
@@ -209,7 +209,7 @@ Reads the devices of a UniFi Network application (UniFi OS Server or a UniFi con
 
 ### Proxmox Backup Server module (optional)
 
-Reads PBS every 5 minutes through an API token with the read-only **Audit** role (the module page
+Reads PBS every 15 minutes by default through an API token with the read-only **Audit** role (the module page
 shows the commands to create it).
 
 | Check | WARNING | ERROR |
@@ -253,6 +253,21 @@ under "Containers to watch" (grouped per host and compose project).
 | Restarts (watched containers, last hour) | ≥ 1 | ≥ 3 |
 | Health checks | a watched container is unhealthy | |
 | Containers removed (save the page to accept) | a watched container is gone | |
+
+### How often each module is read
+
+Each module's page has a **Read every (minutes)** box next to its password or token. The defaults keep
+alerts quick where they matter and spare devices where they don't. A problem is alerted after two
+readings agree, so expect an alert one to two read intervals after it starts.
+
+| Module | Default | Why |
+|---|---|---|
+| Internet line | continuous probes, checked every 2 min | the line itself |
+| UPS, Home Assistant | 2 min | power events, alarm and safety sensors |
+| MikroTik, UniFi, OPNsense, Proxmox VE, Docker | 5 min | each read logs in; a stop or a down port waits a few minutes |
+| Synology NAS | 10 min | each read is a DSM login |
+| Proxmox Backup Server | 15 min | backups run nightly |
+| ISP modem | 15 min | its own setting |
 
 ### Alerts and notifications
 

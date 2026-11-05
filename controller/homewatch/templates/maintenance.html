@@ -3,8 +3,8 @@
 {% block title %}Maintenance{% endblock %}
 {% block content %}
 <h1>Maintenance</h1>
-<h2>Snooze</h2>
 <div class="card" id="snooze">
+  <h2 class="card-title">Snooze</h2>
   {{ note("snooze") }}
   <p class="quiet small" style="margin-top:0">Holds one check's notifications for a while. Its problems are still recorded.</p>
   {% if snoozes %}<table>
@@ -40,8 +40,8 @@
     </tr>{% else %}<tr><td colspan="5" class="quiet">No windows.</td></tr>{% endfor %}
   </table>
 </div>
-<h2>Add a window</h2>
 <form method="post" action="/maintenance" class="card" id="add">
+  <h2 class="card-title">Add a window</h2>
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="add">
   {{ note("add") }}
   <label for="mn">Name</label><input id="mn" type="text" name="name" placeholder="e.g. Router firmware update" maxlength="100">

@@ -1,4 +1,4 @@
-<div id="reading" class="card scroll">
+<div id="reading" class="card">
   <div class="row" style="justify-content:space-between;align-items:center">
     <h2 style="margin:0">Last reading</h2>
     <div class="row" style="align-items:center;gap:8px">
@@ -12,7 +12,7 @@
   <p class="quiet small">Read {{ st.last_ok | ts('%d %b %H:%M:%S') }}{% if st.info %} ·
     {% for k, v in st.info.items() %}{{ k }} {{ v }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</p>
   {% set v = st['values'] %}{% set stt = st['status'] %}
-  <table>
+  <fieldset class="reading"><legend>DSL line</legend><div class="scroll"><table>
     <tr><th></th><th>Down</th><th>Up</th></tr>
     <tr><td>Sync rate</td><td>{{ '%.1f' | format(v.get('sync_down_kbps', 0) / 1000) }} Mbit/s</td><td>{{ '%.1f' | format(v.get('sync_up_kbps', 0) / 1000) }} Mbit/s</td></tr>
     <tr><td>Attainable</td><td>{{ '%.1f' | format(v.get('attainable_down_kbps', 0) / 1000) }} Mbit/s</td><td>{{ '%.1f' | format(v.get('attainable_up_kbps', 0) / 1000) }} Mbit/s</td></tr>
@@ -22,7 +22,7 @@
     <tr><td>DSL link</td><td colspan="2">{{ 'up' if stt.get('link_up') else 'down' }}{% if v.get('line_up_s') %}, in sync for {{ v.line_up_s | dur }}{% endif %}</td></tr>
     {% if 'ppp_up' in stt %}<tr><td>PPP on the modem</td><td colspan="2">{{ 'up' if stt.ppp_up else 'down' }}</td></tr>{% endif %}
     {% if v.get('modem_uptime_s') %}<tr><td>Modem uptime</td><td colspan="2">{{ v.modem_uptime_s | dur }}</td></tr>{% endif %}
-  </table>
+  </table></div></fieldset>
   {% else %}<p class="quiet">No reading yet.</p>{% endif %}
   {% if st.last_error %}<p style="color:var(--err)">Last attempt {{ st.last_try | ts('%d %b %H:%M') }}: {{ st.last_error }}</p>{% endif %}
   {% if st.cert_changed %}

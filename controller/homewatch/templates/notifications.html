@@ -74,8 +74,8 @@
   <p class="row"><button data-save>Save</button>
     <button class="secondary" name="send_now" value="1">Save and send it now</button></p>
 </form>
-<h2>Timing</h2>
 <form method="post" action="/notifications/timing" class="card" id="timing">
+  <h2 class="card-title">Timing</h2>
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="timing">
   {{ note("timing") }}
   <div class="row">
