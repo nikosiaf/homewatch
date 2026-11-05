@@ -269,3 +269,59 @@ document.querySelectorAll("[data-choice-search]").forEach(function (search) {
     });
   });
 })();
+
+// Long tables (data-page="20"): the first rows, then "Show 20 more" until all are shown. The header row stays.
+document.querySelectorAll("table[data-page]").forEach(function (table) {
+  const step = parseInt(table.dataset.page, 10) || 20;
+  const rows = Array.from(table.querySelectorAll("tr")).filter(function (r) { return !r.querySelector("th"); });
+  if (rows.length <= step) return;
+  let shown = 0;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "secondary more-rows";
+  function more() {
+    shown = Math.min(rows.length, shown + step);
+    rows.forEach(function (r, i) { r.classList.toggle("page-hidden", i >= shown); });
+    const left = rows.length - shown;
+    btn.textContent = "Show " + Math.min(step, left) + " more (" + left + " left)";
+    btn.hidden = left === 0;
+  }
+  btn.addEventListener("click", more);
+  table.after(btn);
+  more();
+});
+
+// Forms that need the user's password (data-ask-password="question"): it is asked in a window when the form is sent.
+(function () {
+  const dlg = document.getElementById("ask-password");
+  if (!dlg) return;
+  const title = dlg.querySelector("[data-ask-title]");
+  const input = dlg.querySelector("input[type=password]");
+  const ok = dlg.querySelector("[data-ask-ok]");
+  let pending = null;
+  document.addEventListener("submit", function (e) {
+    const form = e.target;
+    if (!form.matches("form[data-ask-password]") || form.dataset.asked) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    pending = form;
+    title.textContent = form.dataset.askPassword;
+    const action = form.dataset.askAction || "Confirm";
+    ok.textContent = action;
+    ok.classList.toggle("danger", form.hasAttribute("data-ask-danger"));
+    input.value = "";
+    dlg.returnValue = "";  // Escape keeps the last value otherwise
+    dlg.showModal();
+    input.focus();
+  }, true);
+  dlg.addEventListener("close", function () {
+    const form = pending;
+    pending = null;
+    if (!form || dlg.returnValue !== "ok" || !input.value) return;
+    form.querySelector('input[name="current"]').value = input.value;
+    input.value = "";
+    form.dataset.asked = "1";
+    form.requestSubmit();
+  });
+  dlg.querySelector("[data-ask-cancel]").addEventListener("click", function () { dlg.close("cancel"); });
+})();

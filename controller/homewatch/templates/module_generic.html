@@ -42,7 +42,8 @@
   </div>
   {% endif %}
   {% set fs = module.fields | selectattr('section', 'equalto', section) | rejectattr('key', 'in', placed) | list %}
-  {% set plain = fs | rejectattr('kind', 'in', ('check', 'lines')) | list %}
+  {% set plain = fs | rejectattr('kind', 'in', ('check', 'lines')) | rejectattr('own_line') | list %}
+  {% if section == 'more' and plain and module.more_fields_title %}<h3>{{ module.more_fields_title }}</h3>{% endif %}
   {% if plain or (section == '' and module.secret_label and '_secret' not in placed) %}
   <div class="row fields">
   {% for f in plain %}{{ field_cell(f, s) }}{% endfor %}
@@ -50,19 +51,52 @@
   </div>
   {% endif %}
   {% for f in fs if f.kind == 'lines' %}
-    <div style="margin-top:12px"><label for="f-{{ f.key }}">{{ f.label }}</label>
+    <div style="margin-top:12px">{% if section == 'more' %}<h3><label for="f-{{ f.key }}">{{ f.label }}</label></h3>{% else %}<label for="f-{{ f.key }}">{{ f.label }}</label>{% endif %}
       <textarea id="f-{{ f.key }}" name="{{ f.key }}" rows="6" spellcheck="false" placeholder="{{ f.placeholder }}"
                 style="width:100%;max-width:none;font-family:var(--mono, monospace)">{{ s[f.key] if s[f.key] is not none }}</textarea>
       {% if f.help %}<p class="quiet small" style="margin:4px 0 0">{{ f.help }}</p>{% endif %}</div>
   {% endfor %}
+  {% if section == '' %}{{ check_fields(fs) }}{% endif %}
+  {% for f in fs if f.own_line %}<div class="row fields">{{ field_cell(f, s) }}</div>{% endfor %}
+{% endmacro %}
+
+{% macro check_fields(fs) %}
   {% for f in fs if f.kind == 'check' %}
     <label class="check"><input type="checkbox" name="{{ f.key }}" {{ 'checked' if s[f.key] }}> {{ f.label }}</label>
     {% if f.help %}<p class="quiet small" style="margin:0 0 0 26px">{{ f.help }}</p>{% endif %}
   {% endfor %}
 {% endmacro %}
 
+{# the lists, and on the second box the fields after them: entities to watch, ones to ignore, sensors, rules #}
+{% macro lists_html() %}
+    {% if snap and (module.choices_title or module.filter_title) %}
+    <p class="quiet small" style="margin-top:14px">The lists below come from the reading at {{ snap_ts | ts('%H:%M:%S') }}
+      ({{ module.name }} is read every {{ read_every }}).
+      <button class="secondary" formaction="/modules/{{ module.id }}/refresh" formnovalidate>Read now</button></p>
+    {% endif %}
+    {% if module.more_title and module.filter_title %}
+    <h3>{{ module.filter_title }}</h3>
+    {% if module.filter_help %}<p class="quiet small">{{ module.filter_help }}</p>{% endif %}
+    {{ check_fields(module.fields | selectattr('section', 'equalto', 'more') | list) }}
+    {% if filters %}<input type="hidden" name="_filters_shown" value="{{ filters_shown }}">
+    {{ choice_list(filters, "keep.", "watched") }}{% else %}<p class="quiet">Appears after the first reading.</p>{% endif %}
+    {% endif %}
+    {% if module.choices_title %}
+    <h3>{{ module.choices_title }}</h3>
+    {% if module.choices_help %}<p class="quiet small">{{ module.choices_help }}</p>{% endif %}
+    {% if not choices and snap and module.choices_empty %}<p class="empty-note">{{ module.choices_empty }}</p>
+    {% else %}{{ choice_list(choices, "choose.", "ticked") }}{% endif %}
+    {% endif %}
+    {% if not module.more_title and module.filter_title and filters %}
+    <h3>{{ module.filter_title }}</h3>
+    {% if module.filter_help %}<p class="quiet small">{{ module.filter_help }}</p>{% endif %}
+    <input type="hidden" name="_filters_shown" value="{{ filters_shown }}">
+    {{ choice_list(filters, "keep.", "watched") }}
+    {% endif %}
+{% endmacro %}
+
 {% macro choice_label(c, prefix, on) %}
-      <label class="check" title="{{ c.detail }}"><input type="checkbox" name="{{ prefix }}{{ c.value }}" {{ 'checked' if on }}> <span class="cl">{{ c.label }}</span>{% if c.detail %} <span class="quiet small cd">{{ c.detail }}</span>{% endif %}</label>
+      <label class="check" title="{{ c.label }}{{ " · " ~ c.detail if c.detail }}"><input type="checkbox" name="{{ prefix }}{{ c.value }}" {{ 'checked' if on }}> <span class="cl">{{ c.label }}</span>{% if c.detail %} <span class="quiet small cd">{{ c.detail }}</span>{% endif %}</label>
 {% endmacro %}
 
 {% macro choice_list(items_all, prefix, word) %}
@@ -117,28 +151,9 @@
   {% if api_error %}<p class="flash err">{{ api_error }}</p>{% endif %}
   {% if notice %}<p class="flash err">{{ notice }}</p>{% endif %}
   <fieldset data-enable-target class="plain" {{ 'disabled' if not s.enabled }}>
+    {% if module.more_title %}<input type="hidden" name="_part" value="main">{% endif %}
     {{ fields_html(s) }}
-    {% if module.more_title %}
-    <h3 class="section">{{ module.more_title }}</h3>
-    {% if module.more_help %}<p class="quiet small">{{ module.more_help }}</p>{% endif %}
-    {{ fields_html(s, 'more') }}
-    {% endif %}
-    {% if snap and (module.choices_title or module.filter_title) %}
-    <p class="quiet small" style="margin-top:14px">The lists below come from the reading at {{ snap_ts | ts('%H:%M:%S') }}
-      ({{ module.name }} is read every {{ read_every }}).
-      <button class="secondary" formaction="/modules/{{ module.id }}/refresh" formnovalidate>Read now</button></p>
-    {% endif %}
-    {% if module.choices_title %}
-    <h3>{{ module.choices_title }}</h3>
-    {% if module.choices_help %}<p class="quiet small">{{ module.choices_help }}</p>{% endif %}
-    {{ choice_list(choices, "choose.", "ticked") }}
-    {% endif %}
-    {% if module.filter_title and filters %}
-    <h3>{{ module.filter_title }}</h3>
-    {% if module.filter_help %}<p class="quiet small">{{ module.filter_help }}</p>{% endif %}
-    <input type="hidden" name="_filters_shown" value="{{ filters_shown }}">
-    {{ choice_list(filters, "keep.", "watched") }}
-    {% endif %}
+    {% if not module.more_title %}{{ lists_html() }}{% endif %}
   </fieldset>
   <p class="row" style="justify-content:space-between"><button data-save>Save</button>
     <button class="danger" name="remove" value="1" data-confirm="Remove {{ module.name }} and its saved login from homewatch?" formnovalidate>Remove</button></p>
@@ -156,6 +171,19 @@
   </table>
   {% endfor %}
 </div>
+{% endif %}
+
+{% if module.more_title and s.enabled %}
+<form method="post" action="/modules/{{ module.id }}" class="card" id="more">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="more">
+  <input type="hidden" name="_part" value="more">
+  <h2 style="margin-top:0">{{ module.more_title }}</h2>
+  {{ note("more") }}
+  {% if module.more_help %}<p class="quiet small">{{ module.more_help }}</p>{% endif %}
+  {{ lists_html() }}
+  {{ fields_html(s, 'more') }}
+  <p><button data-save>Save</button></p>
+</form>
 {% endif %}
 {% endif %}
 {% include "_cert.html" %}

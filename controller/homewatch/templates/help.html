@@ -102,9 +102,12 @@ less install.sh          # please read it first; it's short
 
 <h2 id="update">Update and back up</h2>
 <div class="card">
-  <p>To update, set <code>HW_VERSION</code> in <code>.env</code> to the new release, then run:</p>
+  <p>The Home box on the System page says when a newer release exists. If <code>install.sh</code> added the updater,
+    press Install there: homewatch restarts with the new release within a minute or two. The updater runs on the host;
+    homewatch only asks it, and it always installs the latest release from GitHub.</p>
+  <p>Without the updater, set <code>HW_VERSION</code> in <code>.env</code> to the new release, then run:</p>
   <pre class="code">docker compose pull &amp;&amp; docker compose up -d</pre>
-  <p>Database changes apply on start. The System page tells you when a newer release exists.</p>
+  <p>Database changes apply on start.</p>
   <p style="margin-bottom:0">To back up, keep the Docker volumes <code>homewatch_hw-data</code> (settings, users, history, encrypted secrets) and
     <code>homewatch_vm-data</code> (metrics), and a copy of <code>.env</code>. Without <code>HW_MASTER_KEY</code> from that file, saved passwords
     and tokens can't be decrypted and you would enter them again.</p>

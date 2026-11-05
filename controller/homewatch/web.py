@@ -10,7 +10,7 @@ import secrets as pysecrets
 import time
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from datetime import datetime
 from zoneinfo import ZoneInfo, available_timezones
 
@@ -943,14 +943,16 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     # -- system ------------------------------------------------------------------------------------
     @app.get("/system")
     async def system_page(request: Request):
+        from . import updater
         rt = rt_of(request)
         users = rt.db.all("SELECT id, username, role, created FROM users ORDER BY username")
         log_rows = rt.db.all("SELECT * FROM audit ORDER BY id DESC LIMIT 100")
-        version_rows = rt.db.all("SELECT id, ts, username, action, summary FROM config_versions ORDER BY id DESC LIMIT 50")
+        version_rows = rt.db.all("SELECT id, ts, username, action, summary FROM config_versions ORDER BY id DESC LIMIT 200")
         vm_ok = await rt.metrics.healthy()
         return page(request, "system.html", request.state.user, users=users, log=log_rows, vm_ok=vm_ok,
                     last_run=rt.last_run, last_error=rt.last_error, csrf=request.state.user.csrf,
                     updates=rt.db.get("updates.check", True), latest=rt.db.get("updates.latest", ""),
+                    checked=rt.db.get("updates.checked", 0), updater=updater.state(rt.cfg.update_dir),
                     roles=ROLES, tzname=rt.db.get("home.tz") or "UTC", zones=sorted(available_timezones()),
                     home_name=rt.db.get("home.name") or "Home", home_url=rt.db.get("home.url") or "",
                     probe_age=_probe_age(rt), ookla=_ookla_version(rt), versions=version_rows,
@@ -963,6 +965,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         name = f"homewatch-config-{time.strftime('%Y-%m-%d')}.yaml"
         return Response(versions.to_yaml(rt_of(request).db), media_type="application/yaml",
                         headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+    @app.get("/system/exports")
+    async def config_export_pick(name: str = ""):  # the export dropdown
+        return RedirectResponse(f"/system/exports/{quote(name)}" if name else "/system#backup", status_code=303)
 
     @app.get("/system/exports/{name}")
     async def config_export_file(request: Request, name: str):
@@ -1148,15 +1154,33 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/system", err=f"History deleted, but metrics could not be: {warning}")
         return back("/system", msg="History and metrics deleted")
 
-    @app.post("/system/updates")
-    async def updates_toggle(request: Request):
+    @app.post("/system/updates/check")
+    async def updates_check(request: Request):
         rt = rt_of(request)
-        form = await form_of(request, request.state.user)
-        if form is None:
+        if await form_of(request, request.state.user) is None:
             return back("/system", err="Form expired")
-        rt.db.set("updates.check", form.get("check") == "on")
-        audit(rt.db, request.state.user.username, "updates", f"check={form.get('check') == 'on'}")
-        return back("/system", msg="Saved")
+        _box.set("home")
+        await rt.check_update(time.time())
+        latest, newer = rt.db.get("updates.latest", ""), rt.update_available()
+        if not latest:
+            return back("/system", err="Couldn't read the latest release from GitHub; try again later")
+        return back("/system", msg=f"homewatch {newer} is available" if newer else f"{latest} is the latest release")
+
+    @app.post("/system/updates/install")
+    async def updates_install(request: Request):
+        from . import updater
+        rt = rt_of(request)
+        if await form_of(request, request.state.user) is None:
+            return back("/system", err="Form expired")
+        _box.set("home")
+        newer = rt.update_available()
+        if not newer:
+            return back("/system", err="No newer release to install")
+        err = updater.ask(rt.cfg.update_dir, newer, request.state.user.username)
+        if err:
+            return back("/system", err=err)
+        audit(rt.db, request.state.user.username, "update", f"asked the updater for {newer}")
+        return back("/system", msg=f"Installing {newer}: homewatch restarts within a minute or two. Reload this page then.")
 
 
 def _probe_age(rt) -> float | None:
@@ -1317,7 +1341,11 @@ def _save_section(request: Request, section: str, form: dict, user: User) -> str
             rt.db.set("home.url", url)
         rt.db.set("home.name", name or "Home")
         rt.db.set("home.tz", zone)
-        audit(rt.db, user.username, "home", f"name={name} tz={zone}")
+        detail = f"name={name} tz={zone}"
+        if "_updates" in form:  # the System page's Home box also holds the update check (not the wizard's)
+            rt.db.set("updates.check", form.get("check") == "on")
+            detail += f" update_check={form.get('check') == 'on'}"
+        audit(rt.db, user.username, "home", detail)
         return ""
     if section == "internet":
         return MODULES["internet"].save(rt, form, user)

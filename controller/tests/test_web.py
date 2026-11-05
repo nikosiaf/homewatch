@@ -1086,7 +1086,7 @@ def test_home_assistant_form_shows_full_read_default_for_old_settings(client):
     setup_admin(client)
     client.rt.db.set("module.homeassistant", {"enabled": True, "url": "http://ha.test:8123", "verify": False})
     page = client.get("/modules/homeassistant").text
-    assert 'name="full_every" value="30"' in page and "From 5 to 1440" in page
+    assert 'name="full_every" value="30"' in page and "(5 to 1440)" in page
 
 
 def test_docker_save_refused_when_one_host_unreachable(client, monkeypatch):
@@ -1138,7 +1138,9 @@ def test_module_pages_connect_first_then_the_details(client, monkeypatch):
     tok = setup_admin(client)
     page = client.get("/modules/homeassistant").text
     assert 'id="f-url"' in page and 'id="f-secret"' in page
-    assert 'id="f-rules"' not in page and 'id="f-full_every"' not in page  # not on the Add form
+    assert 'id="f-rules"' not in page and 'id="f-cpu_sensor"' not in page  # not on the Add form
+    # how often to read: on its own line below the certificate box
+    assert page.index('name="verify"') < page.index('id="f-full_every"') < page.index(">Connect<")
     from homewatch.modules.homeassistant.plugin import plugin
     from tests.test_homeassistant import snap
 
@@ -1146,14 +1148,96 @@ def test_module_pages_connect_first_then_the_details(client, monkeypatch):
         return snap()
 
     monkeypatch.setattr(plugin, "fetch", good)
-    client.post("/modules/homeassistant", data={"csrf": tok, "url": "http://ha:8123", "secret": "t", "verify": "on"})
+    client.post("/modules/homeassistant", data={"csrf": tok, "url": "http://ha:8123", "secret": "t", "verify": "on",
+                                                "full_every": "30"})
     s = client.rt.db.get("module.homeassistant")
     assert s["full_every"] == plugin.field("full_every").default and s["watch_all"] is False
     page = client.get("/modules/homeassistant").text
-    assert "Additional configuration" in page and page.index('id="f-secret"') < page.index("Additional configuration") \
-        < page.index('id="f-rules"')
-    assert "class=num" in page.split('id="f-full_every"')[1].split(">")[0]
+    # the connection box, then Last reading, then Additional configuration as its own box
+    main = page.split('id="settings"')[1].split("</form>")[0]
+    assert 'id="f-full_every"' in main and 'id="f-rules"' not in main and "Entities to watch" not in main
+    assert "class=num" in main.split('id="f-full_every"')[1].split(">")[0]
+    assert page.index('id="overview"') < page.index('id="more"')
+    more = page.split('id="more"')[1].split("</form>")[0]
+    order = [more.index(k) for k in ("Entities to watch", 'name="watch_all"', "Unavailable entities to ignore",
+                                     "Host sensors", 'id="f-disk_sensor"', 'id="f-memory_sensor"', 'id="f-cpu_sensor"',
+                                     'id="f-rules"')]
+    assert order == sorted(order) and 'name="_part" value="more"' in more
+    # each box saves only its own fields
+    client.post("/modules/homeassistant", data={"csrf": tok, "_part": "more", "rules": "sensor.oil below 200 warning",
+                                                "cpu_sensor": "sensor.cpu", "watch_all": "on"})
+    s = client.rt.db.get("module.homeassistant")
+    assert s["rules"] == "sensor.oil below 200 warning" and s["cpu_sensor"] == "sensor.cpu" and s["watch_all"] is True
+    assert s["enabled"] is True and s["verify"] is True and s["url"] == "http://ha:8123"
+    client.post("/modules/homeassistant", data={"csrf": tok, "_part": "main", "enabled": "on", "url": "http://ha:8123",
+                                                "full_every": "60"})
+    s = client.rt.db.get("module.homeassistant")
+    assert s["full_every"] == 60 and s["verify"] is False  # unticked in the main box
+    assert s["rules"] == "sensor.oil below 200 warning" and s["watch_all"] is True and s["cpu_sensor"] == "sensor.cpu"
     plugin.snap = None
+
+
+def test_unavailable_list_says_when_nothing_is_unavailable(client, monkeypatch):
+    tok = setup_admin(client)
+    from homewatch.modules.homeassistant.plugin import plugin
+    from tests.test_homeassistant import snap
+
+    async def none_down(*a, **k):
+        return snap() | {"unavailable": []}
+
+    monkeypatch.setattr(plugin, "fetch", none_down)
+    client.post("/modules/homeassistant", data={"csrf": tok, "url": "http://ha:8123", "secret": "t"})
+    page = client.get("/modules/homeassistant").text
+    assert "Nothing is unavailable right now" in page
+    plugin.snap = None
+
+
+def test_system_page_users_ask_password_in_a_window(client):
+    tok = setup_admin(client)
+    client.post("/users", data={"csrf": tok, "username": "viewer1", "password": "x" * 12, "role": "viewer",
+                                "current": "a-long-password"})
+    page = client.get("/system").text
+    users = page.split('id="users"')[1].split("<h2>")[0]
+    assert "Your current password" not in users and 'placeholder="Your password"' not in users
+    assert 'data-ask-password="Remove viewer1?"' in users and 'data-ask-password="Add this user?"' in users
+    assert '<dialog class="ask" id="ask-password">' in page
+    assert 'data-page="10"' in page  # configuration versions, 10 at a time
+
+
+def test_update_check_and_install_from_the_home_box(client, monkeypatch, tmp_path):
+    import os
+    from homewatch import updater
+    tok = setup_admin(client)
+    page = client.get("/system").text
+    home = page.split('id="home"')[1].split("</form>")[0]
+    assert 'name="check"' in home and "Check now" in home and "Install" not in home
+    client.post("/system/home", data={"csrf": tok, "_box": "home", "name": "Home", "tz": "UTC", "_updates": "1"})
+    assert client.rt.db.get("updates.check") is False  # unticked, saved by the Home box's Save
+    client.post("/system/home", data={"csrf": tok, "name": "Home", "tz": "UTC"})  # the wizard's step: untouched
+    assert client.rt.db.get("updates.check") is False
+
+    async def found(now):
+        client.rt.db.set("updates.checked", now)
+        client.rt.db.set("updates.latest", "9.9.9")
+
+    monkeypatch.setattr(client.rt, "check_update", found)
+    monkeypatch.setattr(client.rt, "update_available", lambda: "9.9.9")
+    assert "homewatch 9.9.9 is available" in client.post("/system/updates/check", data={"csrf": tok}).text
+    page = client.get("/system").text
+    assert "Install 9.9.9" not in page and "HW_VERSION=9.9.9" in page  # no updater on this host: the command
+    upd = tmp_path / "update"
+    (upd / "ask").mkdir(parents=True)
+    object.__setattr__(client.rt.cfg, "update_dir", str(upd))
+    assert "Install 9.9.9" in client.get("/system").text
+    r = client.post("/system/updates/install", data={"csrf": tok})
+    assert "Installing 9.9.9" in r.text and os.path.exists(upd / "ask" / "request")
+    assert "update requested" in client.get("/system").text
+    os.remove(upd / "ask" / "request")
+    (upd / "status").write_text("1700000000 failed installing 9.9.9 failed, still on 0.28.0\n")
+    st = updater.state(str(upd))
+    assert st["state"] == "failed" and "still on 0.28.0" in st["status"]
+    (upd / "status").write_text("1700000000 running installing 9.9.9\n")
+    assert updater.state(str(upd), now=1700000000 + 3600)["state"] == "failed"  # stuck for an hour
 
 
 def test_synology_lines_share_columns_and_snmp_shows_when_ticked(client):

@@ -5,3 +5,5 @@ __pycache__/
 deploy/.env
 deploy/certs/
 deploy/data/
+deploy/update/
+deploy/.env.before-update

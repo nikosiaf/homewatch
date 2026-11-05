@@ -21,7 +21,7 @@ services:
     tmpfs: [/tmp, /config]
 
   controller:
-    image: ghcr.io/nikosiaf/homewatch:${HW_VERSION:-0.28.0}
+    image: ghcr.io/nikosiaf/homewatch:${HW_VERSION:-0.29.0}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -33,6 +33,7 @@ services:
     volumes:
       - hw-data:/data
       - telegraf-config:/telegraf
+      - ./update:/update  # the host's updater (install.sh): homewatch only leaves a request in update/ask/
     depends_on:
       - victoriametrics
     read_only: true

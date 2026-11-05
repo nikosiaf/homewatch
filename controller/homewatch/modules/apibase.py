@@ -54,6 +54,7 @@ class Field:
     width: str = ""  # "" | wide | narrow: the size of the box
     section: str = ""  # "" = the connection (on the Add form too) | more = the module's second section, after connecting
     when: str = ""  # check field key(s), space separated: the field shows only while they are all ticked
+    own_line: bool = False  # on a line of its own, after the section's tick boxes
 
 
 @dataclass
@@ -98,8 +99,10 @@ class ApiModule(PinnedTLS, Module):
     layout: list[list[str | None]] = []
     layout_cols = ""  # CSS grid-template-columns for layout
     secret_width = ""  # "" | wide
-    more_title = ""  # title of the second section (fields with section="more" and the lists)
+    more_title = ""  # the second section: its own box after "Last reading", with the section="more" fields and the lists
     more_help = ""
+    more_fields_title = ""  # heading over the second section's plain fields
+    choices_empty = ""  # shown when the choice list has nothing in it
 
     def field(self, key: str) -> Field:
         return next(f for f in self.fields if f.key == key)
@@ -111,6 +114,10 @@ class ApiModule(PinnedTLS, Module):
         self.snap: dict | None = None
         self.snap_ts = 0.0
         self.error = ""
+        self.stale = False  # read again at the next run, whatever the time
+
+    def reread(self) -> None:
+        self.stale = True
 
     # ---- settings --------------------------------------------------------------------------
     @property
@@ -163,12 +170,16 @@ class ApiModule(PinnedTLS, Module):
     def validate(self, form: dict, old: dict) -> tuple[dict, str]:
         """Turn the form into settings; override to normalize addresses. Returns (settings, error)."""
         out = {}
+        part = form.get("_part")  # a module with a second box saves each box on its own; None = one form for all
         for f in self.fields:
             if f.secret:
                 continue
-            raw = form.get(f.key, old.get(f.key, f.default))
+            other = part is not None and (f.section or "main") != part  # a field of the other box keeps its value
+            raw = old.get(f.key, f.default) if other else form.get(f.key, old.get(f.key, f.default))
             if f.kind == "check":
-                if f.section and "_new" in form:  # not on the Add form: its default
+                if other:
+                    out[f.key] = bool(raw)
+                elif f.section and "_new" in form:  # not on the Add form: its default
                     out[f.key] = bool(f.default)
                 else:
                     out[f.key] = form.get(f.key) == "on" if f.key in form or "enabled" in form or "_new" in form else bool(raw)
@@ -222,7 +233,8 @@ class ApiModule(PinnedTLS, Module):
         return []
 
     async def readings(self, rt, settings, now):
-        if self.snap is None or now - self.snap_ts >= self.every:
+        if self.snap is None or self.stale or now - self.snap_ts >= self.every:
+            self.stale = False
             try:
                 full = await self.pin_settings(rt, self.with_secret_fields(rt, settings))
                 self.snap = await self.fetch(full, rt.secrets.get(self.secret_key) or "", now)
@@ -271,6 +283,10 @@ class ApiModule(PinnedTLS, Module):
         for f in self.fields:
             if f.secret and not f.optional and not full[f.key]:
                 return f"Enter the {f.label}"
+        if form.get("_part") == "more":  # the second box changes nothing of the connection: read again at the next run
+            self.reread()
+            form["_validated"] = json.dumps(new)
+            return ""
         turning_off = self.configured(rt) and "enabled" not in form
         if not turning_off:
             try:
@@ -302,13 +318,17 @@ class ApiModule(PinnedTLS, Module):
         old = self.load(rt)
         new = json.loads(form.get("_validated", "{}"))
         settings = old | new
-        settings["enabled"] = True if first else form.get("enabled") == "on"
+        part = form.get("_part")
+        if part != "more":
+            settings["enabled"] = True if first else form.get("enabled") == "on"
+        # the lists are in the form: the second box, or the one form when it isn't greyed out
+        lists = part == "more" or (part is None and "enabled" in form)
         if self.choices_title:
             if first:
                 settings["chosen"] = json.loads(form.get("_default_chosen", "[]"))
-            elif "enabled" in form:  # the list is part of the (not greyed-out) form
+            elif lists:
                 settings["chosen"] = sorted(k.split(".", 1)[1] for k in form if k.startswith("choose."))
-        if self.filter_title and not first and "enabled" in form:
+        if self.filter_title and not first and lists:
             # values not on the page this time (e.g. a domain that has no entities now) keep their setting
             shown = set(json.loads(form.get("_filters_shown", "[]")))
             kept = {k.split(".", 1)[1] for k in form if k.startswith("keep.")}

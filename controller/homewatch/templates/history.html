@@ -10,7 +10,6 @@
       <option value="1" {{ 'selected' if level == '1' }}>WARNING</option><option value="2" {{ 'selected' if level == '2' }}>ERROR</option></select></div>
     <div><label for="d">Period</label><select id="d" name="days">
       {% for d in [1, 7, 30, 90, 365] %}<option value="{{ d }}" {{ 'selected' if d == days }}>{{ d }} day{{ 's' if d > 1 }}</option>{% endfor %}</select></div>
-    <div><button>Show</button></div>
   </form>
   {% if avail.percent is none %}<p>Internet availability over {{ days }} day{{ 's' if days > 1 }}: <b>unknown</b>, the line wasn't monitored in this period.</p>
   {% else %}<p>Internet availability over {{ days }} day{{ 's' if days > 1 }}: <b>{{ '%.2f' | format(avail.percent) }} %</b> · {{ avail.outages }} outage{{ 's' if avail.outages != 1 }}
@@ -21,7 +20,7 @@
 </div>
 {% from "_more.html" import more %}
 {% macro event_table(rows, with_source) %}
-<div class="card scroll"><table>
+<div class="card scroll"><table data-page="20">
   <tr><th>When</th><th>Status</th>{% if with_source %}<th>Source</th>{% endif %}<th>Check</th><th>What happened</th><th>Duration</th></tr>
   {% for e in rows %}<tr>
     <td style="white-space:nowrap">{{ e.ts | ts }}</td>

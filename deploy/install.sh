@@ -3,9 +3,12 @@
 #   1. creates .env from .env.example with a new master key, this host's time zone and
 #      its gateway / DNS server as defaults for the setup wizard (skipped if .env exists)
 #   2. creates a self-signed HTTPS certificate in ./certs (skipped if one exists)
-#   3. pulls the images and starts the stack with docker compose
-# Usage: ./install.sh          (release images from ghcr.io)
-#        ./install.sh --dev    (build the controller from ../controller)
+#   3. offers the updater: a systemd unit that runs update.sh when the System page's "Install" button asks
+#      (needs sudo once; homewatch itself gets no Docker access, it only leaves a file in update/ask/)
+#   4. pulls the images and starts the stack with docker compose
+# Usage: ./install.sh               (release images from ghcr.io)
+#        ./install.sh --no-updater  (the same, without the updater)
+#        ./install.sh --dev         (build the controller from ../controller; no updater)
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -48,6 +51,51 @@ if [[ ! -f certs/cert.pem ]]; then
     -keyout certs/key.pem -out certs/cert.pem -subj "/CN=homewatch" -addext "subjectAltName=${san}" 2>/dev/null
   chmod 600 certs/key.pem
 fi
+
+# The updater. update/ is root's (status), update/ask/ only homewatch's (uid 10001) for the request.
+add_updater() {
+  local dir sudo=()
+  dir=$(pwd -P)
+  [[ $EUID -eq 0 ]] || sudo=(sudo)
+  [[ -x update.sh ]] || { echo "  update.sh is missing next to install.sh; skipping the updater"; return 0; }
+  command -v systemctl >/dev/null && command -v curl >/dev/null \
+    || { echo "  needs systemd and curl; skipping the updater"; return 0; }
+  "${sudo[@]}" install -d -o root -g root -m 755 update
+  "${sudo[@]}" install -d -o 10001 -m 700 update/ask
+  "${sudo[@]}" tee /etc/systemd/system/homewatch-update.service >/dev/null <<UNIT
+[Unit]
+Description=homewatch: install the latest release (asked from the System page)
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart="${dir}/update.sh"
+UNIT
+  "${sudo[@]}" tee /etc/systemd/system/homewatch-update.path >/dev/null <<UNIT
+[Unit]
+Description=homewatch: wait for an update request from the System page
+
+[Path]
+PathExists=${dir}/update/ask/request
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  "${sudo[@]}" systemctl daemon-reload
+  "${sudo[@]}" systemctl enable --now homewatch-update.path >/dev/null
+  echo "  updater installed (homewatch-update.path); remove it with: sudo systemctl disable --now homewatch-update.path"
+}
+if [[ "${1:-}" != "--dev" && "${1:-}" != "--no-updater" ]]; then
+  answer=y
+  if [[ -t 0 ]]; then
+    read -r -p "Add the updater, so the System page can install new releases? It needs sudo once. [Y/n] " answer
+  fi
+  if [[ ! "$answer" =~ ^[Nn] ]]; then
+    echo "Adding the updater"
+    add_updater
+  fi
+fi
+mkdir -p update  # the controller mounts it; without the updater it stays empty
 
 if [[ "${1:-}" == "--dev" ]]; then
   "${compose[@]}" up -d --build

@@ -20,14 +20,6 @@
     {% if connections %}<h3>Connections to devices</h3>
     <table>{% for name, how, good in connections %}<tr><td>{{ name }}</td>
       <td>{% if good %}{{ how }}{% else %}<span style="color:var(--err)">{{ how }}</span>{% endif %}</td></tr>{% endfor %}</table>{% endif %}
-    {% if update %}<p>To update: set <code>HW_VERSION={{ update }}</code> in <code>.env</code>, then
-      <code>docker compose pull && docker compose up -d</code>.</p>{% endif %}
-    <form method="post" action="/system/updates">
-      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="health">
-      <label class="check"><input type="checkbox" name="check" {{ 'checked' if updates }}> Check GitHub once a day for a newer release</label>
-      <p class="row" style="align-items:center"><button data-save>Save</button>
-        <span class="quiet small">Last check run: {{ last_run | ts('%d %b %H:%M:%S') if last_run else 'not yet' }}</span></p>
-    </form>
   </div>
   <form method="post" action="/system/home" class="card" id="home">
     <h2 style="margin-top:0">Home</h2>
@@ -39,7 +31,20 @@
     <p class="quiet small">Added as a link at the end of every alert, so you can tap it to open homewatch.
       It is filled in from the address you use to open this page; change it if you reach homewatch by another
       name (for example over Tailscale).</p>
-    <p><button data-save>Save</button></p>
+    <h3>Updates</h3>
+    <input type="hidden" name="_updates" value="1">
+    <label class="check"><input type="checkbox" name="check" {{ 'checked' if updates }}> Check GitHub once a day for a newer release</label>
+    <p class="small" style="margin:8px 0">This is {{ version }}.
+      {% if update %}<b>{{ update }} is available.</b>{% elif latest %}The latest release is {{ latest }}.{% endif %}
+      <span class="quiet">Last checked: {{ checked | ts('%d %b %H:%M') if checked else 'not yet' }}.</span></p>
+    {% if updater.status %}<p class="small {{ 'flash err' if updater.state == 'failed' }}" style="margin:8px 0">Updater: {{ updater.status }}</p>{% endif %}
+    {% if update and not updater.ready %}<p class="small">To update: set <code>HW_VERSION={{ update }}</code> in <code>.env</code>, then
+      <code>docker compose pull && docker compose up -d</code>. Or run <code>install.sh</code> again once: it adds the
+      updater, and this button installs new releases from then on.</p>{% endif %}
+    <p class="row" style="gap:8px"><button data-save>Save</button>
+      <button class="secondary" formaction="/system/updates/check" formnovalidate>Check now</button>
+      {% if update and updater.ready %}<button class="secondary" formaction="/system/updates/install" formnovalidate
+        data-confirm="Install homewatch {{ update }}? homewatch restarts and is away for a minute or two.">Install {{ update }}</button>{% endif %}</p>
   </form>
 </div>
 <h2>Users</h2>
@@ -47,15 +52,15 @@
   {{ note("users") }}
   <table><tr><th>User</th><th>Role</th><th>Created</th><th></th></tr>
   {% for u in users %}<tr><td>{{ u.username }}</td><td>{{ u.role }}</td><td>{{ u.created | ts }}</td>
-    <td>{% if u.id != user.id %}<form class="inline" method="post" action="/users/{{ u.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="users">
-      <input type="password" name="current" placeholder="Your password" aria-label="Your current password" autocomplete="current-password" required style="max-width:150px"> <button class="danger" data-confirm="Remove {{ u.username }}?">Remove</button></form>{% endif %}</td></tr>{% endfor %}
+    <td>{% if u.id != user.id %}<form class="inline" method="post" action="/users/{{ u.id }}/delete" data-ask-password="Remove {{ u.username }}?" data-ask-action="Remove" data-ask-danger>
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="users"><input type="hidden" name="current">
+      <button class="danger icon" aria-label="Remove {{ u.username }}" title="Remove {{ u.username }}"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button></form>{% endif %}</td></tr>{% endfor %}
   </table>
-  <form method="post" action="/users" class="row" style="margin-top:12px">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="users">
+  <form method="post" action="/users" class="row" style="margin-top:12px" data-ask-password="Add this user?" data-ask-action="Add user">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="users"><input type="hidden" name="current">
     <div><label for="nu">Username</label><input id="nu" type="text" name="username" required></div>
     <div><label for="np">Password (10+ characters)</label><input id="np" type="password" name="password" minlength="10" required autocomplete="new-password"></div>
     <div><label for="nr">Role</label><select id="nr" name="role"><option value="viewer">viewer (read-only)</option><option value="admin">admin</option></select></div>
-    <div><label for="cu">Your current password</label><input id="cu" type="password" name="current" required autocomplete="current-password"></div>
     <div><button>Add user</button></div>
   </form>
 </div>
@@ -67,10 +72,11 @@
     <p class="quiet small">All settings as one YAML file: modules, thresholds, timing, channels and maintenance windows.
       No passwords, tokens or users. homewatch also saves one every night and keeps the last 14.</p>
     <p><a class="button" href="/system/export">Download export</a></p>
-    {% if exports %}<table>
-      {% for e in exports %}<tr><td><a href="/system/exports/{{ e.name }}">{{ e.name }}</a></td>
-        <td class="quiet small">{{ e.ts | ts('%d %b %H:%M') }} · {{ e.kb }} KB</td></tr>{% endfor %}
-    </table>{% else %}<p class="quiet small">The first nightly export appears within 5 minutes of starting.</p>{% endif %}
+    {% if exports %}<form method="get" action="/system/exports" class="row" style="gap:8px">
+      <div><label for="exs">Nightly exports</label><select id="exs" name="name">
+        {% for e in exports %}<option value="{{ e.name }}">{{ e.ts | ts('%d %b %H:%M') }} · {{ e.kb }} KB</option>{% endfor %}</select></div>
+      <div><button class="secondary">Download</button></div></form>
+    {% else %}<p class="quiet small">The first nightly export appears within 5 minutes of starting.</p>{% endif %}
   </div>
   <form method="post" action="/system/import" enctype="multipart/form-data" class="card">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="backup">
@@ -87,7 +93,7 @@
   <p class="quiet small">homewatch keeps the last 200 versions of its settings: modules, thresholds, timing, home,
     weekly report, channels and maintenance windows. Restoring one is saved as a new version, so it can be undone.
     Passwords, tokens and users are not part of a version and stay as they are, except credentials of a module or channel whose address changes or whose HTTPS or certificate check is turned off: those are deleted and it is switched off.</p>
-  <table>
+  <table data-page="10">
     <tr><th>#</th><th>When</th><th>Who</th><th>What changed</th><th></th></tr>
     {% for v in versions %}<tr><td>{{ v.id }}</td><td>{{ v.ts | ts('%d %b %H:%M') }}</td><td>{{ v.username }}</td>
       <td class="small">{{ v.summary }}{% if v.action == 'config.restore' %} <span class="quiet">(restore)</span>{% endif %}</td>
@@ -124,4 +130,12 @@
   {% for a in log %}<tr><td>{{ a.ts | ts('%d %b %H:%M') }}</td><td>{{ a.username }}</td><td>{{ a.action }}</td><td class="small">{{ a.detail }}</td></tr>
   {% else %}<tr><td colspan="4" class="quiet">Nothing yet.</td></tr>{% endfor %}
 </table></div>
+<dialog class="ask" id="ask-password">
+  <form method="dialog">
+    <h2 data-ask-title>Confirm</h2>
+    <label for="ask-pw">Your password</label>
+    <input id="ask-pw" type="password" autocomplete="current-password" required>
+    <div class="row"><button type="button" class="secondary" data-ask-cancel>Cancel</button><button value="ok" data-ask-ok>Confirm</button></div>
+  </form>
+</dialog>
 {% endblock %}

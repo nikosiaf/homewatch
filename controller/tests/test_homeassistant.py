@@ -259,7 +259,8 @@ def test_addon_entities_are_essential_and_sensor_fields_validated():
     e = {"entity_id": "binary_sensor.samba_share_running", "attributes": {"device_class": "running"}}
     assert _addon(e) and _special(e)
     assert not _addon({"entity_id": "binary_sensor.washer_status", "attributes": {"device_class": "running"}})
-    assert _sensors({}) == {"disk": "sensor.system_monitor_disk_usage", "memory": "sensor.system_monitor_memory_usage"}
+    assert _sensors({}) == {"disk": "sensor.system_monitor_disk_usage", "memory": "sensor.system_monitor_memory_usage",
+                            "cpu": "sensor.system_monitor_processor_use"}
     base = {"url": "http://ha.local:8123", "full_every": "30"}
     out, err = plugin.validate(base | {"disk_sensor": " sensor.my_disk ", "memory_sensor": ""}, {})
     assert not err and out["disk_sensor"] == "sensor.my_disk" and out["memory_sensor"] == ""
@@ -279,7 +280,7 @@ def test_addon_and_host_sensors_read_between_full_reads(monkeypatch):
     m = HomeAssistantModule()
     s = {"url": "http://ha", "verify": False, "memory_sensor": "sensor.ram"}
     first = asyncio.run(m.fetch(s, "t", NOW))
-    assert first["host"] == {"disk": ["17.7", "%"], "memory": ["40", "%"]}
+    assert first["host"] == {"disk": ["17.7", "%"], "memory": ["40", "%"], "cpu": None}
     assert [e["entity_id"] for e in first["watch"]] == ["binary_sensor.zigbee2mqtt_running"]
     calls.clear()
     m.snap_ts = NOW

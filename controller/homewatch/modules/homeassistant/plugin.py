@@ -35,6 +35,9 @@ CHECKS = [
              help="Disk use of the Home Assistant host, from the disk sensor chosen in the settings."),
     CheckDef("memory", "Memory", "api", unit="%", warn=80, error=90, editable=("warn", "error"),
              help="Memory use of the Home Assistant host, from the memory sensor chosen in the settings."),
+    CheckDef("cpu", "CPU", "api", unit="%", warn=90, error=98, editable=("warn", "error"),
+             help="Processor use of the Home Assistant host, from the CPU sensor chosen in the settings. "
+                  "Short peaks are normal, so the limits are high."),
     CheckDef("rules", "Entity rules", "api",
              help="Your own rules on any entity (see Entity rules in the settings); the worst rule that fires sets "
                   "the level. WARNING when a rule matches no entity or a number rule gets no number."),
@@ -47,8 +50,11 @@ MAX_SINGLE = 100  # more essential entities than this: one bulk read is lighter 
 BACKUP = ("sensor.backup_last_successful_automatic_backup", "sensor.backup_last_attempted_automatic_backup")
 NOISE = re.compile(r"^sensor\..*_(rx|tx)$")  # per-client traffic counters; they drop out whenever a client sleeps
 SAFETY = {"smoke", "moisture", "gas", "carbon_monoxide", "heat", "safety"}  # binary_sensor device classes
-# System Monitor's sensors, used when the disk / memory sensor fields are left empty
+# System Monitor's sensors, used when the disk / memory / CPU sensor fields are left empty
 DISK, MEMORY = "sensor.system_monitor_disk_usage", "sensor.system_monitor_memory_usage"
+CPU = "sensor.system_monitor_processor_use"
+HOST = (("disk", "disk_sensor", "Disk use sensor", DISK), ("memory", "memory_sensor", "Memory use sensor", MEMORY),
+        ("cpu", "cpu_sensor", "CPU use sensor", CPU))
 
 
 def _domain(e) -> str:
@@ -78,7 +84,7 @@ def _special(e) -> bool:
 
 def _sensors(s) -> dict:
     """Host sensors to read: the chosen ones, else System Monitor's."""
-    return {"disk": s.get("disk_sensor") or DISK, "memory": s.get("memory_sensor") or MEMORY}
+    return {cid: s.get(key) or default for cid, key, _, default in HOST}
 
 
 def _ts(value) -> float | None:
@@ -93,8 +99,8 @@ class HomeAssistantModule(ApiModule):
     name = "Home Assistant"
     checks = CHECKS
     description = ("Watches Home Assistant through the token of a non-admin user: core state, alarm panels, safety and "
-                   "tamper sensors, batteries, available updates, automatic backups, add-ons and the host's disk and "
-                   "memory, plus your own rules on any entity. Only those entities are read "
+                   "tamper sensors, batteries, available updates, automatic backups, add-ons and the host's disk, "
+                   "memory and CPU, plus your own rules on any entity. Only those entities are read "
                    "at each check; the full list is read every 30 minutes (you can change this) to find new ones and new updates, and isn't kept. "
                    "Nothing in Home Assistant is changed.")
     setup_title = "First create an account and token for homewatch"
@@ -106,21 +112,22 @@ class HomeAssistantModule(ApiModule):
         ("text", "Optional, add-ons: Settings → Devices & services → Home Assistant Supervisor → open an add-on's "
                  "device and enable its \"Running\" sensor (disabled by default). Enable it for each add-on that must "
                  "always run; homewatch reports it when it stops."),
-        ("text", "Optional, disk and memory: add the System Monitor integration with its disk use and memory use "
-                 "sensors, or name your own sensors below."),
+        ("text", "Optional, disk, memory and CPU: add the System Monitor integration with its disk use, memory use "
+                 "and processor use sensors, or name your own sensors after connecting."),
     ]
     fields = [
         Field("url", "Home Assistant address", "http://homeassistant.local:8123", width="wide"),
         Field("verify", "Check the HTTPS certificate", kind="check", default=True,
               help=SELF_SIGNED),
-        Field("full_every", "Full read every (minutes)", "30", kind="number", default=FULL_EVERY, section="more",
-              width="narrow",
-              help=f"How often the whole entity list is read, to find new updates and new essential entities. "
-                   f"From {FULL_MIN} to {FULL_MAX}; raise it on a slow Home Assistant host."),
+        Field("full_every", "Full read every (minutes)", "30", kind="number", default=FULL_EVERY,
+              width="narrow", own_line=True,
+              help=f"How often the whole entity list is read to find new entities and updates ({FULL_MIN} to {FULL_MAX})."),
         Field("disk_sensor", "Disk use sensor", DISK, section="more",
-              help="A sensor giving the host's disk use in %. Empty: System Monitor's disk use sensor."),
+              help="Host disk use in %. Empty: System Monitor's."),
         Field("memory_sensor", "Memory use sensor", MEMORY, section="more",
-              help="A sensor giving the host's memory use in %. Empty: System Monitor's memory use sensor."),
+              help="Host memory use in %. Empty: System Monitor's."),
+        Field("cpu_sensor", "CPU use sensor", CPU, section="more",
+              help="Host processor use in %. Empty: System Monitor's."),
         Field("rules", "Entity rules", "binary_sensor.alarm_panel_trouble_* is on warning\nsensor.heating_oil below 200 warning",
               kind="lines", section="more",
               help="One rule per line: <entity or pattern> is | is not | below | above <value> warning | error. "
@@ -128,14 +135,16 @@ class HomeAssistantModule(ApiModule):
                    "binary_sensor.panel_zone_*_tamper is on error · sensor.panel_link is not online error · "
                    "sensor.oil_level below 100 error."),
         Field("watch_all", "Watch every entity", kind="check", default=False, section="more",
-              help="Off: only the essential entities above are read. On: all of them are read at every check and "
-                   "listed below, so any one that becomes unavailable can be reported (network traffic RX/TX "
-                   "sensors never are)."),
+              help="Off: only the essential entities (alarm, safety, tamper, battery, add-on, backup, host and rule "
+                   "entities) are read and listed. On: all of them are read at every check, so any one that becomes "
+                   "unavailable can be reported (network traffic RX/TX sensors never are)."),
     ]
     secret_label = "Long-lived access token"
     secret_width = "wide"
     more_title = "Additional configuration"
-    more_help = "After connecting: how often to read, which sensors, your own rules and which entities to watch."
+    more_help = "Which entities to watch, which unavailable ones to ignore, the host sensors and your own rules."
+    more_fields_title = "Host sensors"
+    choices_empty = "Nothing is unavailable right now, so there is nothing to ignore."
     secret_placeholder = "eyJ0eXAiOiJKV1Qi…"
     filter_title = "Entities to watch"
     filter_help = ("Unticked entities are not checked or reported. New ones are watched, except in a domain where you "
@@ -151,6 +160,10 @@ class HomeAssistantModule(ApiModule):
         self._total = 0
         self._found_ts = 0.0
 
+    def reread(self):
+        super().reread()
+        self._ids = None  # the rules or sensors may name other entities: a full read finds them
+
     def validate(self, form, old):
         out, err = super().validate(form, old)
         if err:
@@ -160,7 +173,7 @@ class HomeAssistantModule(ApiModule):
             return out, "Home Assistant address: e.g. http://homeassistant.local:8123"
         if not FULL_MIN <= out["full_every"] <= FULL_MAX:
             return out, f"Full read every: from {FULL_MIN} to {FULL_MAX} minutes"
-        for k, label in (("disk_sensor", "Disk use sensor"), ("memory_sensor", "Memory use sensor")):
+        for _, k, label, _ in HOST:
             v = (out.get(k) or "").strip()
             if v and not re.fullmatch(r"sensor\.[a-z0-9_]+", v):
                 return out, f"{label}: an entity id like sensor.disk_use_percent"
@@ -309,7 +322,7 @@ class HomeAssistantModule(ApiModule):
             age = (now - ok_ts) / 3600
             add("backups", level(age, th["backups"]), f"last automatic backup {age:.0f} h ago", age)
 
-        for cid, what in (("disk", "disk"), ("memory", "memory")):
+        for cid, what in (("disk", "disk"), ("memory", "memory"), ("cpu", "CPU")):
             st, unit = (snap.get("host") or {}).get(cid) or (None, None)
             try:
                 v = float(st)

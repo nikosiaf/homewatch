@@ -125,6 +125,7 @@ Reads Home Assistant with the long-lived token of a dedicated **non-admin** user
 | Add-ons (watched = Running sensor enabled) | Running sensor unavailable | not running |
 | Disk use of the host (%) | ≥ 80 % | ≥ 90 % |
 | Memory use of the host (%) | ≥ 80 % | ≥ 90 % |
+| CPU use of the host (%) | ≥ 90 % | ≥ 98 % |
 | Entity rules (your own) | a rule set to warning fires; a rule matches no entity | a rule set to error fires |
 
 The alarm, safety, tamper and battery checks find their sensors by Home Assistant's device class
@@ -135,12 +136,13 @@ watches the add-ons' **Running** sensors instead. They are disabled by default: 
 services → Home Assistant Supervisor, open each add-on that must always run and enable its "Running"
 sensor. An add-on you stop on purpose: leave its sensor disabled, or untick it under "Entities to watch".
 
-**Disk and memory** come from the System Monitor integration's disk use and memory use sensors, or
-from any sensors in % you name in the settings. Without them, both checks stay OK with a note.
+**Disk, memory and CPU** come from the System Monitor integration's disk use, memory use and processor
+use sensors, or from any sensors in % you name under "Additional configuration". Without them, the
+checks stay OK with a note. CPU peaks are normal, so its limits start high (90 % / 98 %).
 
 **Entity rules** cover anything without a device class: an alarm panel's trouble sensors, a tank level,
-a link status. One rule per line, under "Additional configuration" on the module's page (it
-appears after connecting):
+a link status. One rule per line, in the "Additional configuration" box on the module's page (it
+appears after connecting, below "Last reading"):
 
 ```
 binary_sensor.panel_troubles_* is on warning
@@ -302,16 +304,18 @@ https://docs.docker.com/engine/install/debian/), then add your user to the `dock
 
 ```sh
 mkdir homewatch && cd homewatch
-# download docker-compose.yml, Caddyfile, env.example and install.sh from the latest release
+# download docker-compose.yml, Caddyfile, env.example, install.sh and update.sh from the latest release
 # https://github.com/nikosiaf/homewatch/releases
 chmod +x install.sh
 less install.sh          # please read it first; it's short
 ./install.sh
 ```
 
-`install.sh` does three things:
+`install.sh` does four things:
 - writes `.env` with a new master key, the host's time zone, and its gateway and DNS server as defaults
 - creates a self-signed certificate in `certs/`
+- offers the updater (asks first, needs sudo once): a systemd unit that installs the latest release when
+  you press Install on the System page (see Update)
 - runs `docker compose up -d`
 
 At the end it prints the certificate's SHA-256 fingerprint. Open `https://<host>` and compare that
@@ -339,14 +343,26 @@ docker compose up -d
 
 ## Update
 
-Set `HW_VERSION` in `.env` to the new release, then run:
+The Home box on the System page says when a newer release exists (it checks GitHub once a day, or
+when you press Check now). With the updater installed, press **Install**: homewatch restarts with the
+new release within a minute or two.
+
+The updater is a systemd unit on the host (`homewatch-update.path`) that runs `update.sh`. homewatch
+gets no Docker access for it: the button only leaves a request file in `update/ask/`. The script never
+reads what is in the file. It asks GitHub for the latest release itself, sets `HW_VERSION` in `.env`,
+then pulls and restarts. If that fails, it puts `.env` back. It reports to `update/status`, which the
+System page shows. It doesn't update `docker-compose.yml`: when a release changes that file, its release
+notes say so. To add the updater to an existing install, put `update.sh` from the release next to
+`install.sh` and run `./install.sh` again (it keeps `.env` and the certificate). To remove it:
+`sudo systemctl disable --now homewatch-update.path`.
+
+Without the updater, set `HW_VERSION` in `.env` to the new release, then run:
 
 ```sh
 docker compose pull && docker compose up -d
 ```
 
-Database changes apply on start. The System page tells you when a newer release exists (you can
-switch that check off there).
+Database changes apply on start.
 
 ## Back up
 

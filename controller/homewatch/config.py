@@ -23,6 +23,7 @@ class Config:
     dns_hint: str
     secure_cookies: bool
     ookla_dir: str
+    update_dir: str = "/update"  # shared with the host's updater (install.sh); missing = no updater
 
     @property
     def db_path(self) -> str:
@@ -54,4 +55,5 @@ def load(env: dict[str, str] | None = None) -> Config:
         dns_hint=env.get("HW_DNS_HINT", ""),
         secure_cookies=env.get("HW_SECURE_COOKIES", "1") != "0",
         ookla_dir=env.get("HW_OOKLA_DIR", os.path.join(data_dir, "ookla")),
+        update_dir=env.get("HW_UPDATE_DIR", "/update"),
     )

@@ -106,8 +106,10 @@ def test_export_and_import_through_the_system_page(client):  # noqa: F811
 
     client.rt.nightly_export(time.time())
     page = client.get("/system").text
-    assert "Export and import" in page and "/system/exports/homewatch-config-" in page
+    assert "Export and import" in page and 'value="homewatch-config-' in page  # the dropdown of nightly exports
     name = versions.list_exports(client.rt.exports_dir)[0]
+    r = client.get("/system/exports", params={"name": name}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == f"/system/exports/{name}"
     assert "home.name: Changed" in client.get(f"/system/exports/{name}").text
     assert client.get("/system/exports/..%2Fhomewatch.db", follow_redirects=False).status_code in (303, 404)
 
