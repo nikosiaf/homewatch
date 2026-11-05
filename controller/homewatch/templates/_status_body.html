@@ -10,14 +10,14 @@
   {% if user.is_admin %}<form method="post" action="/checks/run" style="margin-left:auto">
     <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status"><button class="secondary" data-busy="Running…">Check now</button></form>{% endif %}
 </div>
-{% from "_note.html" import note with context %}{{ note("status") }}
+{% from "_note.html" import note with context %}{% from "_more.html" import more %}{{ note("status") }}
 {% if open %}
 <h2>Needs attention</h2>
 <div class="card scroll"><table>
   <tr><th>Level</th><th>Check</th><th>Why</th><th>Since</th><th>For</th>{% if user.is_admin %}<th></th>{% endif %}</tr>
   {% for i in open %}<tr>
     <td><span class="badge s{{ i.level }}">{{ LEVEL_WORD[i.level] }}</span></td>
-    <td>{{ names.get(i.check_key, i.check_key) }}</td><td>{{ i.detail }}</td>
+    <td>{{ names.get(i.check_key, i.check_key) }}</td><td>{{ more(i.detail, "i" ~ i.id) }}</td>
     <td>{{ i.started | ts }}</td><td>{{ (now - i.started) | dur }}</td>
     {% if user.is_admin %}<td style="white-space:nowrap"><form class="inline" method="post" action="/maintenance/snooze">
       <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status"><input type="hidden" name="_from" value="status">
@@ -47,7 +47,7 @@
         <span class="name">{{ r.name }}</span>
         {% if r.suppressed_by %}<span class="badge mute">—</span>{% else %}<span class="badge s{{ t.status }}">{{ LEVEL_WORD[t.status] }}</span>{% endif %}
       </div>
-      <div class="detail">{{ r.detail }}</div>
+      <div class="detail">{{ more(r.detail, "t" ~ r.key) }}</div>
       {% if t.pending is not none and t.pending != t.status %}<div class="detail">Changing to {{ LEVEL_WORD[t.pending] }}, waiting for confirmation</div>{% endif %}
       {% if t.silenced %}<div class="detail">🔕 {{ t.silenced }}</div>{% endif %}
     </div>

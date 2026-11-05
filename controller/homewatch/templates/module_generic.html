@@ -5,34 +5,64 @@
 <h1><a href="/modules" class="quiet" style="text-decoration:none">Modules</a> › {{ module.name }}</h1>
 <p class="quiet">{{ module.description }}</p>
 
-{% macro fields_html(s) %}
-  <div class="row">
-  {% for f in module.fields if f.kind not in ('check', 'lines') %}
-    {% if f.secret %}
-    <div><label for="f-{{ f.key }}">{{ f.label }} · {{ 'set' if secret_fields_set[f.key] else 'not set' }}</label>
+{% macro cell_attrs(f, extra='') %}class="fcell {{ 'w-' ~ f.width if f.width }} {{ extra }}"{% if f.when %} data-when="{{ f.when }}"{% endif %}{% endmacro %}
+
+{% macro field_cell(f, s) %}
+  {% if f.kind == 'check' %}
+    <div {{ cell_attrs(f, 'checkcell') }}><label class="check"><input type="checkbox" name="{{ f.key }}" {{ 'checked' if s[f.key] }}> {{ f.label }}</label></div>
+  {% elif f.secret %}
+    <div {{ cell_attrs(f) }}><label for="f-{{ f.key }}">{{ f.label }} · {{ 'set' if secret_fields_set[f.key] else 'not set' }}</label>
       <input id="f-{{ f.key }}" type="password" name="{{ f.key }}" placeholder="{{ 'leave empty to keep' if secret_fields_set[f.key] else f.placeholder }}" autocomplete="new-password"></div>
-    {% else %}
-    <div><label for="f-{{ f.key }}">{{ f.label }}</label>
-      <input id="f-{{ f.key }}" type="{{ 'number' if f.kind == 'number' else 'text' }}" {{ 'step=any' if f.kind == 'number' }}
+  {% elif f.kind == 'select' %}
+    <div {{ cell_attrs(f) }}><label for="f-{{ f.key }}">{{ f.label }}</label>
+      <select id="f-{{ f.key }}" name="{{ f.key }}">{% for o in f.options %}<option {{ 'selected' if (s[f.key] or f.default) == o }}>{{ o }}</option>{% endfor %}</select></div>
+  {% else %}
+    <div {{ cell_attrs(f) }}><label for="f-{{ f.key }}">{{ f.label }}</label>
+      <input id="f-{{ f.key }}" type="{{ 'number' if f.kind == 'number' else 'text' }}" {{ 'step=any' if f.kind == 'number' }} {{ 'class=num' if f.width == 'narrow' }}
              name="{{ f.key }}" value="{{ s[f.key] if s[f.key] is not none }}" placeholder="{{ f.placeholder }}" autocomplete="off">
       {% if f.help %}<p class="quiet small" style="margin:4px 0 0">{{ f.help }}</p>{% endif %}</div>
-    {% endif %}
-  {% endfor %}
-  {% if module.secret_label %}
-    <div><label for="f-secret">{{ module.secret_label }} · {{ 'set' if has_secret else 'not set' }}</label>
-      <input id="f-secret" type="password" name="secret" placeholder="{{ 'leave empty to keep' if has_secret else module.secret_placeholder }}" autocomplete="new-password"></div>
   {% endif %}
+{% endmacro %}
+
+{% macro secret_cell() %}
+    <div class="fcell {{ 'w-' ~ module.secret_width if module.secret_width }}"><label for="f-secret">{{ module.secret_label }} · {{ 'set' if has_secret else 'not set' }}</label>
+      <input id="f-secret" type="password" name="secret" placeholder="{{ 'leave empty to keep' if has_secret else module.secret_placeholder }}" autocomplete="new-password"></div>
+{% endmacro %}
+
+{# the fields of one section: "" = the connection, "more" = the details after connecting #}
+{% macro fields_html(s, section='') %}
+  {% set placed = module.layout_keys() if section == '' else [] %}
+  {% if section == '' and module.layout %}
+  <div class="fgrid" style="--cols: {{ module.layout_cols }}">
+    {% for line in module.layout %}{% for k in line %}
+      {% if k is none %}<div class="fcell empty"></div>
+      {% elif k == '_secret' %}{{ secret_cell() }}
+      {% else %}{% set f = module.field(k) %}{{ field_cell(f, s) }}{% endif %}
+    {% endfor %}{% endfor %}
   </div>
-  {% for f in module.fields if f.kind == 'lines' %}
+  {% endif %}
+  {% set fs = module.fields | selectattr('section', 'equalto', section) | rejectattr('key', 'in', placed) | list %}
+  {% set plain = fs | rejectattr('kind', 'in', ('check', 'lines')) | list %}
+  {% if plain or (section == '' and module.secret_label and '_secret' not in placed) %}
+  <div class="row fields">
+  {% for f in plain %}{{ field_cell(f, s) }}{% endfor %}
+  {% if section == '' and module.secret_label and '_secret' not in placed %}{{ secret_cell() }}{% endif %}
+  </div>
+  {% endif %}
+  {% for f in fs if f.kind == 'lines' %}
     <div style="margin-top:12px"><label for="f-{{ f.key }}">{{ f.label }}</label>
       <textarea id="f-{{ f.key }}" name="{{ f.key }}" rows="6" spellcheck="false" placeholder="{{ f.placeholder }}"
-                style="width:100%;font-family:var(--mono, monospace)">{{ s[f.key] if s[f.key] is not none }}</textarea>
+                style="width:100%;max-width:none;font-family:var(--mono, monospace)">{{ s[f.key] if s[f.key] is not none }}</textarea>
       {% if f.help %}<p class="quiet small" style="margin:4px 0 0">{{ f.help }}</p>{% endif %}</div>
   {% endfor %}
-  {% for f in module.fields if f.kind == 'check' %}
+  {% for f in fs if f.kind == 'check' %}
     <label class="check"><input type="checkbox" name="{{ f.key }}" {{ 'checked' if s[f.key] }}> {{ f.label }}</label>
     {% if f.help %}<p class="quiet small" style="margin:0 0 0 26px">{{ f.help }}</p>{% endif %}
   {% endfor %}
+{% endmacro %}
+
+{% macro choice_label(c, prefix, on) %}
+      <label class="check" title="{{ c.detail }}"><input type="checkbox" name="{{ prefix }}{{ c.value }}" {{ 'checked' if on }}> <span class="cl">{{ c.label }}</span>{% if c.detail %} <span class="quiet small cd">{{ c.detail }}</span>{% endif %}</label>
 {% endmacro %}
 
 {% macro choice_list(items_all, prefix, word) %}
@@ -45,18 +75,16 @@
   </div>
   {% endif %}
   {% if items_all and items_all[0][0].group %}
-  {% for g, items in items_all | groupby('0.group') %}{% set n_on = items | selectattr('1') | list | length %}
-  <details class="choices" data-choice-group>
-    <summary><b>{{ g }}</b> <span class="quiet small"><span data-group-count>{{ n_on }}</span> of {{ items | length }} {{ word }}{% if prefix == 'choose.' and ('group:' ~ g) in skipped %} · domain not watched{% endif %}</span></summary>
-    <label class="check all"><input type="checkbox" data-group-all {{ 'checked' if n_on == items | length }}> <span data-group-all-label>All {{ items | length }}</span></label>
-    <div class="row">{% for c, on in items %}
-      <label class="check" title="{{ c.detail }}"><input type="checkbox" name="{{ prefix }}{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
-    {% endfor %}</div>
+  {% set groups = items_all | groupby('0.group') %}
+  {% for g, items in groups %}{% set n_on = items | selectattr('1') | list | length %}
+  <details class="choices" data-choice-group {{ 'open data-open-default' if groups | length <= 4 }}>
+    <summary><b>{{ g }}</b> <span class="quiet small"><span data-group-count data-total="{{ items | length }}" data-word="{{ word }}">{{ 'all ' ~ (items | length) if n_on == items | length else n_on ~ ' of ' ~ (items | length) }} {{ word }}</span>{% if prefix == 'choose.' and ('group:' ~ g) in skipped %} · domain not watched{% endif %}</span></summary>
+    {% if items | length > 1 %}<label class="check all"><input type="checkbox" data-group-all {{ 'checked' if n_on == items | length }}> <span data-group-all-label>All {{ items | length }}</span></label>{% endif %}
+    <div class="choice-grid">{% for c, on in items %}{{ choice_label(c, prefix, on) }}{% endfor %}</div>
   </details>
   {% endfor %}
   {% else %}
-  <div class="row">{% for c, on in items_all %}
-    <label class="check" title="{{ c.detail }}"><input type="checkbox" name="{{ prefix }}{{ c.value }}" {{ 'checked' if on }}> {{ c.label }}{% if c.detail %} <span class="quiet small">{{ c.detail }}</span>{% endif %}</label>
+  <div class="choice-grid">{% for c, on in items_all %}{{ choice_label(c, prefix, on) }}
   {% else %}<span class="quiet">Appears after the first reading.</span>{% endfor %}</div>
   {% endif %}
   </div>
@@ -90,6 +118,11 @@
   {% if notice %}<p class="flash err">{{ notice }}</p>{% endif %}
   <fieldset data-enable-target class="plain" {{ 'disabled' if not s.enabled }}>
     {{ fields_html(s) }}
+    {% if module.more_title %}
+    <h3 class="section">{{ module.more_title }}</h3>
+    {% if module.more_help %}<p class="quiet small">{{ module.more_help }}</p>{% endif %}
+    {{ fields_html(s, 'more') }}
+    {% endif %}
     {% if snap and (module.choices_title or module.filter_title) %}
     <p class="quiet small" style="margin-top:14px">The lists below come from the reading at {{ snap_ts | ts('%H:%M:%S') }}
       ({{ module.name }} is read every {{ read_every }}).

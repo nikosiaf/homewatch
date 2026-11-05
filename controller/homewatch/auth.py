@@ -66,7 +66,6 @@ class Auth:
         self.fails: dict[str, list[float]] = {}
         self.slots = asyncio.Semaphore(MAX_VERIFYING)
         self.waiting = 0
-        self._setup_code = ""
 
     def has_users(self) -> bool:
         return self.db.one("SELECT 1 FROM users LIMIT 1") is not None
@@ -138,24 +137,6 @@ class Auth:
         self.db.run("INSERT INTO sessions(token,user_id,csrf,created,last_seen) VALUES(?,?,?,?,?)",
                     (_token_hash(token), row["id"], secrets.token_urlsafe(24), now, now))
         return token
-
-    # ---- first run ------------------------------------------------------------------------
-    def setup_code(self) -> str:
-        """The code that proves whoever creates the first admin can read this host's logs. Used once."""
-        if not self._setup_code:
-            self._setup_code = secrets.token_hex(8)
-            print(f"First-run setup code: {self._setup_code}", flush=True)  # noqa: T201 - for the admin, at any log level
-        return self._setup_code
-
-    def check_setup_code(self, code: str, client: str) -> None:
-        if self.locked(client):
-            raise Throttled("Too many failed attempts. Try again in a few minutes.")
-        if not secrets.compare_digest(code.strip().lower().encode(), self.setup_code().encode()):
-            self.fails.setdefault(client, []).append(time.time())
-            raise AuthError("That setup code is wrong")
-
-    def setup_done(self) -> None:
-        self._setup_code = ""
 
     def session(self, token: str | None) -> User | None:
         if not token:

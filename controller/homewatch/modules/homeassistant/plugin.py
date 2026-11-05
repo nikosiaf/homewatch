@@ -110,28 +110,32 @@ class HomeAssistantModule(ApiModule):
                  "sensors, or name your own sensors below."),
     ]
     fields = [
-        Field("url", "Home Assistant address", "http://homeassistant.local:8123"),
+        Field("url", "Home Assistant address", "http://homeassistant.local:8123", width="wide"),
         Field("verify", "Check the HTTPS certificate", kind="check", default=True,
               help=SELF_SIGNED),
-        Field("full_every", "Full read every (minutes)", "30", kind="number", default=FULL_EVERY,
+        Field("full_every", "Full read every (minutes)", "30", kind="number", default=FULL_EVERY, section="more",
+              width="narrow",
               help=f"How often the whole entity list is read, to find new updates and new essential entities. "
                    f"From {FULL_MIN} to {FULL_MAX}; raise it on a slow Home Assistant host."),
-        Field("disk_sensor", "Disk use sensor", DISK,
+        Field("disk_sensor", "Disk use sensor", DISK, section="more",
               help="A sensor giving the host's disk use in %. Empty: System Monitor's disk use sensor."),
-        Field("memory_sensor", "Memory use sensor", MEMORY,
+        Field("memory_sensor", "Memory use sensor", MEMORY, section="more",
               help="A sensor giving the host's memory use in %. Empty: System Monitor's memory use sensor."),
         Field("rules", "Entity rules", "binary_sensor.alarm_panel_trouble_* is on warning\nsensor.heating_oil below 200 warning",
-              kind="lines",
+              kind="lines", section="more",
               help="One rule per line: <entity or pattern> is | is not | below | above <value> warning | error. "
                    "* and ? match any text in an entity id. Lines starting with # are notes. Examples: "
                    "binary_sensor.panel_zone_*_tamper is on error · sensor.panel_link is not online error · "
                    "sensor.oil_level below 100 error."),
-        Field("watch_all", "Watch every entity", kind="check", default=False,
+        Field("watch_all", "Watch every entity", kind="check", default=False, section="more",
               help="Off: only the essential entities above are read. On: all of them are read at every check and "
                    "listed below, so any one that becomes unavailable can be reported (network traffic RX/TX "
                    "sensors never are)."),
     ]
     secret_label = "Long-lived access token"
+    secret_width = "wide"
+    more_title = "Additional configuration"
+    more_help = "After connecting: how often to read, which sensors, your own rules and which entities to watch."
     secret_placeholder = "eyJ0eXAiOiJKV1Qi…"
     filter_title = "Entities to watch"
     filter_help = ("Unticked entities are not checked or reported. New ones are watched, except in a domain where you "
@@ -281,7 +285,7 @@ class HomeAssistantModule(ApiModule):
 
         new = [e for e in self._reported(s, snap) if (now - (_ts(e.get("last_changed")) or now)) >= SETTLE]
         n = len(new)
-        names = ", ".join((e.get("name") or e["entity_id"]) for e in new[:5]) + (f" (+{n - 5} more)" if n > 5 else "")
+        names = ", ".join((e.get("name") or e["entity_id"]) for e in new)  # all of them; the page shows the first part
         quiet = len(snap["unavailable"]) - len(self._reported(s, snap))
         add("unavailable", level(n, th["unavailable"]) if n else OK,
             f"{n} unavailable: {names}" if n else f"none (ignoring {quiet})", n)
@@ -291,7 +295,7 @@ class HomeAssistantModule(ApiModule):
         ups = [u for u in snap["updates"] if not u.get("skipped_version") or u["skipped_version"] != u.get("latest_version")]
         add("updates", WARNING if ups else OK,
             "; ".join(f"{u.get('title') or u['entity_id']} {u.get('installed_version')} → {u.get('latest_version')}"
-                      for u in ups[:4]) + (f" (+{len(ups) - 4} more)" if len(ups) > 4 else "") if ups else "up to date",
+                      for u in ups) if ups else "up to date",
             len(ups))
 
         ok_ts = _ts(snap["backup"].get("last_successful_automatic_backup"))

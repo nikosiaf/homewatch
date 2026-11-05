@@ -168,7 +168,7 @@ def evaluate(settings: dict, th: dict[str, Thresholds], st: State) -> list[Check
                 problems.append(f"{name}: newest backup {_ago(age)} old")
                 lvl = max(lvl, g)
         if problems:
-            add("backups", lvl, "; ".join(problems[:4]) + (f" (+{len(problems) - 4} more)" if len(problems) > 4 else ""),
+            add("backups", lvl, "; ".join(problems),
                 oldest)
         else:
             add("backups", OK, f"{len(covered)} guests backed up, oldest {_ago(oldest)} ago", oldest)

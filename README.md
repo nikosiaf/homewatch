@@ -139,7 +139,8 @@ sensor. An add-on you stop on purpose: leave its sensor disabled, or untick it u
 from any sensors in % you name in the settings. Without them, both checks stay OK with a note.
 
 **Entity rules** cover anything without a device class: an alarm panel's trouble sensors, a tank level,
-a link status. One rule per line in the settings:
+a link status. One rule per line, under "Additional configuration" on the module's page (it
+appears after connecting):
 
 ```
 binary_sensor.panel_troubles_* is on warning
@@ -172,9 +173,10 @@ shared folders or applications.
 | Fans and power (optional, SNMPv3) | SNMP can't be read | a fan, the power supply or the system failed |
 
 DSM's Web API doesn't report fans or the power supply; the NAS's SNMP agent does. To watch them,
-enable SNMP in Control Panel → Terminal & SNMP, tick SNMPv3 and create a user with authentication
-SHA (or SHA256) and privacy AES, then enter that user and both passwords in the module settings.
-homewatch reads UDP port 161 of the NAS at each DSM read. Leave the SNMP user empty to skip it.
+enable SNMP in Control Panel → Terminal & SNMP, tick SNMPv3 and create a user (authentication SHA
+and privacy AES are the safe choices; MD5, SHA256, DES and no privacy work too). On the module's
+page, tick SNMPv3 and enter the same user, protocols and passwords, with "SNMP privacy" ticked or
+not as in DSM. homewatch reads UDP port 161 of the NAS at each DSM read. Untick SNMPv3 to skip it.
 
 ### MikroTik module (optional)
 
@@ -313,9 +315,8 @@ less install.sh          # please read it first; it's short
 - runs `docker compose up -d`
 
 At the end it prints the certificate's SHA-256 fingerprint. Open `https://<host>` and compare that
-fingerprint when the browser warns about the certificate (once). It also prints a one-time setup
-code the wizard asks for. A new code is made each time homewatch restarts or is reset, and only the
-newest works; to see it, run `docker compose logs controller | grep "setup code" | tail -1`.
+fingerprint when the browser warns about the certificate (once). Create the admin account right
+away: until it exists (after an install or a reset), whoever opens the page first creates it.
 Then follow the setup wizard:
 1. Admin account
 2. Home name and time zone

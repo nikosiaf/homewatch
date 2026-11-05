@@ -117,3 +117,11 @@ def test_rejected_certificate_is_explained():
 
     assert "isn't trusted" in why(Exception("[SSL: CERTIFICATE_VERIFY_FAILED] self-signed certificate"))
     assert why(ValueError("x")) == "ValueError"
+
+
+def test_ports_are_listed_per_device():
+    m = MikroTikModule()
+    snap = {"devices": [dev("sw1"), dev("sw2")], "errors": {}, "_summary": "2"}
+    cs = m.choices(snap)
+    assert {c.group for c in cs} == {"sw1", "sw2"}
+    assert all(not c.label.startswith("sw") for c in cs)  # the device is the group, the label is the port

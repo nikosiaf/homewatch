@@ -45,11 +45,15 @@ class Field:
     key: str
     label: str
     placeholder: str = ""
-    kind: str = "text"  # text | number | check | url | lines (several lines of text)
+    kind: str = "text"  # text | number | check | url | lines (several lines of text) | select (one of options)
     default: Any = ""
     help: str = ""
     secret: bool = False  # kept encrypted with the module's secret, never in settings, versions or exports
     optional: bool = False  # a secret field that may stay empty
+    options: tuple = ()  # kind select: the values offered
+    width: str = ""  # "" | wide | narrow: the size of the box
+    section: str = ""  # "" = the connection (on the Add form too) | more = the module's second section, after connecting
+    when: str = ""  # check field key(s), space separated: the field shows only while they are all ticked
 
 
 @dataclass
@@ -89,6 +93,19 @@ class ApiModule(PinnedTLS, Module):
     filter_title = ""  # e.g. "Domains to watch": a list that is ticked by default; unticked values go to "skipped"
     filter_help = ""
     template = "module_generic.html"
+    # the connection fields as a grid, one list per line, so lines share columns; "_secret" is the module's secret,
+    # None an empty cell. Fields not named here follow below the grid.
+    layout: list[list[str | None]] = []
+    layout_cols = ""  # CSS grid-template-columns for layout
+    secret_width = ""  # "" | wide
+    more_title = ""  # title of the second section (fields with section="more" and the lists)
+    more_help = ""
+
+    def field(self, key: str) -> Field:
+        return next(f for f in self.fields if f.key == key)
+
+    def layout_keys(self) -> set:
+        return {k for line in self.layout for k in line if k}
 
     def __init__(self):
         self.snap: dict | None = None
@@ -151,7 +168,10 @@ class ApiModule(PinnedTLS, Module):
                 continue
             raw = form.get(f.key, old.get(f.key, f.default))
             if f.kind == "check":
-                out[f.key] = form.get(f.key) == "on" if f.key in form or "enabled" in form or "_new" in form else bool(raw)
+                if f.section and "_new" in form:  # not on the Add form: its default
+                    out[f.key] = bool(f.default)
+                else:
+                    out[f.key] = form.get(f.key) == "on" if f.key in form or "enabled" in form or "_new" in form else bool(raw)
             elif f.kind == "number":
                 try:
                     out[f.key] = float(raw)
@@ -159,6 +179,11 @@ class ApiModule(PinnedTLS, Module):
                     return {}, f"{f.label}: a number"
                 if not math.isfinite(out[f.key]):
                     return {}, f"{f.label}: a number"
+            elif f.kind == "select":
+                pick = {str(o).lower(): o for o in f.options}.get(str(raw).strip().lower())
+                if pick is None:
+                    return {}, f"{f.label}: one of " + ", ".join(map(str, f.options))
+                out[f.key] = pick
             elif f.kind == "lines":
                 out[f.key] = "\n".join(x.strip() for x in str(raw).splitlines()).rstrip("\n")  # line numbers as typed
             else:

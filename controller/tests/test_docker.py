@@ -144,3 +144,21 @@ def test_proxy_refusing_containers(monkeypatch):
         raise AssertionError("expected ApiError")
     except Exception as e:  # noqa: BLE001
         assert "CONTAINERS=1" in str(e)
+
+
+def test_list_is_grouped_per_host_and_old_project_skips_carry_over(monkeypatch, db):
+    from types import SimpleNamespace
+    fake(monkeypatch, {"10.0.0.5:2375": [ctr("a", "web"), ctr("b", "db"), ctr("c", "toy", project="lab")]})
+    m = DockerModule()
+    s = {"enabled": True, "hosts": "10.0.0.5"}
+    m.snap = asyncio.run(m.fetch(s, "", NOW))
+    fs = m.filters(m.snap)
+    assert {c.group for c in fs} == {"10-0-0-5"}  # one group per host, not per compose project
+    assert next(c for c in fs if c.label == "toy").detail == "lab"  # state only when not running
+    rt = SimpleNamespace(db=db)
+    db.set("module.docker", s | {"skipped": ["group:10-0-0-5 · lab"]})  # saved by 0.27
+    assert m.load(rt)["skipped"] == ["10.0.0.5:2375/toy"]
+    res = evaluate(m, m.load(rt), m.snap)
+    assert res["stopped"].detail == "2 watched containers running"
+    db.set("module.docker", s | {"skipped": ["group:10-0-0-5"]})  # a whole host unticked
+    assert evaluate(m, m.load(rt), m.snap)["stopped"].detail == "0 watched containers running"

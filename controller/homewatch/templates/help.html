@@ -30,8 +30,7 @@ less install.sh          # please read it first; it's short
   <p>The script writes <code>.env</code> with a new master key, creates a self-signed certificate and starts the containers.
     It prints the certificate's SHA-256 fingerprint: compare it when your browser warns about the certificate at
     <code>https://&lt;host&gt;</code>.</p>
-  <p>The script also prints a one-time setup code, which the wizard asks for, so nobody else on your network can claim homewatch first.
-    A new code is made each time homewatch restarts or is reset, and only the newest works. To see it, run <code>docker compose logs controller | grep "setup code" | tail -1</code>.</p>
+  <p>Open homewatch and create the admin account right away: until it exists, whoever opens the page first creates it.</p>
   <p style="margin-bottom:0">The setup wizard then asks for an admin account, your home's name and time zone, the internet checks and contracted
     speed, your equipment, a notification channel and an optional heartbeat. Under "Your equipment" you tick what you have;
     the wizard then opens each module's page in turn so you can connect it, or skip it. Anything else you add later, one module at a time, under Modules.</p>

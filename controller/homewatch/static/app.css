@@ -169,3 +169,36 @@ label.check.filtered-out { display: none; }
 .equipment-item input { margin-top: 3px; }
 .wizard-bar { align-items: center; flex-wrap: wrap; border: 1px solid var(--line); background: var(--card); }
 .wizard-bar .wizard-text { flex: 1 1 280px; min-width: 0; }
+
+/* module settings: a grid whose lines share columns (layout), wide / narrow boxes, fields shown while a box is ticked */
+.fcell { min-width: 0; }
+.row > .fcell.w-wide { flex: 1 1 340px; max-width: 620px; }
+.fcell.w-wide input, .fcell.w-wide select { max-width: none; }
+.fgrid { display: grid; grid-template-columns: var(--cols); gap: 0 16px; align-items: end; margin-bottom: 8px; }
+.fgrid input, .fgrid select { max-width: none; }
+.fgrid .checkcell label.check { margin: 0 0 9px; }
+.when-off { visibility: hidden; }
+h3.section { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 22px; }
+@media (max-width: 700px) {
+  .fgrid { grid-template-columns: 1fr; }
+  .fgrid .fcell.empty, .when-off { display: none; }
+  .fgrid .checkcell label.check { margin: 14px 0 0; }
+}
+/* tick lists: columns that line up; long details shorten with … (the full text is the row's tooltip) */
+.choice-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 2px 20px; }
+.choice-grid label.check { margin: 3px 0; min-width: 0; align-items: baseline; }
+.choice-grid label.check input { flex: none; align-self: center; }
+.choice-grid .cl { white-space: nowrap; }
+.choice-grid .cd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Checks and limits: the unit stays next to its box */
+td.lim { white-space: nowrap; }
+td.lim input.num { width: 84px; }
+/* long texts: the first part, the rest on click */
+details.more { display: inline; }
+details.more > summary { cursor: pointer; list-style: none; display: inline; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary .more-link { color: var(--accent); white-space: nowrap; }
+details.more[open] > summary { display: none; }
+.row.fields { align-items: flex-start; }  /* boxes line up even when their help texts differ in length */
+#thresholds td:nth-child(2) { min-width: 150px; }
+.row.fields > .fcell:not(.w-wide) { max-width: 420px; }  /* a long help text wraps under its box */

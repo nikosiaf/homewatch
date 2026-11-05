@@ -145,7 +145,8 @@ class MikroTikModule(ApiModule):
         return [self._key(d, p) for d in snap["devices"] for p in d["ports"] if p["running"] and not p["disabled"]]
 
     def choices(self, snap):
-        return [Choice(self._key(d, p), f"{d['name']} {p['name']}", p["comment"] + ("" if p["running"] else " · down"))
+        return [Choice(self._key(d, p), p["name"], " · ".join(x for x in (p["comment"], "" if p["running"] else "down") if x),
+                       group=d["name"])
                 for d in snap["devices"] for p in d["ports"] if not p["disabled"]]
 
     def check(self, s, th, snap, now):

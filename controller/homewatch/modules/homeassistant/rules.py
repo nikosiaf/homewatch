@@ -103,5 +103,4 @@ def evaluate(rules: list[Rule], entities: list[dict]) -> tuple[int, str, int]:
     parts = [t for _, t in firing] + problems
     if not parts:
         return OK, f"{len(rules)} rules, {len(seen)} entities fine", 0
-    shown = "; ".join(parts[:6]) + (f" (+{len(parts) - 6} more)" if len(parts) > 6 else "")
-    return status, shown, len(firing)
+    return status, "; ".join(parts), len(firing)

@@ -32,7 +32,7 @@ def setup_admin(c):
     r = c.get("/")
     assert r.url.path == "/setup"
     r = c.post("/setup", data={"csrf": csrf(r.text), "username": "admin", "password": "a-long-password",
-                               "password2": "a-long-password", "code": c.app.state.auth.setup_code()})
+                               "password2": "a-long-password"})
     assert r.url.path == "/setup/home"
     return csrf(r.text)
 
@@ -378,25 +378,16 @@ def test_history_shows_coverage(client):
     assert "100.00 %" in page and "Monitored 50 %" in page
 
 
-def test_first_admin_needs_the_setup_code(client):
+def test_first_admin_needs_no_code_and_only_once(client):
     auth = client.app.state.auth
     page = client.get("/setup").text
+    assert "setup code" not in page.lower()
     form = {"csrf": csrf(page), "username": "admin", "password": "a-long-password", "password2": "a-long-password"}
-    r = client.post("/setup", data={**form, "code": "wrong"})
-    assert "setup code is wrong" in r.text and not auth.has_users()
-    code = auth.setup_code()
-    r = client.post("/setup", data={**form, "code": code.upper() + " "})
+    r = client.post("/setup", data=form)
     assert r.url.path == "/setup/home" and auth.has_users()
-    assert auth.setup_code() != code  # used once
-
-
-def test_setup_code_guessing_locks_out(client):
-    page = client.get("/setup").text
-    form = {"csrf": csrf(page), "username": "admin", "password": "a-long-password", "password2": "a-long-password"}
-    for _ in range(5):
-        client.post("/setup", data={**form, "code": "wrong"})
-    r = client.post("/setup", data={**form, "code": client.app.state.auth.setup_code()})
-    assert "Too many" in r.text and not client.app.state.auth.has_users()
+    r = client.post("/setup", data={**form, "username": "intruder"})
+    assert r.url.path == "/login"
+    assert client.rt.db.one("SELECT COUNT(*) n FROM users")["n"] == 1
 
 
 def test_sensitive_actions_ask_for_the_password(client):
@@ -1141,3 +1132,44 @@ def test_entity_rules_field_is_a_text_box_and_keeps_lines(client, monkeypatch):
     assert "line 1" in r.text
     assert client.rt.db.get("module.homeassistant")["rules"] == s["rules"]
     plugin.snap = None
+
+
+def test_module_pages_connect_first_then_the_details(client, monkeypatch):
+    tok = setup_admin(client)
+    page = client.get("/modules/homeassistant").text
+    assert 'id="f-url"' in page and 'id="f-secret"' in page
+    assert 'id="f-rules"' not in page and 'id="f-full_every"' not in page  # not on the Add form
+    from homewatch.modules.homeassistant.plugin import plugin
+    from tests.test_homeassistant import snap
+
+    async def good(*a, **k):
+        return snap()
+
+    monkeypatch.setattr(plugin, "fetch", good)
+    client.post("/modules/homeassistant", data={"csrf": tok, "url": "http://ha:8123", "secret": "t", "verify": "on"})
+    s = client.rt.db.get("module.homeassistant")
+    assert s["full_every"] == plugin.field("full_every").default and s["watch_all"] is False
+    page = client.get("/modules/homeassistant").text
+    assert "Additional configuration" in page and page.index('id="f-secret"') < page.index("Additional configuration") \
+        < page.index('id="f-rules"')
+    assert "class=num" in page.split('id="f-full_every"')[1].split(">")[0]
+    plugin.snap = None
+
+
+def test_synology_lines_share_columns_and_snmp_shows_when_ticked(client):
+    setup_admin(client)
+    page = client.get("/modules/synology").text
+    grid = page.split('class="fgrid"')[1].split("</div>\n  </div>")[0]
+    order = [k for k in ("f-url", "f-username", "f-secret", 'name="snmp_on"', "f-snmp_user", "f-snmp_auth_protocol",
+                         "f-snmp_auth\"", 'name="snmp_priv_on"', "f-snmp_priv_protocol", "f-snmp_priv\"")]
+    pos = [grid.find(k) for k in order]
+    assert -1 not in pos and pos == sorted(pos)
+    assert 'data-when="snmp_on snmp_priv_on"' in grid and "<option selected>SHA</option>" in grid
+
+
+def test_long_texts_expand_on_click():
+    from homewatch.web import templates
+    t = templates.env.from_string('{% from "_more.html" import more %}{{ more(x, "k1") }}')
+    assert t.render(x="short") == "short"
+    html = t.render(x="word " * 100)
+    assert '<details class="more" data-more="k1">' in html and html.count("word") > 100

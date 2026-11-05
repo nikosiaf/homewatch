@@ -10,24 +10,27 @@ OIDS = {
     "cpu_fan": "1.3.6.1.4.1.6574.1.4.2.0",
 }
 NAMES = {"system": "system", "power": "power supply", "system_fan": "system fan", "cpu_fan": "CPU fan"}
-AUTH = ("SHA", "SHA256")
-PRIV = ("AES",)
+AUTH = ("SHA", "MD5", "SHA256")  # as DSM offers them; SHA is the default, MD5 only for old setups
+PRIV = ("AES", "DES")
 
 
 class SnmpError(Exception):
     pass
 
 
-async def read(host: str, user: str, auth_key: str, priv_key: str, auth: str = "SHA", timeout: float = 3) -> dict:
-    """{name: 1 | 2 | None} for each OID; raises SnmpError when the NAS doesn't answer or refuses the user."""
+async def read(host: str, user: str, auth_key: str, priv_key: str, auth: str = "SHA", priv: str = "AES",
+               timeout: float = 3) -> dict:
+    """{name: 1 | 2 | None} for each OID; priv "" = no privacy (authNoPriv).
+    Raises SnmpError when the NAS doesn't answer or refuses the user."""
     from pysnmp.hlapi.v3arch.asyncio import (ContextData, ObjectIdentity, ObjectType, SnmpEngine, UdpTransportTarget,
-                                             UsmUserData, get_cmd, usmAesCfb128Protocol,
-                                             usmHMAC192SHA256AuthProtocol, usmHMACSHAAuthProtocol)
+                                             UsmUserData, get_cmd, usmAesCfb128Protocol, usmDESPrivProtocol,
+                                             usmHMAC192SHA256AuthProtocol, usmHMACMD5AuthProtocol,
+                                             usmHMACSHAAuthProtocol, usmNoPrivProtocol)
+    auth_p = {"SHA256": usmHMAC192SHA256AuthProtocol, "MD5": usmHMACMD5AuthProtocol}.get(auth, usmHMACSHAAuthProtocol)
+    priv_p = {"AES": usmAesCfb128Protocol, "DES": usmDESPrivProtocol}.get(priv, usmNoPrivProtocol)
     engine = SnmpEngine()
     try:
-        user_data = UsmUserData(user, auth_key, priv_key,
-                                authProtocol=usmHMAC192SHA256AuthProtocol if auth == "SHA256" else usmHMACSHAAuthProtocol,
-                                privProtocol=usmAesCfb128Protocol)
+        user_data = UsmUserData(user, auth_key, priv_key if priv else None, authProtocol=auth_p, privProtocol=priv_p)
         target = await UdpTransportTarget.create((host, 161), timeout=timeout, retries=1)
         err, status, _, binds = await get_cmd(engine, user_data, target, ContextData(),
                                               *(ObjectType(ObjectIdentity(o)) for o in OIDS.values()))
@@ -36,7 +39,7 @@ async def read(host: str, user: str, auth_key: str, priv_key: str, auth: str = "
     finally:
         engine.close_dispatcher()
     if err:
-        raise SnmpError(f"SNMP: {err}; check the user, both passwords, SHA/AES and UDP 161 from this host")
+        raise SnmpError(f"SNMP: {err}; check the user, the protocols and passwords, and UDP 161 from this host")
     if status:
         raise SnmpError(f"SNMP: the NAS answered {status.prettyPrint()}")
     out = {}

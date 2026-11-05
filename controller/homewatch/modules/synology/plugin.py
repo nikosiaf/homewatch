@@ -50,20 +50,29 @@ class SynologyModule(ApiModule):
                  "except DSM. If 2-step verification is enforced, exempt this account."),
         ("text", "homewatch only reads; it logs in every 10 minutes and logs out right after."),
         ("text", "Optional, fans and power supply: Control Panel → Terminal & SNMP → SNMP → enable the SNMP "
-                 "service, tick SNMPv3, and create a user with authentication SHA and privacy AES. Enter that "
-                 "user and both passwords below. Leave the SNMP user empty to skip this check."),
+                 "service, tick SNMPv3 and create a user (authentication SHA, privacy AES are the safe choices). "
+                 "Then tick SNMPv3 below and enter the same user, protocols and passwords."),
     ]
+    # line 1 the DSM login; lines 2 and 3 SNMPv3, their protocols and passwords in the same columns
+    layout = [
+        ["url", "username", None, "_secret"],
+        ["snmp_on", "snmp_user", "snmp_auth_protocol", "snmp_auth"],
+        ["snmp_priv_on", None, "snmp_priv_protocol", "snmp_priv"],
+    ]
+    layout_cols = "minmax(0, 1.3fr) minmax(0, 1fr) 130px minmax(0, 1fr)"
     fields = [
         Field("url", "NAS address", "https://192.168.1.20:5001"),
         Field("username", "User name", "homewatch", default="homewatch"),
         Field("verify", "Check the HTTPS certificate", kind="check", default=True,
               help=SELF_SIGNED),
-        Field("snmp_user", "SNMPv3 user (optional)", "homewatch",
-              help="For the fans and power check. Empty: that check is skipped."),
-        Field("snmp_auth_protocol", "SNMPv3 authentication", "SHA", default="SHA",
-              help="SHA or SHA256, as set for the user in DSM. Privacy is always AES."),
-        Field("snmp_auth", "SNMPv3 authentication password", secret=True, optional=True),
-        Field("snmp_priv", "SNMPv3 privacy password", secret=True, optional=True),
+        Field("snmp_on", "SNMPv3", kind="check", default=False),
+        Field("snmp_user", "SNMPv3 user name", "homewatch", when="snmp_on"),
+        Field("snmp_auth_protocol", "Protocol", kind="select", options=snmp.AUTH, default="SHA", when="snmp_on"),
+        Field("snmp_auth", "Password", secret=True, optional=True, when="snmp_on"),
+        Field("snmp_priv_on", "SNMP privacy", kind="check", default=True, when="snmp_on"),
+        Field("snmp_priv_protocol", "Protocol", kind="select", options=snmp.PRIV, default="AES",
+              when="snmp_on snmp_priv_on"),
+        Field("snmp_priv", "Privacy password", secret=True, optional=True, when="snmp_on snmp_priv_on"),
     ]
     secret_label = "Password"
 
@@ -76,10 +85,22 @@ class SynologyModule(ApiModule):
             return out, "NAS address: e.g. https://192.168.1.20:5001"
         if not out["username"]:
             return out, "Enter the user name"
-        proto = (out.get("snmp_auth_protocol") or "SHA").upper()
-        if proto not in snmp.AUTH:
-            return out, "SNMPv3 authentication: SHA or SHA256"
-        return out | {"url": url, "snmp_auth_protocol": proto}, ""
+        if out.get("snmp_on") and not out.get("snmp_user"):
+            return out, "Enter the SNMPv3 user name, or untick SNMPv3"
+        return out | {"url": url}, ""
+
+    @staticmethod
+    def _upgrade(s: dict, saved: dict | None) -> dict:
+        """Settings from before 0.28 had no SNMP boxes: an SNMP user meant SNMPv3 with privacy (AES)."""
+        if saved is not None and "snmp_on" not in saved:
+            s = s | {"snmp_on": bool(saved.get("snmp_user")), "snmp_priv_on": True}
+        return s
+
+    def load(self, rt):
+        return self._upgrade(super().load(rt), rt.db.get(self.key))
+
+    def imported(self, settings):
+        return super().imported(self._upgrade(settings, settings))
 
     async def fetch(self, s, secret, now):
         entry = f"{s['url']}/webapi/entry.cgi"
@@ -132,13 +153,16 @@ class SynologyModule(ApiModule):
             "update_version": ((upgrade or {}).get("update") or {}).get("version", ""),
         }
         snap["hw"], snap["hw_error"] = None, ""
-        if s.get("snmp_user"):
-            if not (s.get("snmp_auth") and s.get("snmp_priv")):
-                snap["hw_error"] = "enter both SNMPv3 passwords in the settings"
+        if s.get("snmp_on"):
+            priv = (s.get("snmp_priv_protocol") or "AES") if s.get("snmp_priv_on", True) else ""
+            if not s.get("snmp_auth"):
+                snap["hw_error"] = "enter the SNMPv3 password in the settings"
+            elif priv and not s.get("snmp_priv"):
+                snap["hw_error"] = "enter the SNMP privacy password in the settings, or untick SNMP privacy"
             else:
                 try:
                     snap["hw"] = await snmp.read(urlsplit(s["url"]).hostname, s["snmp_user"], s["snmp_auth"],
-                                                 s["snmp_priv"], s.get("snmp_auth_protocol") or "SHA")
+                                                 s.get("snmp_priv") or "", s.get("snmp_auth_protocol") or "SHA", priv)
                 except snmp.SnmpError as e:
                     snap["hw_error"] = str(e)
         snap["_summary"] = f"{snap['info'].get('model', 'NAS')} {snap['info'].get('firmware_ver', '')}".strip()
@@ -218,8 +242,8 @@ class SynologyModule(ApiModule):
                 f"update available {snap.get('update_version') or ''}".strip() if snap["update"]
                 else f"{i.get('firmware_ver', 'DSM')} is up to date")
 
-        if not s.get("snmp_user"):
-            add("hardware", OK, "not watched (no SNMPv3 user in the settings)")
+        if not s.get("snmp_on"):
+            add("hardware", OK, "not watched (SNMPv3 is off in the settings)")
         elif snap.get("hw_error"):
             add("hardware", WARNING, snap["hw_error"])
         elif snap.get("hw") is not None:

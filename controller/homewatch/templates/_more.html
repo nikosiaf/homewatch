@@ -1,0 +1,2 @@
+{# A long text: its first part and "more"; a click shows all of it. key keeps it open across the Status refresh. #}
+{% macro more(text, key='', n=160) %}{% set text = (text or '') | string %}{% if text | length > n %}<details class="more"{% if key %} data-more="{{ key }}"{% endif %}><summary>{{ text[:n] | trim }}… <span class="more-link">more</span></summary>{{ text }}</details>{% else %}{{ text }}{% endif %}{% endmacro %}

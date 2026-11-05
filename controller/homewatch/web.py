@@ -79,8 +79,6 @@ def create_app(rt: Runtime | None = None, start_loops: bool = True) -> FastAPI:
     async def lifespan(app: FastAPI):
         app.state.rt = rt or Runtime.create(config_mod.load())
         app.state.auth = Auth(app.state.rt.db)
-        if not app.state.auth.has_users():
-            app.state.auth.setup_code()
         if start_loops:
             app.state.rt.start()
         yield
@@ -88,6 +86,7 @@ def create_app(rt: Runtime | None = None, start_loops: bool = True) -> FastAPI:
             await app.state.rt.stop()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.first_admin = asyncio.Lock()
     app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
     app.add_middleware(BodyLimit)
     _routes(app)
@@ -321,7 +320,6 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if auth.has_users():
             return RedirectResponse("/setup/home", status_code=303)
         tok = pre_value(request)
-        auth.setup_code()
         return with_pre(request, page(request, "setup_account.html", None, step=1, steps=SETUP_STEPS, csrf=tok), tok)
 
     @app.post("/setup")
@@ -335,9 +333,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if form.get("password") != form.get("password2"):
             return back("/setup", err="The passwords don't match")
         try:
-            auth.check_setup_code(str(form.get("code", "")), client_ip(request))
-            await asyncio.to_thread(auth.create_user, form.get("username", ""), form.get("password", ""), "admin")
-            auth.setup_done()
+            async with request.app.state.first_admin:  # two forms sent at once: only the first creates an admin
+                if auth.has_users():
+                    return RedirectResponse("/login", status_code=303)
+                await asyncio.to_thread(auth.create_user, form.get("username", ""), form.get("password", ""), "admin")
             token = await auth.login(form["username"], form["password"], client_ip(request))
         except AuthError as e:
             return back("/setup", err=str(e))

@@ -117,19 +117,40 @@ document.querySelectorAll("[data-choice-group]").forEach(function (d) {
   const boxes = Array.from(d.querySelectorAll('input[type="checkbox"]:not([data-group-all])'));
   function sync() {
     const n = boxes.filter(function (b) { return b.checked; }).length;
-    all.checked = n === boxes.length;
-    all.indeterminate = n > 0 && n < boxes.length;
-    count.textContent = n;
+    if (all) {
+      all.checked = n === boxes.length;
+      all.indeterminate = n > 0 && n < boxes.length;
+    }
+    count.textContent = (n === boxes.length ? "all " + n : n + " of " + boxes.length) + " " + count.dataset.word;
   }
+  boxes.forEach(function (b) { b.addEventListener("change", sync); });
+  sync();
+  if (!all) return;  // a group of one has no "All" box
   all.addEventListener("change", function () {
     // while the list is filtered, only what is shown: nothing out of sight changes
     boxes.filter(function (b) { return !b.closest("label").classList.contains("filtered-out"); })
       .forEach(function (b) { b.checked = all.checked; });
     sync();
   });
-  boxes.forEach(function (b) { b.addEventListener("change", sync); });
-  sync();
 });
+
+// Fields that show only while a box is ticked (data-when="key [key]"): hidden, they keep their place in the grid.
+(function () {
+  const cells = Array.from(document.querySelectorAll("[data-when]"));
+  if (!cells.length) return;
+  function update() {
+    cells.forEach(function (c) {
+      const form = c.closest("form");
+      const on = c.dataset.when.split(" ").every(function (k) {
+        const box = form.querySelector('input[type="checkbox"][name="' + k + '"]');
+        return box && box.checked;
+      });
+      c.classList.toggle("when-off", !on);
+    });
+  }
+  document.addEventListener("change", function (e) { if (e.target.type === "checkbox") update(); });
+  update();
+})();
 
 // Narrow screens: the header menu opens and closes with the menu button.
 document.addEventListener("click", function (e) {
@@ -220,7 +241,7 @@ document.querySelectorAll("[data-choice-search]").forEach(function (search) {
       const visible = inGroup.filter(function (l) { return !l.classList.contains("filtered-out"); }).length;
       d.hidden = filtering && visible === 0;
       if (filtering) d.open = visible > 0;
-      else if (d.dataset.wasFiltering) d.open = false;
+      else if (d.dataset.wasFiltering) d.open = d.hasAttribute("data-open-default");
       d.dataset.wasFiltering = filtering ? "1" : "";
       const label = d.querySelector("[data-group-all-label]");
       if (label) label.textContent = filtering ? "All " + visible + " shown" : "All " + inGroup.length;
@@ -234,3 +255,17 @@ document.querySelectorAll("[data-choice-search]").forEach(function (search) {
   apply();
 });
 
+
+// Long texts opened with "more" stay open when the Status page refreshes.
+(function () {
+  let open = [];
+  document.body.addEventListener("htmx:beforeSwap", function () {
+    open = Array.from(document.querySelectorAll("details.more[open][data-more]")).map(function (d) { return d.dataset.more; });
+  });
+  document.body.addEventListener("htmx:afterSwap", function () {
+    open.forEach(function (k) {
+      const d = document.querySelector('details.more[data-more="' + CSS.escape(k) + '"]');
+      if (d) d.open = true;
+    });
+  });
+})();

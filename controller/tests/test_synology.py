@@ -81,7 +81,8 @@ def run_with(s, snap):
     return {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, snap, "", NOW))}
 
 
-SNMP = S | {"snmp_user": "hw", "snmp_auth_protocol": "SHA", "snmp_auth": "authpass1", "snmp_priv": "privpass1"}
+SNMP = S | {"snmp_on": True, "snmp_user": "hw", "snmp_auth_protocol": "SHA", "snmp_auth": "authpass1",
+            "snmp_priv_on": True, "snmp_priv_protocol": "AES", "snmp_priv": "privpass1"}
 
 
 @respx.mock
@@ -90,17 +91,22 @@ async def test_fans_and_power_over_snmp(monkeypatch):
     respx.get("https://nas.test:5001/webapi/entry.cgi").mock(side_effect=dsm())
     asked = []
 
-    async def fake(host, user, auth, priv, proto="SHA", timeout=3):
-        asked.append((host, user, auth, priv, proto))
+    async def fake(host, user, auth, priv, proto="SHA", priv_proto="AES", timeout=3):
+        asked.append((host, user, auth, priv, proto, priv_proto))
         return {"system": 1, "power": 1, "system_fan": 2, "cpu_fan": None}
 
     monkeypatch.setattr(snmp, "read", fake)
     snap = await plugin.fetch(SNMP, "pw", NOW)
-    assert asked == [("nas.test", "hw", "authpass1", "privpass1", "SHA")]
+    assert asked == [("nas.test", "hw", "authpass1", "privpass1", "SHA", "AES")]
     res = run_with(SNMP, snap)
     assert res["hardware"].status == ERROR and res["hardware"].detail == "system fan failed"
     snap["hw"]["system_fan"] = 1
     assert run_with(SNMP, snap)["hardware"].detail == "system, power supply, system fan normal"
+    # MD5 without privacy (authNoPriv): no privacy password needed
+    no_priv = SNMP | {"snmp_auth_protocol": "MD5", "snmp_priv_on": False, "snmp_priv": ""}
+    asked.clear()
+    snap = await plugin.fetch(no_priv, "pw", NOW)
+    assert asked == [("nas.test", "hw", "authpass1", "", "MD5", "")] and not snap["hw_error"]
 
 
 @respx.mock
@@ -111,7 +117,9 @@ async def test_snmp_off_missing_password_and_unreadable(monkeypatch):
     assert run_with(S, snap)["hardware"].status == OK and "not watched" in run_with(S, snap)["hardware"].detail
     half = SNMP | {"snmp_priv": ""}
     snap = await plugin.fetch(half, "pw", NOW)
-    assert run_with(half, snap)["hardware"].status == WARNING and "both SNMPv3 passwords" in snap["hw_error"]
+    assert run_with(half, snap)["hardware"].status == WARNING and "privacy password" in snap["hw_error"]
+    snap = await plugin.fetch(SNMP | {"snmp_on": False}, "pw", NOW)  # a user but the box unticked: not read
+    assert snap["hw"] is None and "not watched" in run_with(SNMP | {"snmp_on": False}, snap)["hardware"].detail
 
     async def broken(*a, **k):
         raise snmp.SnmpError("SNMP: Unknown USM user")
@@ -125,8 +133,20 @@ async def test_snmp_off_missing_password_and_unreadable(monkeypatch):
 
 def test_snmp_settings_validated_and_passwords_are_secret():
     base = {"url": "nas.test", "username": "homewatch"}
-    out, err = plugin.validate(base | {"snmp_auth_protocol": "sha256"}, {})
-    assert not err and out["snmp_auth_protocol"] == "SHA256"
-    assert "SHA or SHA256" in plugin.validate(base | {"snmp_auth_protocol": "MD5"}, {})[1]
+    out, err = plugin.validate(base | {"snmp_auth_protocol": "md5", "snmp_priv_protocol": "des"}, {})
+    assert not err and out["snmp_auth_protocol"] == "MD5" and out["snmp_priv_protocol"] == "DES"
+    assert "SHA, MD5, SHA256" in plugin.validate(base | {"snmp_auth_protocol": "SHA512"}, {})[1]
+    assert "AES, DES" in plugin.validate(base | {"snmp_priv_protocol": "3DES"}, {})[1]
+    assert "SNMPv3 user name" in plugin.validate(base | {"snmp_on": "on", "_new": "1"}, {})[1]
     assert {f.key for f in plugin.fields if f.secret} == {"snmp_auth", "snmp_priv"}
     assert "snmp_auth" not in out and "snmp_priv" not in out
+
+
+def test_settings_from_before_028_keep_snmp_on(db):
+    from types import SimpleNamespace
+    rt = SimpleNamespace(db=db)
+    rt.db.set("module.synology", {"url": "https://nas.test:5001", "username": "homewatch", "snmp_user": "hw"})
+    s = plugin.load(rt)
+    assert s["snmp_on"] and s["snmp_priv_on"] and s["snmp_priv_protocol"] == "AES"
+    rt.db.set("module.synology", {"url": "https://nas.test:5001", "username": "homewatch", "snmp_user": ""})
+    assert not plugin.load(rt)["snmp_on"]

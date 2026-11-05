@@ -269,3 +269,10 @@ def test_split_text_prefers_boundaries():
     assert split_text("aaa\n\nbbb\nccc", 8) == ["aaa", "bbb\nccc"]
     assert split_text("x" * 25, 10) == ["x" * 10, "x" * 10, "x" * 5]
 
+
+def test_a_long_check_text_is_shortened_in_messages_only():
+    long = "; ".join(f"sensor {i} unavailable" for i in range(60))
+    ev = Event("open", "homeassistant.rules", "Entity rules", WARNING, WARNING, long, T0)
+    msg = render([ev], "Home", (0, 1), "", ZONE)
+    line = [x for x in msg.body.splitlines() if "sensor 0" in x][0].strip()
+    assert len(line) <= 300 and line.endswith("…") and "sensor 59" not in msg.body

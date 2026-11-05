@@ -169,7 +169,7 @@ class PBSModule(ApiModule):
         if not chosen:
             add("backups", OK, "Nothing chosen to watch")
         elif problems:
-            add("backups", lvl, "; ".join(problems[:4]) + (f" (+{len(problems) - 4} more)" if len(problems) > 4 else ""), oldest)
+            add("backups", lvl, "; ".join(problems), oldest)
         else:
             add("backups", OK, f"{len(chosen)} backed up, oldest {oldest:.0f} h ago", oldest)
 

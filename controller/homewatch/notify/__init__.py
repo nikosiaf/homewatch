@@ -98,6 +98,14 @@ def _dur(seconds: float) -> str:
     return f"{h // 24} d {h % 24} h"
 
 
+SHORT = 300  # a message keeps each check's text short; the full text is on the Status page
+
+
+def _short(text: str) -> str:
+    text = text or ""
+    return text if len(text) <= SHORT else text[:SHORT - 1].rstrip(" ;,") + "…"
+
+
 def _hm(ts: float, zone: ZoneInfo) -> str:
     return datetime.fromtimestamp(ts, zone).strftime("%H:%M")
 
@@ -116,10 +124,10 @@ def render(events: list[Event], home: str, open_counts: tuple[int, int], link: s
             span = ""
             if e.started and e.resolved:
                 span = f" after {_dur(e.resolved - e.started)} ({_hm(e.started, zone)}–{_hm(e.resolved, zone)})"
-            lines.append(f"{ICON[OK]} OK · {e.name}{span}\n    {e.detail}")
+            lines.append(f"{ICON[OK]} OK · {e.name}{span}\n    {_short(e.detail)}")
         else:
             since = f" since {_hm(e.started, zone)}" if e.kind == "remind" and e.started else ""
-            lines.append(f"{ICON[e.level]} {LEVEL_WORD[e.level]} · {e.name}{since}\n    {e.detail}")
+            lines.append(f"{ICON[e.level]} {LEVEL_WORD[e.level]} · {e.name}{since}\n    {_short(e.detail)}")
     errors, warnings = open_counts
     footer = "All checks OK." if not (errors or warnings) else f"Open now: {errors} error, {warnings} warning"
     body = "\n".join(lines) + f"\n\n{footer}" + (f"\n{link}" if link else "")

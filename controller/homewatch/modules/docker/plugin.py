@@ -74,7 +74,7 @@ class DockerModule(ApiModule):
               help=f"Addresses of the proxies, separated by commas; port {PORT} when none is given."),
     ]
     filter_title = "Containers to watch"
-    filter_help = ("Containers with a restart policy, per host and compose project. Unticked ones are not checked. "
+    filter_help = ("Containers with a restart policy, per host, with their compose project. Unticked ones are not checked. "
                    "New containers with a restart policy are watched.")
 
     def __init__(self):
@@ -155,15 +155,27 @@ class DockerModule(ApiModule):
         return f"{h['host']}/{c['name']}"
 
     def filters(self, snap):
-        return [Choice(self._key(h, c), c["name"], f"{c['image']} · {c['state']}",
-                       group=f"{h['name']} · {c['project'] or 'no project'}")
+        # one group per host; the compose project goes in the detail, so a project of one container needs no group
+        return [Choice(self._key(h, c), c["name"],
+                       " · ".join(x for x in (c["project"], "" if c["state"] == "running" else c["state"]) if x),
+                       group=h["name"])
                 for h in snap["hosts"] for c in h["containers"] if c["policy"] in AUTO]
+
+    def load(self, rt) -> dict:
+        s = super().load(rt)
+        # before 0.28 the list was grouped per "host · project": such a skipped project becomes its containers
+        old = {m for m in s.get("skipped", []) if m.startswith("group:") and " · " in m}
+        if old and self.snap:
+            mine = {self._key(h, c) for h in self.snap["hosts"] for c in h["containers"]
+                    if f"group:{h['name']} · {c['project'] or 'no project'}" in old}
+            s["skipped"] = sorted((set(s["skipped"]) - old) | mine)
+        return s
 
     def _watched(self, s, snap):
         skipped = set(s.get("skipped", []))
         return [(h, c) for h in snap["hosts"] for c in h["containers"] if c["policy"] in AUTO
-                and self._key(h, c) not in skipped
-                and f"group:{h['name']} · {c['project'] or 'no project'}" not in skipped]
+                and self._key(h, c) not in skipped and f"group:{h['name']}" not in skipped
+                and f"group:{h['name']} · {c['project'] or 'no project'}" not in skipped]  # set before 0.28
 
     def check(self, s, th, snap, now):
         out = []
