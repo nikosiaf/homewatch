@@ -259,6 +259,12 @@ def test_addon_entities_are_essential_and_sensor_fields_validated():
     e = {"entity_id": "binary_sensor.samba_share_running", "attributes": {"device_class": "running"}}
     assert _addon(e) and _special(e)
     assert not _addon({"entity_id": "binary_sensor.washer_status", "attributes": {"device_class": "running"}})
+    pve = {"entity_id": "binary_sensor.node_pve_backup_running", "attributes": {  # Proxmox VE integration, not an add-on
+        "running_since": None, "running_guests": None, "device_class": "running", "icon": "mdi:backup-restore",
+        "friendly_name": "Node pve Backup running"}}
+    assert not _addon(pve) and not _special(pve)
+    assert _addon({"entity_id": "binary_sensor.tv_hyper_muter_running",
+                   "attributes": {"device_class": "running", "friendly_name": "TV hyper muter Εκτελείται"}})
     assert _sensors({}) == {"disk": "sensor.system_monitor_disk_usage", "memory": "sensor.system_monitor_memory_usage",
                             "cpu": "sensor.system_monitor_processor_use"}
     base = {"url": "http://ha.local:8123", "full_every": "30"}

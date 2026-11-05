@@ -67,11 +67,16 @@ def _update(e) -> dict:
             **{k: attrs.get(k) for k in ("title", "installed_version", "latest_version", "skipped_version")}}
 
 
+ADDON_ATTRS = {"device_class", "friendly_name", "icon", "entity_picture"}  # all a Supervisor Running sensor has
+
+
 def _addon(e) -> bool:
     """An add-on's Running sensor (Supervisor integration). Other integrations use the 'running' class too
-    (VM status, appliance switches), but their entity ids don't end in _running."""
+    (VM status, appliance switches), mostly with ids not ending in _running; the ones that do (Proxmox VE's
+    "Node pve Backup running") carry attributes of their own, which the Supervisor's sensors never have."""
+    attrs = e.get("attributes", {})
     return (e["entity_id"].startswith("binary_sensor.") and e["entity_id"].endswith("_running")
-            and e.get("attributes", {}).get("device_class") == "running")
+            and attrs.get("device_class") == "running" and set(attrs) <= ADDON_ATTRS)
 
 
 def _special(e) -> bool:
