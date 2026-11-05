@@ -1,6 +1,6 @@
 """Check engine: turns check results into confirmed state changes, issues and events to notify.
 
-Rules (defaults from the siafHome experience):
+Rules (defaults from running it in a real home):
 - a new level must hold for CONFIRM runs in a row before it counts (blips are ignored)
 - every open / worse / better / resolve is stored as an issue
 - snoozed checks and maintenance windows record issues but hold their notifications; anything
