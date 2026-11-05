@@ -53,6 +53,9 @@ class UniFiModule(ApiModule):
     secret_label = "Password"
     choices_title = "Devices to watch"
     choices_help = "homewatch alerts when one of these disconnects. All adopted devices are ticked when you connect."
+    more_title = "Additional configuration"
+    more_help = "After connecting: the devices homewatch watches."
+    list_search = False
 
     def validate(self, form, old):
         out, err = super().validate(form, old)

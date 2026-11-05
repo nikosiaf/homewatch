@@ -103,6 +103,7 @@ class ApiModule(PinnedTLS, Module):
     more_help = ""
     more_fields_title = ""  # heading over the second section's plain fields
     choices_empty = ""  # shown when the choice list has nothing in it
+    list_search = True  # long tick lists get a search box and "only ticked"
 
     def field(self, key: str) -> Field:
         return next(f for f in self.fields if f.key == key)

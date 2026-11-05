@@ -34,17 +34,16 @@
     <h3>Updates</h3>
     <input type="hidden" name="_updates" value="1">
     <label class="check"><input type="checkbox" name="check" {{ 'checked' if updates }}> Check GitHub once a day for a newer release</label>
-    <p class="small" style="margin:8px 0">This is {{ version }}.
-      {% if update %}<b>{{ update }} is available.</b>{% elif latest %}The latest release is {{ latest }}.{% endif %}
-      <span class="quiet">Last checked: {{ checked | ts('%d %b %H:%M') if checked else 'not yet' }}.</span></p>
     {% if updater.status %}<p class="small {{ 'flash err' if updater.state == 'failed' }}" style="margin:8px 0">Updater: {{ updater.status }}</p>{% endif %}
-    {% if update and not updater.ready %}<p class="small">To update: set <code>HW_VERSION={{ update }}</code> in <code>.env</code>, then
+    {% if update and not updater.ready %}<p class="small">{{ update }} is available. To update: set <code>HW_VERSION={{ update }}</code> in <code>.env</code>, then
       <code>docker compose pull && docker compose up -d</code>. Or run <code>install.sh</code> again once: it adds the
-      updater, and this button installs new releases from then on.</p>{% endif %}
-    <p class="row" style="gap:8px"><button data-save>Save</button>
-      <button class="secondary" formaction="/system/updates/check" formnovalidate>Check now</button>
-      {% if update and updater.ready %}<button class="secondary" formaction="/system/updates/install" formnovalidate
-        data-confirm="Install homewatch {{ update }}? homewatch restarts and is away for a minute or two.">Install {{ update }}</button>{% endif %}</p>
+      updater, and the Install button installs new releases from then on.</p>{% endif %}
+    <p class="row tight"><button data-save>Save</button>
+      <button formaction="/system/updates/check" formnovalidate>Check now</button>
+      {% if update and updater.ready %}<button formaction="/system/updates/install" formnovalidate
+        data-confirm="Install homewatch {{ update }}? homewatch restarts and is away for a minute or two.">Install {{ update }}</button>
+      {% else %}<button disabled title="{{ 'No newer release' if not update else 'The updater is not installed on this host' }}">Install</button>{% endif %}
+      <span class="quiet small">Last checked {{ checked | ts('%d %b %H:%M') if checked else 'not yet' }}</span></p>
   </form>
 </div>
 <h2>Users</h2>
@@ -66,27 +65,29 @@
 </div>
 <h2>Export and import</h2>
 <div class="grid2" id="backup">
-  <div class="card">
+  <div class="card col">
     {{ note("backup") }}
     <b>Export</b>
     <p class="quiet small">All settings as one YAML file: modules, thresholds, timing, channels and maintenance windows.
       No passwords, tokens or users. homewatch also saves one every night and keeps the last 14.</p>
-    <form method="get" action="/system/exports" class="row tight">
-      <a class="button" href="/system/export">Download export</a>
-      {% if exports %}<select name="name" aria-label="Nightly exports" class="short">
+    <div class="card-foot">
+      <div class="row tight"><span class="grow">Download the configuration now</span><a class="button" href="/system/export">Download</a></div>
+      {% if exports %}<form method="get" action="/system/exports" class="row tight"><label for="exs" class="grow">Download an earlier one</label>
+        <select id="exs" name="name" class="short">
         {% for e in exports %}<option value="{{ e.name }}">{{ e.ts | ts('%d %b %H:%M') }} · {{ e.kb }} KB</option>{% endfor %}</select>
-      <button>Download</button>{% endif %}
-    </form>
-    {% if not exports %}<p class="quiet small">The first nightly export appears within 5 minutes of starting.</p>{% endif %}
+        <button>Download</button></form>
+      {% else %}<p class="quiet small">The first nightly export appears within 5 minutes of starting.</p>{% endif %}
+    </div>
   </div>
-  <form method="post" action="/system/import" enctype="multipart/form-data" class="card">
+  <form method="post" action="/system/import" enctype="multipart/form-data" class="card col">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="backup">
     <b>Import</b>
     <p class="quiet small">Replaces all settings with the ones in an export file. The current settings are kept as a
       version first, so you can go back under Configuration versions. Passwords, tokens and users stay as they are, except credentials of a module or channel whose address changes or whose HTTPS or certificate check is turned off: those are deleted and it is switched off.</p>
-    <label for="imf">Export file (.yaml)</label>
-    <div class="row tight"><input id="imf" type="file" name="file" accept=".yaml,.yml,text/yaml" required>
-      <button>Preview import…</button></div>
+    <div class="card-foot">
+      <div class="row tight"><input id="imf" type="file" name="file" accept=".yaml,.yml,text/yaml" required aria-label="Export file (.yaml)">
+        <button>Preview import…</button></div>
+    </div>
   </form>
 </div>
 <h2>Configuration versions</h2>

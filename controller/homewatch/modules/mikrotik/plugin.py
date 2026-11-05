@@ -57,15 +57,19 @@ class MikroTikModule(ApiModule):
                  "self-signed, so untick \"Check the HTTPS certificate\" unless you installed a trusted one."),
     ]
     fields = [
-        Field("devices", "Device addresses", "192.168.88.1, 192.168.88.2"),
+        Field("devices", "Device address(es)", "192.168.88.1, 192.168.88.2",
+              help="One or more addresses, separated by commas or spaces."),
         Field("username", "User name", "homewatch", default="homewatch"),
         Field("https", "Use HTTPS (www-ssl)", kind="check", default=True,
               help="Without it the password crosses your network unencrypted at every read."),
-        Field("verify", "Check the HTTPS certificate", kind="check", default=True, help=SELF_SIGNED),
+        Field("verify", "Check the HTTPS certificate", kind="check", default=True, help=SELF_SIGNED, when="https"),
     ]
     secret_label = "Password"
     choices_title = "Ports that should be up"
     choices_help = "homewatch alerts when one of these goes down. The ports running when you connected are ticked."
+    more_title = "Additional configuration"
+    more_help = "After connecting: the ports homewatch watches."
+    list_search = False
 
     def __init__(self):
         super().__init__()

@@ -57,9 +57,10 @@ class SynologyModule(ApiModule):
     layout = [
         ["url", "username", None, "_secret"],
         ["snmp_on", "snmp_user", "snmp_auth_protocol", "snmp_auth"],
-        ["snmp_priv_on", None, "snmp_priv_protocol", "snmp_priv"],
+        [None, "snmp_priv_on", "snmp_priv_protocol", "snmp_priv"],
     ]
-    layout_cols = "minmax(0, 1.3fr) minmax(0, 1fr) 130px minmax(0, 1fr)"
+    # tick boxes sit at the right of their cell, next to what they switch on
+    layout_cols = "minmax(0, 240px) minmax(0, 1fr) 96px minmax(0, 1fr)"
     fields = [
         Field("url", "NAS address", "https://192.168.1.20:5001"),
         Field("username", "User name", "homewatch", default="homewatch"),

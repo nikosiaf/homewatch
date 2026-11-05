@@ -1086,7 +1086,8 @@ def test_home_assistant_form_shows_full_read_default_for_old_settings(client):
     setup_admin(client)
     client.rt.db.set("module.homeassistant", {"enabled": True, "url": "http://ha.test:8123", "verify": False})
     page = client.get("/modules/homeassistant").text
-    assert 'name="full_every" value="30"' in page and "(5 to 1440)" in page
+    box = page.split('id="f-full_every"')[1].split(">")[0]
+    assert 'name="full_every"' in box and 'value="30"' in box and "(5 to 1440)" in page
 
 
 def test_docker_save_refused_when_one_host_unreachable(client, monkeypatch):
@@ -1156,7 +1157,8 @@ def test_module_pages_connect_first_then_the_details(client, monkeypatch):
     # the connection box, then Last reading, then Additional configuration as its own box
     main = page.split('id="settings"')[1].split("</form>")[0]
     assert 'id="f-full_every"' in main and 'id="f-rules"' not in main and "Entities to watch" not in main
-    assert "class=num" in main.split('id="f-full_every"')[1].split(">")[0]
+    line = main.split('class="row tight one-line"')[1].split("</div>")[0]  # label, box and help on one line
+    assert 'class="digits5"' in line and "Full read every" in line and "(5 to 1440)" in line
     assert page.index('id="overview"') < page.index('id="more"')
     more = page.split('id="more"')[1].split("</form>")[0]
     order = [more.index(k) for k in ("Entities to watch", 'name="watch_all"', "Unavailable entities to ignore",
@@ -1210,7 +1212,8 @@ def test_update_check_and_install_from_the_home_box(client, monkeypatch, tmp_pat
     tok = setup_admin(client)
     page = client.get("/system").text
     home = page.split('id="home"')[1].split("</form>")[0]
-    assert 'name="check"' in home and "Check now" in home and "Install" not in home
+    assert 'name="check"' in home and "Check now" in home and "Last checked not yet" in home
+    assert '<button disabled title="No newer release">Install</button>' in home and "This is" not in home
     client.post("/system/home", data={"csrf": tok, "_box": "home", "name": "Home", "tz": "UTC", "_updates": "1"})
     assert client.rt.db.get("updates.check") is False  # unticked, saved by the Home box's Save
     client.post("/system/home", data={"csrf": tok, "name": "Home", "tz": "UTC"})  # the wizard's step: untouched
@@ -1225,6 +1228,7 @@ def test_update_check_and_install_from_the_home_box(client, monkeypatch, tmp_pat
     assert "homewatch 9.9.9 is available" in client.post("/system/updates/check", data={"csrf": tok}).text
     page = client.get("/system").text
     assert "Install 9.9.9" not in page and "HW_VERSION=9.9.9" in page  # no updater on this host: the command
+    assert 'title="The updater is not installed on this host">Install</button>' in page
     upd = tmp_path / "update"
     (upd / "ask").mkdir(parents=True)
     object.__setattr__(client.rt.cfg, "update_dir", str(upd))
@@ -1280,8 +1284,48 @@ def test_system_page_one_line_export_and_paged_audit_log(client):
     setup_admin(client)
     client.rt.nightly_export(time.time())
     page = client.get("/system").text
-    export = page.split('action="/system/exports"')[1].split("</form>")[0]
-    assert "Download export" in export and 'name="name"' in export and "Download</button>" in export
+    export = page.split("<b>Export</b>")[1].split("</form>")[0]
+    assert export.index("Download the configuration now") < export.index('href="/system/export"') \
+        < export.index("Download an earlier one") < export.index('name="name"') < export.index("Download</button>")
     assert page.split("<h2>Audit log</h2>")[1].lstrip().startswith('<div class="card scroll"><table data-page="20">')
     imp = page.split('action="/system/import"')[1].split("</form>")[0]
     assert '<div class="row tight"><input id="imf" type="file"' in imp and "Preview import…</button></div>" in imp
+    assert 'class="card col"' in page and page.count('<div class="card-foot">') == 2  # last lines at the bottom
+
+
+def test_limits_show_whole_numbers_and_no_below(client):
+    setup_admin(client)
+    page = client.get("/modules/internet").text
+    box = page.split('name="internet.fresh.error"')[1].split(">")[0]
+    assert 'value="300"' in box or 'value="180"' in box
+    assert "(below)" not in page and '<th class="lim">WARNING at</th>' in page
+    assert 'step="1"' in page.split('name="internet.fresh.error"')[0].rsplit("<input", 1)[1]  # seconds: whole numbers
+
+
+def test_mikrotik_connect_first_then_ports_in_their_own_box(client, monkeypatch):
+    tok = setup_admin(client)
+    page = client.get("/modules/mikrotik").text
+    assert "Device address(es)" in page and "separated by commas or spaces" in page
+    assert 'class="when-collapse" data-when="https"' in page  # the certificate box only with HTTPS
+    from homewatch.modules.mikrotik.plugin import plugin
+    from tests import test_mikrotik as tm
+    ports = [{"name": f"ether{i}", "comment": "", "running": True, "disabled": False, "errors": 0} for i in range(1, 20)]
+    snap = {"devices": [tm.dev("mt1", ports=ports)], "errors": {}, "_summary": "1"}
+
+    async def good(*a, **k):
+        return snap
+    monkeypatch.setattr(plugin, "fetch", good)
+    client.post("/modules/mikrotik", data={"csrf": tok, "devices": "10.0.0.2", "username": "hw", "secret": "pw"})
+    page = client.get("/modules/mikrotik").text
+    main = page.split('id="settings"')[1].split("</form>")[0]
+    assert "Ports that should be up" not in main
+    more = page.split('id="more"')[1].split("</form>")[0]
+    assert "Ports that should be up" in more and "data-choice-search" not in more  # 19 ports, no search line
+    assert page.index('id="overview"') < page.index('id="more"')
+    overview = page.split('id="overview"')[1].split("</form>")[0]
+    assert 'action="/modules/mikrotik/refresh"' in overview and "Read now" in overview
+    s = client.rt.db.get("module.mikrotik")
+    assert len(s["chosen"]) == 19  # every connected port ticked
+    client.post("/modules/mikrotik", data={"csrf": tok, "_part": "more", "choose.mt1/ether1": "on"})
+    assert client.rt.db.get("module.mikrotik")["chosen"] == ["mt1/ether1"]
+    plugin.snap = None

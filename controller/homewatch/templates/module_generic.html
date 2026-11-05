@@ -57,22 +57,25 @@
       {% if f.help %}<p class="quiet small" style="margin:4px 0 0">{{ f.help }}</p>{% endif %}</div>
   {% endfor %}
   {% if section == '' %}{{ check_fields(fs) }}{% endif %}
-  {% for f in fs if f.own_line %}<div class="row fields">{{ field_cell(f, s) }}</div>{% endfor %}
+  {% for f in fs if f.own_line %}
+  <div class="row tight one-line"><label for="f-{{ f.key }}">{{ f.label }}</label>
+    <input id="f-{{ f.key }}" type="{{ 'number' if f.kind == 'number' else 'text' }}" class="digits5" name="{{ f.key }}"
+           value="{{ s[f.key] | num if f.kind == 'number' else s[f.key] }}" placeholder="{{ f.placeholder }}" autocomplete="off">
+    {% if f.help %}<span class="quiet small">{{ f.help }}</span>{% endif %}</div>
+  {% endfor %}
 {% endmacro %}
 
 {% macro check_fields(fs) %}
-  {% for f in fs if f.kind == 'check' %}
+  {% for f in fs if f.kind == 'check' %}<div{% if f.when %} class="when-collapse" data-when="{{ f.when }}"{% endif %}>
     <label class="check"><input type="checkbox" name="{{ f.key }}" {{ 'checked' if s[f.key] }}> {{ f.label }}</label>
-    {% if f.help %}<p class="quiet small" style="margin:0 0 0 26px">{{ f.help }}</p>{% endif %}
+    {% if f.help %}<p class="quiet small" style="margin:0 0 0 26px">{{ f.help }}</p>{% endif %}</div>
   {% endfor %}
 {% endmacro %}
 
 {# the lists, and on the second box the fields after them: entities to watch, ones to ignore, sensors, rules #}
 {% macro lists_html() %}
     {% if snap and (module.choices_title or module.filter_title) %}
-    <p class="quiet small" style="margin-top:14px">The lists below come from the reading at {{ snap_ts | ts('%H:%M:%S') }}
-      ({{ module.name }} is read every {{ read_every }}).
-      <button class="secondary" formaction="/modules/{{ module.id }}/refresh" formnovalidate>Read now</button></p>
+    <p class="quiet small" style="margin-top:14px">The lists come from the last reading ({{ snap_ts | ts('%d %b %H:%M:%S') }}).</p>
     {% endif %}
     {% if module.more_title and module.filter_title %}
     <h3>{{ module.filter_title }}</h3>
@@ -101,7 +104,7 @@
 
 {% macro choice_list(items_all, prefix, word) %}
   <div data-choice-list>
-  {% if items_all | length >= 15 %}
+  {% if module.list_search and items_all | length >= 15 %}
   <div class="row choice-tools">
     <input type="search" data-choice-search placeholder="Search {{ items_all | length }} items" aria-label="Search this list">
     <label class="check"><input type="checkbox" data-choice-selected> Only {{ word }}</label>
@@ -161,7 +164,10 @@
 
 {% if s.enabled and snap %}
 <div class="card scroll" id="overview">
-  <h2 style="margin-top:0">Last reading <span class="quiet small">{{ snap_ts | ts('%H:%M:%S') }}</span></h2>
+  <form method="post" action="/modules/{{ module.id }}/refresh" class="row tight" style="justify-content:space-between;margin-top:0">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="overview">
+    <h2 style="margin:0">Last reading <span class="quiet small">{{ snap_ts | ts('%d %b %H:%M:%S') }} · read every {{ read_every }}</span></h2>
+    <button>Read now</button></form>
   {% for t in tables %}
   {% if t.title %}<h3>{{ t.title }}</h3>{% endif %}
   <table>

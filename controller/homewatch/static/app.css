@@ -179,11 +179,13 @@ label.check.filtered-out { display: none; }
 .fgrid { display: grid; grid-template-columns: var(--cols); gap: 0 16px; align-items: end; margin-bottom: 8px; }
 .fgrid input, .fgrid select { max-width: none; }
 .fgrid .checkcell label.check { margin: 0 0 9px; }
+.fgrid .checkcell { justify-self: end; }
 .when-off { visibility: hidden; }
 h3.section { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 22px; }
 @media (max-width: 700px) {
   .fgrid { grid-template-columns: 1fr; }
   .fgrid .fcell.empty, .when-off { display: none; }
+  .fgrid .checkcell { justify-self: start; }
   .fgrid .checkcell label.check { margin: 14px 0 0; }
 }
 /* tick lists: columns that line up; long details shorten with … (the full text is the row's tooltip) */
@@ -194,8 +196,10 @@ h3.section { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 2
 .choice-grid .cl { flex: 0 1 auto; }
 .choice-grid .cd { flex: 0 1000 auto; }  /* the detail gives way first; a long name then shortens too */
 /* Checks and limits: the unit stays next to its box */
-td.lim { white-space: nowrap; }
-td.lim input.num { width: 64px; }
+/* the limit columns: a fixed width, header on one line, the box centred with its unit beside it */
+th.lim, td.lim { white-space: nowrap; width: 112px; text-align: center; }
+td.lim input.num { width: 58px; text-align: right; }
+td.lim .unit { display: inline-block; min-width: 2.2em; text-align: left; }
 /* long texts: the first part, the rest on click */
 details.more { display: inline; }
 details.more > summary { cursor: pointer; list-style: none; display: inline; }
@@ -234,3 +238,16 @@ table.attention td.nw { white-space: nowrap; }
 input[type=file] { font: inherit; color: var(--ink); }
 input[type=file]::file-selector-button { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent);
   background: transparent; color: var(--accent); font: inherit; line-height: 1.3; cursor: pointer; margin-right: 10px; }
+
+/* cards side by side whose last lines line up: the foot sits at the bottom */
+.card.col { display: flex; flex-direction: column; }
+.card.col .card-foot { margin-top: auto; }
+.row.tight .grow { flex: 1 1 auto; margin: 0; font-size: 15px; color: var(--ink); }
+
+/* a small setting on one line: label, box, help */
+.row.one-line label { margin: 0; font-size: 15px; color: var(--ink); }
+input.digits5 { width: 5.5em; max-width: 5.5em; text-align: right; }
+.when-collapse.when-off { display: none; }
+/* limit boxes: no spinner arrows, so four digits fit the narrow box */
+td.lim input.num { -moz-appearance: textfield; appearance: textfield; padding-left: 6px; padding-right: 6px; }
+td.lim input.num::-webkit-inner-spin-button, td.lim input.num::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }

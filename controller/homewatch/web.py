@@ -69,6 +69,17 @@ def _fmt_dur(seconds):
 
 templates.env.filters["ts"] = _fmt_ts
 templates.env.filters["dur"] = _fmt_dur
+
+
+def _fmt_num(v) -> str:
+    """180.0 -> "180", 2.5 -> "2.5": a limit as the admin typed it."""
+    if v is None:
+        return ""
+    f = float(v)
+    return str(int(f)) if f.is_integer() else f"{f:g}"
+
+
+templates.env.filters["num"] = _fmt_num
 templates.env.globals["LEVEL_WORD"] = LEVEL_WORD
 templates.env.globals["version"] = __version__
 templates.env.globals["CATALOG"] = CATALOG
@@ -567,7 +578,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return RedirectResponse("/modules", status_code=303)
         if form is None:
             return back(f"/modules/{mid}", err="Form expired, please try again")
-        keep_typed(request, f"/modules/{mid}", form, [f.key for f in m.fields if f.secret])  # a new reading keeps unsaved ticks
+        if set(form) - {"csrf", "_box"}:  # sent from a settings form: the new reading keeps its unsaved ticks
+            keep_typed(request, f"/modules/{mid}", form, [f.key for f in m.fields if f.secret])
         m.snap_ts = float("-inf")  # read now, not at the module's next turn
         await m.readings(rt, m.load(rt), time.time())
         rt.wake.set()  # re-run the checks on the fresh reading
