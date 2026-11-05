@@ -14,6 +14,8 @@ down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy.
 - LAN / Tailscale only: it never needs a port open to the internet
 - MIT licensed
 
+![homewatch's Status page: the overall status, today's key numbers and one tile per module with its 24-hour line](homewatch.png)
+
 ## What homewatch does
 
 ### Internet line module
