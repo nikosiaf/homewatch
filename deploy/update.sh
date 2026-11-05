@@ -17,9 +17,10 @@ status() {  # update/ is root's; homewatch can only write in update/ask/
 [[ -e update/ask/request || -L update/ask/request ]] || exit 0
 rm -f update/ask/request
 
-latest=$(curl -fsS --max-time 20 -H "Accept: application/vnd.github+json" \
-  https://api.github.com/repos/nikosiaf/homewatch/releases/latest \
-  | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"v?([^"]*)".*/\1/') || latest=""
+# read the whole answer first: a pipe that stops early (grep -m1) makes curl fail under pipefail
+json=$(curl -fsS --max-time 20 -H "Accept: application/vnd.github+json" \
+  https://api.github.com/repos/nikosiaf/homewatch/releases/latest) || json=""
+latest=$(sed -nE 's/.*"tag_name": *"v?([^"]*)".*/\1/p' <<<"$json")
 if [[ ! "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   status failed "can't read the latest release from GitHub"
   exit 1
