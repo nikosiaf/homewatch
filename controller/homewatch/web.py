@@ -658,6 +658,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             enabled = form.get(f"{key}.enabled") == "on"
             warn = _float(form.get(f"{key}.warn")) if "warn" in d.editable else d.warn
             error = _float(form.get(f"{key}.error")) if "error" in d.editable else d.error
+            if d.unit == "%" and any(v is not None and not 0 <= v <= 100 for v in (warn, error)):
+                return back(here, err=f"{d.name}: a percentage, from 0 to 100")
             if warn is not None and error is not None and (error > warn if d.lower_is_worse else warn > error):
                 return back(here, err=f"{d.name}: the WARNING level must come before the ERROR level")
             o = old[d.id]

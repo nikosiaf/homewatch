@@ -285,6 +285,12 @@ def clean_import(snap: dict) -> str:
         if err:
             return f"{m.name}: {err}"
         snap["settings"][f"module.{m.id}"] = settings
+    defs = {f"{m.id}.{d.id}": d for m in MODULES.values() for d in m.checks}
+    for c in snap["checks"]:
+        d = defs.get(c["check_key"])
+        for k in ("warn", "error"):
+            if d and d.unit == "%" and c[k] is not None and not (isinstance(c[k], (int, float)) and 0 <= c[k] <= 100):
+                return f"{d.name}: the {'WARNING' if k == 'warn' else 'ERROR'} level is a percentage, from 0 to 100"
     for c in snap["channels"]:
         try:
             config = json.loads(c["config"])

@@ -1257,3 +1257,31 @@ def test_long_texts_expand_on_click():
     assert t.render(x="short") == "short"
     html = t.render(x="word " * 100)
     assert '<details class="more" data-more="k1">' in html and html.count("word") > 100
+
+
+def test_percent_limits_stay_from_0_to_100(client):
+    tok = setup_admin(client)
+    from homewatch.modules.homeassistant.plugin import plugin
+    client.rt.db.set("module.homeassistant", {"enabled": True, "url": "http://ha.test:8123", "verify": False})
+    page = client.get("/modules/homeassistant").text
+    assert 'min=0 max=100 name="homeassistant.disk.warn"' in page
+    assert 'min=0 max=100 name="homeassistant.backups.warn"' not in page  # hours, not %
+    data = {"csrf": tok, **{f"homeassistant.{d.id}.enabled": "on" for d in plugin.checks},
+            "homeassistant.disk.warn": "80", "homeassistant.disk.error": "120"}
+    r = client.post("/modules/homeassistant/thresholds", data=data)
+    assert "Disk: a percentage, from 0 to 100" in r.text
+    from homewatch import versions
+    snap = {"settings": {}, "channels": [], "maintenance": [],
+            "checks": [{"site": "home", "check_key": "homeassistant.cpu", "enabled": 1, "warn": 90, "error": 101}]}
+    assert "CPU: the ERROR level is a percentage" in versions.clean_import(snap)
+
+
+def test_system_page_one_line_export_and_paged_audit_log(client):
+    setup_admin(client)
+    client.rt.nightly_export(time.time())
+    page = client.get("/system").text
+    export = page.split('action="/system/exports"')[1].split("</form>")[0]
+    assert "Download export" in export and 'name="name"' in export and "Download</button>" in export
+    assert page.split("<h2>Audit log</h2>")[1].lstrip().startswith('<div class="card scroll"><table data-page="20">')
+    imp = page.split('action="/system/import"')[1].split("</form>")[0]
+    assert '<div class="row tight"><input id="imf" type="file"' in imp and "Preview import…</button></div>" in imp

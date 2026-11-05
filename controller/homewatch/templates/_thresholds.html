@@ -12,8 +12,8 @@
       <td><b>{{ d.name }}</b><div class="quiet small">{{ d.help }}</div></td>
       <td>{% if c %}<span class="badge s{{ c.effective }}">{{ LEVEL_WORD[c.effective] }}</span>
           <div class="quiet small">{{ more(c.detail) }}</div>{% else %}<span class="quiet">—</span>{% endif %}</td>
-      <td class="lim">{% if 'warn' in d.editable %}<input class="num" type="number" step="any" name="{{ key }}.warn" value="{{ t.warn if t.warn is not none }}"> {{ d.unit }}{% if d.lower_is_worse %} <span class="quiet small">(below)</span>{% endif %}{% else %}<span class="quiet">fixed</span>{% endif %}</td>
-      <td class="lim">{% if 'error' in d.editable %}<input class="num" type="number" step="any" name="{{ key }}.error" value="{{ t.error if t.error is not none }}"> {{ d.unit }}{% if d.lower_is_worse %} <span class="quiet small">(below)</span>{% endif %}{% else %}<span class="quiet">fixed</span>{% endif %}</td>
+      <td class="lim">{% if 'warn' in d.editable %}<input class="num" type="number" step="any" {{ 'min=0 max=100' if d.unit == '%' }} name="{{ key }}.warn" value="{{ t.warn if t.warn is not none }}"> {{ d.unit }}{% if d.lower_is_worse %} <span class="quiet small">(below)</span>{% endif %}{% else %}<span class="quiet">fixed</span>{% endif %}</td>
+      <td class="lim">{% if 'error' in d.editable %}<input class="num" type="number" step="any" {{ 'min=0 max=100' if d.unit == '%' }} name="{{ key }}.error" value="{{ t.error if t.error is not none }}"> {{ d.unit }}{% if d.lower_is_worse %} <span class="quiet small">(below)</span>{% endif %}{% else %}<span class="quiet">fixed</span>{% endif %}</td>
     </tr>{% endfor %}
   </table></div>
   <p class="quiet small">Empty a field to switch that level off. "fixed" checks are ERROR when their condition is met.</p>

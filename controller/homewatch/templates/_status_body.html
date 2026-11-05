@@ -13,16 +13,16 @@
 {% from "_note.html" import note with context %}{% from "_more.html" import more %}{{ note("status") }}
 {% if open %}
 <h2>Needs attention</h2>
-<div class="card scroll"><table>
+<div class="card scroll"><table class="attention">
   <tr><th>Level</th><th>Check</th><th>Why</th><th>Since</th><th>For</th>{% if user.is_admin %}<th></th>{% endif %}</tr>
   {% for i in open %}<tr>
     <td><span class="badge s{{ i.level }}">{{ LEVEL_WORD[i.level] }}</span></td>
     <td>{{ names.get(i.check_key, i.check_key) }}</td><td>{{ more(i.detail, "i" ~ i.id) }}</td>
-    <td>{{ i.started | ts }}</td><td>{{ (now - i.started) | dur }}</td>
+    <td class="nw">{{ i.started | ts }}</td><td class="nw">{{ (now - i.started) | dur }}</td>
     {% if user.is_admin %}<td style="white-space:nowrap"><form class="inline" method="post" action="/maintenance/snooze">
       <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status"><input type="hidden" name="_from" value="status">
       <input type="hidden" name="check" value="{{ i.check_key }}">
-      <select name="for" aria-label="snooze for"><option value="1h">1 h</option><option value="4h">4 h</option><option value="24h">24 h</option></select>
+      <select name="for" aria-label="snooze for" class="short"><option value="1h">1 h</option><option value="4h">4 h</option><option value="24h">24 h</option></select>
       <button class="secondary">Snooze</button></form></td>{% endif %}</tr>{% endfor %}
 </table></div>
 {% endif %}

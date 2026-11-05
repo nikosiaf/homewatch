@@ -59,8 +59,10 @@ input[type=time], select, textarea {
   width: 100%; max-width: 420px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
   background: var(--card); color: var(--ink); font: inherit; }
 input.num { max-width: 110px; }
+/* every button is outlined; red ones (danger) keep their colour */
 button, .button { display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent);
-  background: var(--accent); color: #fff; font: inherit; cursor: pointer; text-decoration: none; }
+  background: transparent; color: var(--accent); font: inherit; line-height: 1.3; cursor: pointer; text-decoration: none; }
+button:not(:disabled):hover, .button:hover { background: var(--muted-bg); }
 button.secondary, .button.secondary { background: transparent; color: var(--accent); }
 button.danger { background: transparent; color: var(--err); border-color: var(--err); }
 button:disabled { opacity: .5; cursor: not-allowed; }
@@ -220,3 +222,15 @@ dialog.ask::backdrop { background: rgba(0, 0, 0, .45); }
 dialog.ask h2 { margin: 0 0 6px; font-size: 18px; }
 dialog.ask input { width: 100%; max-width: none; }
 dialog.ask .row { justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* Needs attention: one line per issue, everything centred on it; the snooze box only as wide as "24 h" */
+table.attention td { vertical-align: middle; }
+select.short { width: auto; }
+/* a row of controls on one line, e.g. export: Download export · nightly exports · Download */
+.row.tight { gap: 8px; align-items: center; margin: 8px 0; }
+.row.tight input[type=file] { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+table.attention td.nw { white-space: nowrap; }
+/* the file chooser's button looks like the other buttons, at the same height */
+input[type=file] { font: inherit; color: var(--ink); }
+input[type=file]::file-selector-button { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent);
+  background: transparent; color: var(--accent); font: inherit; line-height: 1.3; cursor: pointer; margin-right: 10px; }

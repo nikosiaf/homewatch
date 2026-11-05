@@ -71,20 +71,22 @@
     <b>Export</b>
     <p class="quiet small">All settings as one YAML file: modules, thresholds, timing, channels and maintenance windows.
       No passwords, tokens or users. homewatch also saves one every night and keeps the last 14.</p>
-    <p><a class="button" href="/system/export">Download export</a></p>
-    {% if exports %}<form method="get" action="/system/exports" class="row" style="gap:8px">
-      <div><label for="exs">Nightly exports</label><select id="exs" name="name">
-        {% for e in exports %}<option value="{{ e.name }}">{{ e.ts | ts('%d %b %H:%M') }} · {{ e.kb }} KB</option>{% endfor %}</select></div>
-      <div><button class="secondary">Download</button></div></form>
-    {% else %}<p class="quiet small">The first nightly export appears within 5 minutes of starting.</p>{% endif %}
+    <form method="get" action="/system/exports" class="row tight">
+      <a class="button" href="/system/export">Download export</a>
+      {% if exports %}<select name="name" aria-label="Nightly exports" class="short">
+        {% for e in exports %}<option value="{{ e.name }}">{{ e.ts | ts('%d %b %H:%M') }} · {{ e.kb }} KB</option>{% endfor %}</select>
+      <button>Download</button>{% endif %}
+    </form>
+    {% if not exports %}<p class="quiet small">The first nightly export appears within 5 minutes of starting.</p>{% endif %}
   </div>
   <form method="post" action="/system/import" enctype="multipart/form-data" class="card">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="backup">
     <b>Import</b>
     <p class="quiet small">Replaces all settings with the ones in an export file. The current settings are kept as a
       version first, so you can go back under Configuration versions. Passwords, tokens and users stay as they are, except credentials of a module or channel whose address changes or whose HTTPS or certificate check is turned off: those are deleted and it is switched off.</p>
-    <label for="imf">Export file (.yaml)</label><input id="imf" type="file" name="file" accept=".yaml,.yml,text/yaml" required>
-    <p><button class="secondary">Preview import…</button></p>
+    <label for="imf">Export file (.yaml)</label>
+    <div class="row tight"><input id="imf" type="file" name="file" accept=".yaml,.yml,text/yaml" required>
+      <button>Preview import…</button></div>
   </form>
 </div>
 <h2>Configuration versions</h2>
@@ -97,7 +99,7 @@
     <tr><th>#</th><th>When</th><th>Who</th><th>What changed</th><th></th></tr>
     {% for v in versions %}<tr><td>{{ v.id }}</td><td>{{ v.ts | ts('%d %b %H:%M') }}</td><td>{{ v.username }}</td>
       <td class="small">{{ v.summary }}{% if v.action == 'config.restore' %} <span class="quiet">(restore)</span>{% endif %}</td>
-      <td class="row" style="gap:6px"><a class="small" href="/system/versions/{{ v.id }}" target="_blank">View</a>
+      <td class="row" style="gap:6px;align-items:center"><a class="small" href="/system/versions/{{ v.id }}" target="_blank">View</a>
         {% if not loop.first %}<form class="inline" method="get" action="/system/versions/{{ v.id }}/restore"><button class="secondary">Restore…</button></form>
         {% else %}<span class="quiet small">current</span>{% endif %}</td></tr>
     {% else %}<tr><td colspan="5" class="quiet">Nothing yet.</td></tr>{% endfor %}
@@ -125,7 +127,7 @@
   </form>
 </div>
 <h2>Audit log</h2>
-<div class="card scroll"><table>
+<div class="card scroll"><table data-page="20">
   <tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr>
   {% for a in log %}<tr><td>{{ a.ts | ts('%d %b %H:%M') }}</td><td>{{ a.username }}</td><td>{{ a.action }}</td><td class="small">{{ a.detail }}</td></tr>
   {% else %}<tr><td colspan="4" class="quiet">Nothing yet.</td></tr>{% endfor %}
