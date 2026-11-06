@@ -93,10 +93,19 @@ document.querySelectorAll("[data-engine-select]").forEach(function (sel) {
   show();
 });
 
-// Status page: one module tile open at a time. It survives the 30 s refresh; loading the page closes it.
+// Status page: one module tile open at a time. It survives the 30 s refresh; loading the page closes it, except
+// /?open=<module> (Grafana's links), which opens that one.
 (function () {
   let openModule = null;
+  const asked = new URLSearchParams(location.search).get("open");
+  const first = asked && document.querySelector(`details[data-module="${CSS.escape(asked)}"]`);
+  if (first) {
+    first.open = true;
+    openModule = asked;
+    first.scrollIntoView({block: "start"});
+  }
   document.addEventListener("click", function (e) {
+    if (e.target.closest && e.target.closest("details[data-module] > summary a")) return;  // a link, not the tile
     const summary = e.target.closest ? e.target.closest("details[data-module] > summary") : null;
     if (!summary) return;
     const d = summary.parentElement;

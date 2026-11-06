@@ -141,7 +141,7 @@ def page(request: Request, name: str, user: User | None, **ctx) -> HTMLResponse:
         rt.db.set("home.url", f"{request.url.scheme}://{request.url.netloc}")
     templates.env.globals["zone"] = tz(rt.db)
     ctx.update(request=request, user=user, home=rt.db.get("home.name") or "Home",
-               update=rt.update_available(), flash=request.query_params.get("msg", ""),
+               update=rt.update_available(), flash=request.query_params.get("msg", ""), grafana=rt.grafana_on,
                box_id=request.query_params.get("box", ""),
                error=ctx.get("error") or request.query_params.get("err", ""))
     return templates.TemplateResponse(request, name, ctx)
@@ -314,6 +314,12 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if path in ("/login",):
             return await call_next(request)
         user = current(request)
+        if path == "/auth/grafana":  # Caddy's forward_auth for /grafana/: who is this, and in which Grafana role
+            if user is None:
+                return RedirectResponse("/login", status_code=303)
+            return Response(status_code=200, headers={"X-Webauth-User": user.username,
+                                                      "X-Webauth-Role": "Admin" if user.is_admin else "Viewer",
+                                                      "Cache-Control": "no-store"})
         if user is None:
             return RedirectResponse("/login", status_code=303)
         request.state.user = user
@@ -982,6 +988,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         version_rows = rt.db.all("SELECT id, ts, username, action, summary FROM config_versions ORDER BY id DESC LIMIT 200")
         vm_ok = await rt.metrics.healthy()
         return page(request, "system.html", request.state.user, users=users, log=log_rows, vm_ok=vm_ok,
+                    **await _grafana_ctx(rt),
                     last_run=rt.last_run, last_error=rt.last_error, csrf=request.state.user.csrf,
                     updates=rt.db.get("updates.check", True), latest=rt.db.get("updates.latest", ""),
                     checked=rt.db.get("updates.checked", 0), updater=updater.state(rt.cfg.update_dir),
@@ -1186,6 +1193,64 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/system", err=f"History deleted, but metrics could not be: {warning}")
         return back("/system", msg="History and metrics deleted")
 
+    @app.post("/system/grafana")
+    async def grafana_switch(request: Request):
+        from . import updater
+        rt = rt_of(request)
+        form = await form_of(request, request.state.user)
+        if form is None:
+            return back("/system", err="Form expired")
+        _box.set("grafana")
+        want = "on" if form.get("to") == "on" else "off"
+        err = updater.ask(rt.cfg.update_dir, "", request.state.user.username, f"grafana {want}")
+        if err:
+            return back("/system", err=err)
+        audit(rt.db, request.state.user.username, "grafana", f"asked the updater to turn Grafana {want}")
+        if want == "off":
+            rt.grafana_on = False  # the links go now; turning on shows them once Grafana answers
+        return back("/system", msg=f"Asked the host to turn Grafana {want}; this takes up to a minute"
+                    + (" (the first time it downloads Grafana, about 2 GB)." if want == "on" else "."))
+
+    @app.post("/system/retention")
+    async def retention_set(request: Request):
+        from . import updater
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/system", err="Form expired")
+        _box.set("grafana")
+        keep = form.get("keep", "")
+        if keep not in updater.RETENTIONS:
+            return back("/system", err="Choose how long to keep history")
+        if keep == rt.cfg.retention:
+            return back("/system", msg=f"History is already kept for {updater.RETENTIONS[keep]}")
+        problem = await password_problem(request, user, form)
+        if problem:
+            return back("/system", err=problem)
+        err = updater.ask(rt.cfg.update_dir, "", user.username, f"retention {keep}")
+        if err:
+            return back("/system", err=err)
+        audit(rt.db, user.username, "retention", f"asked the updater to keep {keep} of history (was {rt.cfg.retention})")
+        return back("/system", msg=f"Asked the host to keep {updater.RETENTIONS[keep]} of history; "
+                    "homewatch restarts in a few seconds.")
+
+    @app.get("/system/grafana-exports")
+    async def grafana_export_pick(request: Request):
+        name = request.query_params.get("name", "")
+        return RedirectResponse(f"/system/grafana-exports/{quote(name)}" if name else "/system#grafana", status_code=303)
+
+    @app.get("/system/grafana-exports/{name}")
+    async def grafana_export_file(request: Request, name: str):
+        from . import grafana
+        rt = rt_of(request)
+        path = os.path.join(rt.exports_dir, name)
+        if not grafana.MY_EXPORT.match(name) or not os.path.isfile(path):
+            return RedirectResponse("/system#grafana", status_code=303)
+        with open(path, encoding="utf-8") as f:
+            body = f.read()
+        return Response(body, media_type="application/json", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
     @app.post("/system/updates/check")
     async def updates_check(request: Request):
         rt = rt_of(request)
@@ -1290,6 +1355,32 @@ def _module_states(rt) -> dict[str, dict]:
     return out
 
 
+async def _grafana_ctx(rt) -> dict:
+    """The System page's Grafana and history box."""
+    from . import grafana, updater
+    vm = {}
+    try:
+        r = await rt.metrics.http.get(f"{rt.cfg.vm_url}/metrics", timeout=5)
+        for line in r.text.splitlines():
+            name, _, value = line.partition(" ")
+            if name.startswith(("vm_data_size_bytes", "vm_free_disk_space_bytes")):
+                key = name.split("{")[0]
+                vm[key] = vm.get(key, 0) + float(value)
+    except Exception:  # noqa: BLE001 - shown as unknown
+        pass
+    mine = []
+    try:
+        for n in sorted((n for n in os.listdir(rt.exports_dir) if grafana.MY_EXPORT.match(n)), reverse=True):
+            st = os.stat(os.path.join(rt.exports_dir, n))
+            mine.append({"name": n, "ts": st.st_mtime, "kb": max(1, round(st.st_size / 1024))})
+    except FileNotFoundError:
+        pass
+    return {"grafana_on": await grafana.running(rt.notifier.http, rt.cfg.grafana_url),
+            "grafana_ready": os.path.isdir(rt.cfg.grafana_dir), "features": updater.features(rt.cfg.update_dir),
+            "retention": rt.cfg.retention, "retentions": updater.RETENTIONS, "vm_size": vm.get("vm_data_size_bytes"),
+            "vm_free": vm.get("vm_free_disk_space_bytes"), "my_exports": mine}
+
+
 def _exports(rt) -> list[dict]:
     from . import versions
     out = []
@@ -1325,7 +1416,8 @@ def _status_ctx(request: Request) -> dict:
             info[m.id] = {"observed": m.observed(mine), "last_good": m.reading_ts(rt) or rt.engine.last_observed(m.id)}
     switched_off = [m.name for m in MODULES.values() if m.is_set_up(rt) and not m.enabled(m.load(rt))]
     unknown = [m.name for m in MODULES.values() if m.id in info and not info[m.id]["observed"]]
-    return dict(module_info=info, switched_off=switched_off, unknown=unknown, tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
+    from . import grafana
+    return dict(grafana=rt.grafana_on, boards=set(grafana.BUILDERS), module_info=info, switched_off=switched_off, unknown=unknown, tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
                 last_run=rt.last_run, last_error=rt.last_error, errors=errors, warnings=warnings,
                 setup_done=rt.db.get("setup.done", False))
 

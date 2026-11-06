@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from . import __version__, report, versions
+from . import __version__, grafana, report, versions
 from .auth import audit, scrub_audit
 from .config import Config
 from .db import DB
@@ -56,6 +56,8 @@ class Runtime:
     wake: asyncio.Event = field(default_factory=asyncio.Event)
     tasks: list[asyncio.Task] = field(default_factory=list)
     series_written: dict = field(default_factory=dict)  # module id -> reading_ts of the reading already written
+    grafana_for: frozenset | None = None  # the enabled modules the Grafana dashboards were last written for
+    grafana_on: bool = False  # Grafana answered at the last run: the pages then link to it
 
     @classmethod
     def create(cls, cfg: Config) -> Runtime:
@@ -71,7 +73,9 @@ class Runtime:
         versions.scrub_exports(os.path.join(cfg.data_dir, "exports"))
         db.run("DELETE FROM settings WHERE key='status.tiles' OR key LIKE 'status.open.%'")  # settings of 0.16.1 to 0.16.4
         versions.record(db, "system", "startup")  # also catches changes made while homewatch was stopped
-        return cls(cfg, db, secrets, Metrics(cfg.vm_url), Notifier(db, secrets), Engine(db, cfg.site))
+        rt = cls(cfg, db, secrets, Metrics(cfg.vm_url), Notifier(db, secrets), Engine(db, cfg.site))
+        rt.write_grafana()  # before Grafana starts (it waits for a healthy controller): it reads them once at start
+        return rt
 
     # ---- settings helpers ----------------------------------------------------------------
     def internet_settings(self) -> dict:
@@ -184,6 +188,8 @@ class Runtime:
         events += self.engine.reminders(names, now)
         self.notifier.dispatch(events, self.engine.counts(), now)
         self.results, self.last_run = results, now
+        self.write_grafana()
+        self.grafana_on = await grafana.running(self.notifier.http, self.cfg.grafana_url)
         try:
             await self.metrics.write([
                 line("hw_check_status", {"site": self.cfg.site, "module": r.key.split(".")[0], "check": r.key},
@@ -199,6 +205,17 @@ class Runtime:
         if not metrics_error:  # a store that can't be read is what the heartbeat must not hide
             await self.heartbeat()
         return results
+
+    def write_grafana(self) -> None:
+        """Keep Grafana's dashboards in line with the enabled modules (when the Grafana volume is there)."""
+        enabled = frozenset(m.id for m in MODULES.values() if m.enabled(m.load(self)))
+        if enabled == self.grafana_for:
+            return
+        try:
+            grafana.write(self.cfg.grafana_dir, set(enabled))
+            self.grafana_for = enabled
+        except OSError as e:
+            log.warning("Grafana provisioning: %s", e)
 
     async def heartbeat(self) -> None:
         await self.notifier.heartbeat()
@@ -350,6 +367,17 @@ class Runtime:
             versions.write_export(self.db, self.exports_dir, today)
             self.db.set("export.last", today)
 
+    async def export_grafana(self, now: float) -> None:
+        """Once a day, a copy of Grafana's "My dashboards" next to the configuration exports."""
+        today = time.strftime("%Y-%m-%d", time.localtime(now))
+        if self.db.get("export.grafana_last") == today:
+            return
+        try:
+            if await grafana.export_my(self.notifier.http, self.cfg.grafana_url, self.exports_dir, today):
+                self.db.set("export.grafana_last", today)
+        except Exception as e:  # noqa: BLE001 - Grafana is optional; try again at the next look
+            log.warning("Grafana dashboards export: %s", e)
+
     async def run_speedtest(self, already_marked: bool = False) -> speedtest.Result:
         if self.speed_running and not already_marked:
             return speedtest.Result(False, error="a speed test is already running")
@@ -393,6 +421,7 @@ class Runtime:
             now = time.time()
             try:
                 self.nightly_export(now)
+                await self.export_grafana(now)
                 if report.due(self.db, now):
                     await self.send_report(now)
                 if self.db.get("updates.check", True) and now - self.db.get("updates.checked", 0) > 86400:

@@ -135,6 +135,12 @@ details.module > summary::-webkit-details-marker { display: none; }
 details.module > summary::after { content: "▸"; margin-left: auto; color: var(--quiet); }
 details.module[open] > summary::after { content: "▾"; }
 details.module > .tiles { padding: 0 14px 14px; }
+.mt-right { display: flex; align-items: flex-end; gap: 8px; }
+details.module[open] .gf-link.when-open { display: inline-flex; }
+/* the Grafana link on an open Status tile: Grafana's orange-to-yellow, a white chart line */
+.gf-link { line-height: 0; border-radius: 7px; padding: 2px; background: linear-gradient(135deg, #f05a28, #fbca0a);
+  box-shadow: 0 1px 3px rgb(0 0 0 / .25); transition: transform .12s, box-shadow .12s; }
+.gf-link:hover, .gf-link:focus-visible { transform: translateY(-1px) scale(1.08); box-shadow: 0 3px 8px rgb(240 90 40 / .45); }
 /* "- Last attempt …" follows the summary text, only while the module is open */
 details.module .when-open { display: none; }
 details.module[open] .when-open { display: inline; }

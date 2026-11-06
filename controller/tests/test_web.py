@@ -1316,10 +1316,10 @@ def test_system_page_one_line_export_and_paged_audit_log(client):
     export = page.split("<b>Export</b>")[1].split("</form>")[0]
     assert export.index("Download the configuration now") < export.index('href="/system/export"') \
         < export.index("Download an earlier one") < export.index('name="name"') < export.index("Download</button>")
-    assert '<div class="card scroll">\n  <h2 class="card-title">Audit log</h2><table data-page="20">' in page
+    assert '<div class="card scroll">\n  <h2 class="card-title">Audit log</h2><table data-page="12">' in page
     imp = page.split('action="/system/import"')[1].split("</form>")[0]
     assert '<div class="row tight"><input id="imf" type="file"' in imp and "Preview import…</button></div>" in imp
-    assert 'class="card col"' in page and page.count('<div class="card-foot">') == 2  # last lines at the bottom
+    assert 'class="card col"' in page and page.count('<div class="card-foot">') == 4  # last lines at the bottom
 
 
 def test_limits_show_whole_numbers_and_no_below(client):

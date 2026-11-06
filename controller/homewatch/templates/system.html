@@ -46,6 +46,57 @@
       updater, and an Update button installs new releases from then on.</p>{% endif %}
   </form>
 </div>
+<h2>Grafana and history</h2>
+<div id="grafana">{{ note("grafana") }}</div>
+<div class="grid2">
+  <div class="card col">
+    <b>Grafana</b>
+    <p class="quiet small">Optional dashboards for everything homewatch stores, with your homewatch login. The built-in
+      ones are rebuilt with every update; <b>Save as</b> keeps your own copy in <b>My dashboards</b>, which homewatch
+      also saves every night next to the configuration exports.</p>
+    <table>
+      <tr><td>Status</td><td>{% if grafana_on %}<span class="badge s0">running</span> <a href="/grafana/" target="_blank">Open Grafana</a>
+        {% elif not grafana_ready %}<span class="quiet">not part of this install: download this release's docker-compose.yml, Caddyfile and update.sh, see Help → Grafana</span>
+        {% else %}<span class="quiet">off</span>{% endif %}</td></tr>
+    </table>
+    <div class="card-foot">
+      {% if grafana_ready and 'grafana' in features %}
+      <form method="post" action="/system/grafana" class="row tight">
+        <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="grafana">
+        {% if grafana_on %}<span class="grow quiet small">Turning it off keeps its dashboards for later.</span>
+          <input type="hidden" name="to" value="off"><button class="secondary" data-confirm="Turn Grafana off? Its dashboards are kept.">Turn off</button>
+        {% else %}<span class="grow quiet small">Uses about 150 MB of memory; the first start downloads about 2 GB.</span>
+          <input type="hidden" name="to" value="on"><button>Turn on</button>{% endif %}
+      </form>
+      {% elif grafana_ready %}<p class="quiet small">To turn it on or off here, the host's updater must be from this release:
+        put this release's <code>update.sh</code> next to <code>install.sh</code> and run <code>sudo ./update.sh</code> once.
+        Or by hand: <code>COMPOSE_PROFILES=grafana</code> in <code>.env</code>, then <code>docker compose up -d</code>.</p>{% endif %}
+      {% if my_exports %}<form method="get" action="/system/grafana-exports" class="row tight">
+        <label for="gex" class="grow">My dashboards, saved</label>
+        <select id="gex" name="name" class="short">{% for e in my_exports %}<option value="{{ e.name }}">{{ e.ts | ts('%d %b %H:%M') }} · {{ e.kb }} KB</option>{% endfor %}</select>
+        <button>Download</button></form>{% endif %}
+    </div>
+  </div>
+  <form method="post" action="/system/retention" class="card col" data-ask-password="Change how long history is kept? Data older than that is deleted and can't be brought back." data-ask-action="Change" data-ask-danger>
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="grafana"><input type="hidden" name="current">
+    <b>History</b>
+    <p class="quiet small">How long measurements are kept for the charts and Grafana. Issues, speed tests and settings
+      are not affected. When the disk gets full, keep less: data older than the new length is deleted
+      (VictoriaMetrics drops whole months, so it can take up to a month to free the space).</p>
+    <table>
+      <tr><td>Kept for</td><td>{{ retentions.get(retention, retention) }}</td></tr>
+      <tr><td>Stored now</td><td>{{ vm_size | filesizeformat if vm_size is not none else 'unknown' }}</td></tr>
+      <tr><td>Free disk</td><td>{{ vm_free | filesizeformat if vm_free is not none else 'unknown' }}</td></tr>
+    </table>
+    <div class="card-foot">
+      {% if 'retention' in features %}<div class="row tight"><label for="keep" class="grow">Keep history for</label>
+        <select id="keep" name="keep" class="short">{% for k, label in retentions.items() %}<option value="{{ k }}"{{ ' selected' if k == retention }}>{{ label }}</option>{% endfor %}</select>
+        <button class="danger">Change…</button></div>
+      {% else %}<p class="quiet small">Set <code>HW_RETENTION</code> in <code>.env</code> (e.g. 180d) and run <code>docker compose up -d</code>,
+        or update the host's updater (run install.sh again) to change it here.</p>{% endif %}
+    </div>
+  </form>
+</div>
 <div class="card scroll" id="users">
   <h2 class="card-title">Users</h2>
   {{ note("users") }}
@@ -128,7 +179,7 @@
   </form>
 </div>
 <div class="card scroll">
-  <h2 class="card-title">Audit log</h2><table data-page="20">
+  <h2 class="card-title">Audit log</h2><table data-page="12">
   <tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr>
   {% for a in log %}<tr><td>{{ a.ts | ts('%d %b %H:%M') }}</td><td>{{ a.username }}</td><td>{{ a.action }}</td><td class="small">{{ a.detail }}</td></tr>
   {% else %}<tr><td colspan="4" class="quiet">Nothing yet.</td></tr>{% endfor %}

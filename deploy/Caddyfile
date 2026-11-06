@@ -21,13 +21,42 @@
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "same-origin"
-		Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
 		-Server
 	}
 	request_body {
 		max_size 8MB
 	}
-	reverse_proxy controller:8000 {
-		header_up X-Forwarded-For {client_ip}
+
+	# Grafana's links to homewatch: /grafana/homewatch/open/<module> opens homewatch's Status page with that
+	# module's tile expanded. Only a plain module id is passed on; anything else is "not found".
+	handle /grafana/homewatch/* {
+		@open path_regexp open ^/grafana/homewatch/open/([a-z0-9_-]{1,40})$
+		redir @open /?open={re.open.1} 302
+		respond "Not a homewatch page" 404
+	}
+
+	# Grafana (optional, the compose profile "grafana"): homewatch decides who may in, and as what
+	handle /grafana* {
+		route {
+			# only homewatch's answer may name the Grafana user
+			request_header -X-Webauth-User
+			request_header -X-Webauth-Role
+			forward_auth controller:8000 {
+				uri /auth/grafana
+				copy_headers X-Webauth-User X-Webauth-Role
+			}
+			reverse_proxy grafana:3000
+		}
+	}
+	handle_errors 502 {
+		@grafana path /grafana*
+		respond @grafana "Grafana is not running. Turn it on under System → Grafana, or see Help → Grafana." 502
+	}
+
+	handle {
+		header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
+		reverse_proxy controller:8000 {
+			header_up X-Forwarded-For {client_ip}
+		}
 	}
 }

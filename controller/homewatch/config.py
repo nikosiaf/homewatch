@@ -24,6 +24,9 @@ class Config:
     secure_cookies: bool
     ookla_dir: str
     update_dir: str = "/update"  # shared with the host's updater (install.sh); missing = no updater
+    grafana_dir: str = "/grafana"  # Grafana's provisioning volume; missing = Grafana not installed
+    grafana_url: str = "http://grafana:3000/grafana"
+    retention: str = "1y"  # HW_RETENTION in .env: how long VictoriaMetrics keeps data
 
     @property
     def db_path(self) -> str:
@@ -56,4 +59,7 @@ def load(env: dict[str, str] | None = None) -> Config:
         secure_cookies=env.get("HW_SECURE_COOKIES", "1") != "0",
         ookla_dir=env.get("HW_OOKLA_DIR", os.path.join(data_dir, "ookla")),
         update_dir=env.get("HW_UPDATE_DIR", "/update"),
+        grafana_dir=env.get("HW_GRAFANA_DIR", "/grafana"),
+        grafana_url=env.get("HW_GRAFANA_URL", "http://grafana:3000/grafana").rstrip("/"),
+        retention=env.get("HW_RETENTION", "") or "1y",
     )

@@ -44,6 +44,7 @@
     <a href="/system" class="{{ 'on' if p == '/system' }}">System</a>
     {% endif %}
     <a href="/help" class="{{ 'on' if p == '/help' }}">Help</a>
+    {% if grafana %}<a href="/grafana/" target="_blank" rel="noopener" title="Grafana dashboards, in a new tab">Grafana ↗</a>{% endif %}
   </nav>
   <div class="who">
     <a href="/password">{{ user.username }}</a> ({{ user.role }})

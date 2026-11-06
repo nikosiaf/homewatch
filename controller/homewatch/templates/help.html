@@ -15,21 +15,26 @@
   <p class="small" style="margin-bottom:0">On this page:
     <a href="#install">Install</a> · <a href="#modules">Modules</a> · <a href="#alerts">Alerts</a> ·
     <a href="#channels">Notifications</a> · <a href="#config">Settings</a> · <a href="#update">Update and back up</a> ·
+    <a href="#grafana">Grafana</a> · <a href="#recovery">Backup and recovery</a> · <a href="#numbers">Reading the numbers</a> ·
     <a href="#security">Security</a> · <a href="#trouble">Troubleshooting</a></p>
 </div>
 
 <h2 id="install">Install</h2>
 <div class="card">
-  <p>You need a Linux host with Docker Engine and the Compose plugin (2 CPU, 2 GB RAM and 10 GB disk are plenty).
-    Download <code>docker-compose.yml</code>, <code>Caddyfile</code>, <code>env.example</code> and <code>install.sh</code>
-    from the latest release, then:</p>
+  <p>You need a Linux host with Docker Engine and the Compose plugin (2 CPU, 2 GB RAM and 10 GB disk are plenty;
+    add 2 GB of disk for Grafana). No Docker yet? Install it from Docker's own repository
+    (<code>https://docs.docker.com/engine/install/</code>), then add your user to the <code>docker</code> group
+    (<code>sudo usermod -aG docker $USER</code>) and log in again.</p>
   <pre class="code">mkdir homewatch &amp;&amp; cd homewatch
-chmod +x install.sh
-less install.sh          # please read it first; it's short
+for f in docker-compose.yml Caddyfile env.example install.sh update.sh; do
+  curl -fsSLO "https://github.com/nikosiaf/homewatch/releases/latest/download/$f"
+done
+chmod +x install.sh update.sh
+less install.sh          # please read it first; it's short (q to quit)
 ./install.sh</pre>
-  <p>The script writes <code>.env</code> with a new master key, creates a self-signed certificate and starts the containers.
-    It prints the certificate's SHA-256 fingerprint: compare it when your browser warns about the certificate at
-    <code>https://&lt;host&gt;</code>.</p>
+  <p>The script writes <code>.env</code> with a new master key, creates a self-signed certificate, offers the updater
+    (needs sudo once) and asks whether to add Grafana, then starts the containers. It prints the certificate's SHA-256
+    fingerprint: compare it when your browser warns about the certificate at <code>https://&lt;host&gt;</code>.</p>
   <p>Open homewatch and create the admin account right away: until it exists, whoever opens the page first creates it.</p>
   <p style="margin-bottom:0">The setup wizard then asks for an admin account, your home's name and time zone, the internet checks and contracted
     speed, your equipment, a notification channel and an optional heartbeat. Under "Your equipment" you tick what you have;
@@ -110,7 +115,38 @@ less install.sh          # please read it first; it's short
   <p>Database changes apply on start.</p>
   <p style="margin-bottom:0">To back up, keep the Docker volumes <code>homewatch_hw-data</code> (settings, users, history, encrypted secrets) and
     <code>homewatch_vm-data</code> (metrics), and a copy of <code>.env</code>. Without <code>HW_MASTER_KEY</code> from that file, saved passwords
-    and tokens can't be decrypted and you would enter them again.</p>
+    and tokens can't be decrypted and you would enter them again. With Grafana, also keep
+    <code>homewatch_grafana-data</code> (your own dashboards; the built-in ones are recreated).</p>
+</div>
+
+<h2 id="grafana">Grafana dashboards</h2>
+<div class="card">
+  <p>Grafana is optional. It shows everything homewatch stores (every device, port, guest, disk and the Home Assistant
+    entities you record) as dashboards at <code>https://&lt;homewatch&gt;/grafana/</code>. It has no login of its own:
+    you are signed in with your homewatch account. Admins are Grafana admins, viewers can only look.</p>
+  <ul>
+    <li><b>Turn it on or off</b> on the System page (Grafana and history). The first start downloads Grafana (about
+      2 GB) and it uses about 150 MB of memory. Turning it off keeps its dashboards. Without the updater: set
+      <code>COMPOSE_PROFILES=grafana</code> in <code>.env</code> (empty to turn it off) and run <code>docker compose up -d</code>.</li>
+    <li><b>Built-in dashboards</b> (folder homewatch): an Overview and one per enabled module. They are rebuilt with
+      every update, so they can't be saved. Switching a module off removes its dashboard.</li>
+    <li><b>Your own dashboards</b>: open a built-in one, choose <b>Save as</b> and save it in <b>My dashboards</b>.
+      Updates never touch that folder. homewatch saves it every night next to the configuration exports (System →
+      Grafana and history, last 14); to restore one, Dashboards → New → Import and paste its entry.</li>
+    <li><b>Home Assistant</b>: only the entities in the module's <i>Entities to record</i> list are kept (plus alarm,
+      safety, tamper and battery entities), every time the module reads (2 minutes by default).</li>
+    <li><b>Resolution</b> follows each module's <i>Read every</i> setting: a module read every 10 minutes has one point
+      per 10 minutes.</li>
+    <li><b>Data</b>: the data source <i>homewatch</i> is VictoriaMetrics (PromQL / MetricsQL). Metric names start with
+      <code>hw_</code>; Explore (left menu) lists them.</li>
+    <li><b>Older installs</b>: Grafana needs this release's <code>docker-compose.yml</code>, <code>Caddyfile</code> and
+      <code>update.sh</code> next to <code>install.sh</code> (the updater only changes the version). Download them from
+      the release, then run <code>docker compose up -d</code> and, with the updater, <code>sudo ./update.sh</code> once
+      (it tells homewatch that it can now turn Grafana on and off).</li>
+  </ul>
+  <p style="margin-bottom:0"><b>History length</b>: measurements are kept for a year by default. You can choose a
+    shorter time under System → History: data older than that is deleted (VictoriaMetrics drops whole months, so
+    space can take up to a month to come back). Issues, speed tests and settings are not affected.</p>
 </div>
 
 <h2 id="recovery">Backup and recovery</h2>

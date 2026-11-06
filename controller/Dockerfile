@@ -5,7 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt \
  && useradd --system --uid 10001 --home /app homewatch \
- && mkdir -p /data /telegraf && chown homewatch /data /telegraf
+ && mkdir -p /data /telegraf /grafana && chown homewatch /data /telegraf /grafana
 COPY homewatch ./homewatch
 # release builds pass the tag's version; local builds keep the "-dev" version from the source
 ARG VERSION=

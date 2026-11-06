@@ -5,15 +5,27 @@
 #   2. creates a self-signed HTTPS certificate in ./certs (skipped if one exists)
 #   3. offers the updater: a systemd unit that runs update.sh when the System page's "Update" button asks
 #      (needs sudo once; homewatch itself gets no Docker access, it only leaves a file in update/ask/)
-#   4. pulls the images and starts the stack with docker compose
+#   4. asks whether to add Grafana (COMPOSE_PROFILES=grafana in .env; System → Grafana can change it later)
+#   5. pulls the images and starts the stack with docker compose
 # Usage: ./install.sh               (release images from ghcr.io)
 #        ./install.sh --no-updater  (the same, without the updater)
+#        ./install.sh --grafana     (add Grafana without asking; --no-grafana: don't add it, don't ask)
 #        ./install.sh --dev         (build the controller from ../controller; no updater)
 set -euo pipefail
+dev=0 updater=1 grafana=ask
+for arg in "$@"; do
+  case "$arg" in
+    --dev) dev=1; updater=0 ;;
+    --no-updater) updater=0 ;;
+    --grafana) grafana=yes ;;
+    --no-grafana) grafana=no ;;
+    *) echo "Unknown option: $arg" >&2; exit 1 ;;
+  esac
+done
 cd "$(dirname "$0")"
 
 compose=(docker compose -f docker-compose.yml)
-if [[ "${1:-}" == "--dev" ]]; then compose+=(-f docker-compose.dev.yml); fi
+if [[ $dev == 1 ]]; then compose+=(-f docker-compose.dev.yml); fi
 
 for cmd in docker openssl ip; do
   command -v "$cmd" >/dev/null || { echo "Missing: $cmd" >&2; exit 1; }
@@ -62,6 +74,7 @@ add_updater() {
     || { echo "  needs systemd and curl; skipping the updater"; return 0; }
   "${sudo[@]}" install -d -o root -g root -m 755 update
   "${sudo[@]}" install -d -o 10001 -m 700 update/ask
+  echo "update grafana retention" | "${sudo[@]}" tee update/features >/dev/null  # update.sh rewrites it each run
   "${sudo[@]}" tee /etc/systemd/system/homewatch-update.service >/dev/null <<UNIT
 [Unit]
 Description=homewatch: install the latest release (asked from the System page)
@@ -85,7 +98,7 @@ UNIT
   "${sudo[@]}" systemctl enable --now homewatch-update.path >/dev/null
   echo "  updater installed (homewatch-update.path); remove it with: sudo systemctl disable --now homewatch-update.path"
 }
-if [[ "${1:-}" != "--dev" && "${1:-}" != "--no-updater" ]]; then
+if [[ $updater == 1 ]]; then
   answer=y
   if [[ -t 0 ]]; then
     read -r -p "Add the updater, so the System page can install new releases? It needs sudo once. [Y/n] " answer
@@ -97,7 +110,22 @@ if [[ "${1:-}" != "--dev" && "${1:-}" != "--no-updater" ]]; then
 fi
 mkdir -p update  # the controller mounts it; without the updater it stays empty
 
-if [[ "${1:-}" == "--dev" ]]; then
+# Grafana: optional dashboards at https://<homewatch>/grafana/, signed in with the homewatch login
+if [[ $grafana == ask ]] && ! grep -qE '^COMPOSE_PROFILES=.*grafana' .env; then
+  grafana=no
+  if [[ -t 0 ]]; then
+    read -r -p "Add Grafana dashboards (about 2 GB download, 150 MB memory)? You can change it later on the System page. [y/N] " answer
+    [[ "$answer" =~ ^[Yy] ]] && grafana=yes
+  fi
+fi
+if [[ $grafana == yes ]] && ! grep -qE '^COMPOSE_PROFILES=.*grafana' .env; then
+  echo "Adding Grafana"
+  if grep -q '^COMPOSE_PROFILES=.' .env; then sed -i 's/^COMPOSE_PROFILES=\(.*\)/COMPOSE_PROFILES=\1,grafana/' .env
+  elif grep -q '^COMPOSE_PROFILES=' .env; then sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=grafana/' .env
+  else echo "COMPOSE_PROFILES=grafana" >> .env; fi
+fi
+
+if [[ $dev == 1 ]]; then
   "${compose[@]}" up -d --build
 else
   "${compose[@]}" pull

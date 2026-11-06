@@ -178,7 +178,7 @@
     <button>Read now</button></form>
   {% for t in tables %}
   <fieldset class="reading">{% if t.title %}<legend>{{ t.title }}</legend>{% endif %}
-  <div class="scroll"><table>
+  <div class="scroll"><table data-page="12">
     <tr>{% for h in t.head %}<th>{{ h }}</th>{% endfor %}</tr>
     {% for r in t.rows %}<tr>{% for c in r %}<td>{{ c if c is not none else '—' }}</td>{% endfor %}</tr>
     {% else %}<tr><td colspan="{{ t.head | length }}" class="quiet">nothing</td></tr>{% endfor %}

@@ -52,13 +52,29 @@ def summary(st: str, text: str, when: str) -> str:
     return f"{text} ({when})"
 
 
-def ask(update_dir: str, version: str, username: str) -> str:
-    """Ask the host to install the latest release. Returns an error message or ''."""
+RETENTIONS = {"1y": "1 year", "180d": "6 months", "90d": "3 months", "30d": "1 month"}
+COMMANDS = {"grafana on", "grafana off", *(f"retention {k}" for k in RETENTIONS)}
+
+
+def features(update_dir: str) -> set[str]:
+    """What the host's updater can do besides updating ('grafana', 'retention'); empty for older updaters."""
+    try:
+        with open(os.path.join(update_dir, "features"), encoding="utf-8") as f:
+            return set(f.read(200).split())
+    except OSError:
+        return set()
+
+
+def ask(update_dir: str, version: str, username: str, command: str = "") -> str:
+    """Ask the host to install the latest release, or to run one of COMMANDS. Returns an error message or ''."""
     if not state(update_dir)["ready"]:
         return "The updater isn't installed on this host: run install.sh again, or update by hand"
+    if command and (command not in COMMANDS or command.split()[0] not in features(update_dir)):
+        return "The updater on this host is older and can't do that: download update.sh of this release next to install.sh"
     try:
         with open(os.path.join(update_dir, "ask", "request"), "w", encoding="utf-8") as f:
-            f.write(f"{int(time.time())} {username} {version}\n")
+            # the updater compares the first line with its fixed words; anything else means "update"
+            f.write(f"{command}\n" if command else f"{int(time.time())} {username} {version}\n")
     except OSError as e:
         return f"Can't ask the updater ({e.strerror})"
     return ""
