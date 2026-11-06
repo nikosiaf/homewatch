@@ -9,7 +9,7 @@ A small, self-hosted monitor for your home network, configured from a plain web 
 homewatch watches **your internet line**, **your provider's DSL modem**, **your Proxmox VE host**,
 **your OPNsense firewall**, **Home Assistant**, **your Synology NAS**, **your MikroTik switches**, **UniFi**, **Proxmox Backup Server**, **your UPS** and **your Docker hosts**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
 down", "guest stopped", "backup failed") and sends alerts to Telegram, ntfy, email or a webhook.
-Optionally it adds **Grafana dashboards**, an Overview and one per device, behind your homewatch login,
+Optionally it adds **Grafana dashboards**, an Overview and one per module, behind your homewatch login,
 with a year of history from every device, port and guest, and from the Home Assistant entities you choose.
 
 - Runs as a Docker Compose stack on any Linux host (amd64 or arm64)
