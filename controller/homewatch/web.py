@@ -259,7 +259,7 @@ def typed_over(saved: dict, draft: dict) -> dict:
 
 def ticks_over(ctx: dict, draft: dict) -> None:
     """Lists on a module's page as the form had them, so that a new reading or a failed save doesn't undo ticks."""
-    if "enabled" not in draft and "_filters_shown" not in draft and not any(k.startswith(("choose.", "keep.", "watch.")) for k in draft):
+    if "enabled" not in draft and "_filters_shown" not in draft and "_entities" not in draft and not any(k.startswith(("choose.", "keep.", "watch.")) for k in draft):
         return
     if ctx.get("choices"):
         ctx["choices"] = [(c, "choose." + c.value in draft) for c, _ in ctx["choices"]]
@@ -268,6 +268,22 @@ def ticks_over(ctx: dict, draft: dict) -> None:
         ctx["filters"] = [(c, "keep." + c.value in draft if c.value in shown else on) for c, on in ctx["filters"]]
     for g in ctx.get("guests", []):
         g["watched"] = f"watch.{g['vmid']}" in draft
+    if "_entities" in draft:
+        shown = set(json.loads(draft["_entities"]))
+        for _, rows in ctx.get("entity_groups", []):
+            for e in rows:
+                if e["id"] in shown:
+                    e["w"] = f"w.{e['id']}" in draft
+                    if "_gcol" in draft:
+                        e["g"] = f"g.{e['id']}" in draft
+                    e["rule"] = draft.get(f"r.{e['id']}", e["rule"])
+
+
+def _ha_grafana(rt) -> int:
+    """Home Assistant entities ticked Show in Grafana (stored even while Grafana is off)."""
+    m = MODULES.get("homeassistant")
+    s = m.load(rt) if m else {}
+    return len(s.get("grafana") or []) if m and m.enabled(s) else 0
 
 
 def _dropped_note(rt) -> str:
@@ -654,8 +670,11 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back(here, err="Form expired")
         changes, rows = [], []
         old = thresholds(rt.db, rt.cfg.site, m.id, m.checks)
+        hidden = m.hidden_checks(m.load(rt)) if hasattr(m, "hidden_checks") and hasattr(m, "load") else set()
         for d in m.checks:
             key = f"{m.id}.{d.id}"
+            if d.id in hidden:  # not on the page: keeps its limits
+                continue
             enabled = form.get(f"{key}.enabled") == "on"
             warn = _float(form.get(f"{key}.warn")) if "warn" in d.editable else d.warn
             error = _float(form.get(f"{key}.error")) if "error" in d.editable else d.error
@@ -668,6 +687,23 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                 changes.append(f"{key}: warn {o.warn}→{warn}, error {o.error}→{error}, "
                                f"enabled {o.enabled}→{enabled}")
             rows.append((rt.cfg.site, key, int(enabled), warn, error))
+        picked = {}  # sensors chosen in a check's row (Home Assistant: disk, memory, CPU)
+        for cid, fkey in (m.limit_fields().items() if hasattr(m, "limit_fields") else ()):
+            v = form.get(f"{m.id}.{cid}.sensor")
+            if v is None:
+                continue
+            v = v.strip()
+            if v and not re.fullmatch(r"sensor\.[a-z0-9_]+", v):
+                return back(here, err=f"{m.field(fkey).label}: an entity id like sensor.disk_use_percent")
+            picked[fkey] = v
+        if picked:
+            s = m.load(rt)
+            new = {k: v for k, v in picked.items() if (s.get(k) or "") != v}
+            if new:
+                s = {k: v for k, v in (s | new).items() if k != "_configured"}
+                rt.db.set(m.key, s)
+                changes.append(", ".join(f"{k}: {v or 'default'}" for k, v in new.items()))
+                m.reread()
         for row in rows:
             rt.db.run("INSERT INTO checks(site,check_key,enabled,warn,error) VALUES(?,?,?,?,?) "
                       "ON CONFLICT(site,check_key) DO UPDATE SET enabled=excluded.enabled, "
@@ -1343,7 +1379,7 @@ async def _grafana_ctx(rt) -> dict:
     return {"grafana_on": await grafana.running(rt.notifier.http, rt.cfg.grafana_url),
             "grafana_ready": os.path.isdir(rt.cfg.grafana_dir), "features": updater.features(rt.cfg.update_dir),
             "retention": rt.cfg.retention, "retentions": updater.RETENTIONS, "vm_size": vm.get("vm_data_size_bytes"),
-            "vm_free": vm.get("vm_free_disk_space_bytes"), "my_exports": mine}
+            "vm_free": vm.get("vm_free_disk_space_bytes"), "my_exports": mine, "ha_grafana": _ha_grafana(rt)}
 
 
 def _exports(rt) -> list[dict]:

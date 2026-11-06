@@ -83,6 +83,15 @@ class Metrics:
         if r.status_code >= 300:
             raise MetricsError(f"VictoriaMetrics delete failed: HTTP {r.status_code} {r.text[:200]}")
 
+    async def delete(self, match: str) -> None:
+        """Delete every series matching a selector, e.g. {__name__=~"hw_ha_entity_.*",entity_id="sensor.x"}."""
+        try:
+            r = await self.http.post(f"{self.base}/api/v1/admin/tsdb/delete_series", data={"match[]": match})
+        except httpx.HTTPError as e:
+            raise MetricsError(f"VictoriaMetrics unreachable: {e}") from e
+        if r.status_code >= 300:
+            raise MetricsError(f"VictoriaMetrics delete failed: HTTP {r.status_code} {r.text[:200]}")
+
     async def healthy(self) -> bool:
         try:
             r = await self.http.get(f"{self.base}/health")

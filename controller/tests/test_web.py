@@ -848,43 +848,6 @@ def test_api_module_connect_choose_switch_off_remove(client, monkeypatch):
     plugin.snap = None
 
 
-def test_grouped_choices_watch_list_save_and_refresh(client, monkeypatch):
-    tok = setup_admin(client)
-    from homewatch.modules.homeassistant.plugin import plugin
-    from tests.test_homeassistant import snap
-
-    reads = []
-
-    async def good(*a, **k):
-        reads.append(1)
-        return snap(unavailable=[{"entity_id": "light.old", "name": "Old light"}, {"entity_id": "sensor.x", "name": ""}],
-                    all=[["light.old", "Old light"], ["light.new", ""], ["sensor.x", ""], ["sensor.y", ""]])
-
-    monkeypatch.setattr(plugin, "fetch", good)
-    client.post("/modules/homeassistant", data={"csrf": tok, "url": "http://ha:8123", "secret": "t"})
-    s = client.rt.db.get("module.homeassistant")
-    assert s["chosen"] == ["light.old", "sensor.x"] and s["skipped"] == []
-    page = client.get("/modules/homeassistant").text
-    assert "Entities to watch" in page and "data-group-all" in page and "Read now" in page and "read every 2 min" in page
-    # untick all sensors and one light; something skipped earlier but not listed now keeps its setting
-    client.rt.db.set("module.homeassistant", s | {"skipped": ["camera.door"]})
-    shown = '["light.old", "light.new", "sensor.x", "sensor.y"]'
-    client.post("/modules/homeassistant", data={"csrf": tok, "enabled": "on", "url": "http://ha:8123",
-                                                "_filters_shown": shown, "keep.light.old": "on",
-                                                "choose.light.old": "on"})
-    s = client.rt.db.get("module.homeassistant")
-    assert s["skipped"] == ["camera.door", "group:sensor", "light.new", "sensor.x", "sensor.y"]
-    assert s["chosen"] == ["light.old"]
-    # ticking one sensor again drops the domain-wide skip
-    client.post("/modules/homeassistant", data={"csrf": tok, "enabled": "on", "url": "http://ha:8123",
-                                                "_filters_shown": shown, "keep.light.old": "on", "keep.sensor.y": "on"})
-    assert client.rt.db.get("module.homeassistant")["skipped"] == ["camera.door", "light.new", "sensor.x"]
-    n = len(reads)
-    r = client.post("/modules/homeassistant/refresh", data={"csrf": tok})
-    assert "Read again" in r.text and len(reads) == n + 1
-    plugin.snap = None
-
-
 def test_add_email_and_webhook_channels(client):
     tok = setup_admin(client)
     page = client.get("/notifications").text
@@ -1124,87 +1087,6 @@ def test_docker_save_refused_when_one_host_unreachable(client, monkeypatch):
     assert "Nothing saved" not in r.text and client.rt.db.get("module.docker")["hosts"] == "socket-proxy"
 
 
-def test_entity_rules_field_is_a_text_box_and_keeps_lines(client, monkeypatch):
-    tok = setup_admin(client)
-    from homewatch.modules.homeassistant.plugin import plugin
-    from tests.test_homeassistant import snap
-
-    async def good(*a, **k):
-        return snap(ruled=[{"entity_id": "sensor.oil", "state": "80", "name": "Oil", "unit": "L"}])
-
-    monkeypatch.setattr(plugin, "fetch", good)
-    rules = "# tank\r\nsensor.oil below 100 error\r\nsensor.oil below 200 warning"
-    client.post("/modules/homeassistant", data={"csrf": tok, "url": "http://ha:8123", "secret": "t", "rules": rules})
-    s = client.rt.db.get("module.homeassistant")
-    assert s["rules"] == "# tank\nsensor.oil below 100 error\nsensor.oil below 200 warning"
-    page = client.get("/modules/homeassistant").text
-    assert '<textarea id="f-rules"' in page and "sensor.oil below 100 error" in page
-    r = client.post("/modules/homeassistant", data={"csrf": tok, "enabled": "on", "url": "http://ha:8123",
-                                                    "rules": "sensor.oil under 5 warning"})
-    assert "line 1" in r.text
-    assert client.rt.db.get("module.homeassistant")["rules"] == s["rules"]
-    plugin.snap = None
-
-
-def test_module_pages_connect_first_then_the_details(client, monkeypatch):
-    tok = setup_admin(client)
-    page = client.get("/modules/homeassistant").text
-    assert 'id="f-url"' in page and 'id="f-secret"' in page
-    assert 'id="f-rules"' not in page and 'id="f-cpu_sensor"' not in page  # not on the Add form
-    # how often to read: on its own line below the certificate box
-    assert page.index('name="verify"') < page.index('id="f-full_every"') < page.index(">Connect<")
-    from homewatch.modules.homeassistant.plugin import plugin
-    from tests.test_homeassistant import snap
-
-    async def good(*a, **k):
-        return snap()
-
-    monkeypatch.setattr(plugin, "fetch", good)
-    client.post("/modules/homeassistant", data={"csrf": tok, "url": "http://ha:8123", "secret": "t", "verify": "on",
-                                                "full_every": "30"})
-    s = client.rt.db.get("module.homeassistant")
-    assert s["full_every"] == plugin.field("full_every").default and s["watch_all"] is False
-    page = client.get("/modules/homeassistant").text
-    # the connection box, then Last reading, then Additional configuration as its own box
-    main = page.split('id="settings"')[1].split("</form>")[0]
-    assert 'id="f-full_every"' in main and 'id="f-rules"' not in main and "Entities to watch" not in main
-    line = main.split('class="row tight one-line"')[1].split("</div>")[0]  # label, box and help on one line
-    assert 'class="digits4"' in line and "Full read every" in line and "(5 to 1440)" in line
-    assert page.index('id="overview"') < page.index('id="more"')
-    more = page.split('id="more"')[1].split("</form>")[0]
-    order = [more.index(k) for k in ("Entities to watch", 'name="watch_all"', "Unavailable entities to ignore",
-                                     "Host sensors", 'id="f-disk_sensor"', 'id="f-memory_sensor"', 'id="f-cpu_sensor"',
-                                     'id="f-rules"')]
-    assert order == sorted(order) and 'name="_part" value="more"' in more
-    # each box saves only its own fields
-    client.post("/modules/homeassistant", data={"csrf": tok, "_part": "more", "rules": "sensor.oil below 200 warning",
-                                                "cpu_sensor": "sensor.cpu", "watch_all": "on"})
-    s = client.rt.db.get("module.homeassistant")
-    assert s["rules"] == "sensor.oil below 200 warning" and s["cpu_sensor"] == "sensor.cpu" and s["watch_all"] is True
-    assert s["enabled"] is True and s["verify"] is True and s["url"] == "http://ha:8123"
-    client.post("/modules/homeassistant", data={"csrf": tok, "_part": "main", "enabled": "on", "url": "http://ha:8123",
-                                                "full_every": "60"})
-    s = client.rt.db.get("module.homeassistant")
-    assert s["full_every"] == 60 and s["verify"] is False  # unticked in the main box
-    assert s["rules"] == "sensor.oil below 200 warning" and s["watch_all"] is True and s["cpu_sensor"] == "sensor.cpu"
-    plugin.snap = None
-
-
-def test_unavailable_list_says_when_nothing_is_unavailable(client, monkeypatch):
-    tok = setup_admin(client)
-    from homewatch.modules.homeassistant.plugin import plugin
-    from tests.test_homeassistant import snap
-
-    async def none_down(*a, **k):
-        return snap() | {"unavailable": []}
-
-    monkeypatch.setattr(plugin, "fetch", none_down)
-    client.post("/modules/homeassistant", data={"csrf": tok, "url": "http://ha:8123", "secret": "t"})
-    page = client.get("/modules/homeassistant").text
-    assert "Nothing is unavailable right now" in page
-    plugin.snap = None
-
-
 def test_system_page_users_ask_password_in_a_window(client):
     tok = setup_admin(client)
     client.post("/users", data={"csrf": tok, "username": "viewer1", "password": "x" * 12, "role": "viewer",
@@ -1315,7 +1197,8 @@ def test_system_page_one_line_export_and_paged_audit_log(client):
     export = page.split("<b>Export</b>")[1].split("</form>")[0]
     assert export.index("Download the configuration now") < export.index('href="/system/export"') \
         < export.index("Download an earlier one") < export.index('name="name"') < export.index("Download</button>")
-    assert '<div class="card scroll">\n  <h2 class="card-title">Audit log</h2><table data-page="12">' in page
+    assert '<div class="card scroll">\n  <h2 class="card-title">Audit log</h2><table data-page="12" class="audit">' in page
+    assert '<td class="nw">' in page or "Nothing yet" in page  # the date on one line, the detail wraps
     imp = page.split('action="/system/import"')[1].split("</form>")[0]
     assert '<div class="row tight"><input id="imf" type="file"' in imp and "Preview import…</button></div>" in imp
     assert 'class="card col"' in page and page.count('<div class="card-foot">') == 4  # last lines at the bottom
@@ -1426,3 +1309,159 @@ def test_status_has_no_charts_box_and_modules_show_icons(client):
     assert client.get("/api/series").status_code == 404
     mods = client.get("/modules").text
     assert mods.count('<span class="mt-ico">') == 11 and '<b class="mt-name name" title="UPS (NUT)">' in mods
+
+
+def _ha_connected(client, monkeypatch, catalog=None):
+    """A connected Home Assistant module whose readings come from a fake fetch."""
+    from homewatch.modules.homeassistant.plugin import plugin
+    from tests.test_homeassistant import snap
+
+    async def good(*a, **k):
+        return snap()
+
+    monkeypatch.setattr(plugin, "fetch", good)
+    monkeypatch.setattr(plugin, "_catalog", catalog or [])
+    tok = setup_admin(client)
+    client.post("/modules/homeassistant", data={"csrf": tok, "url": "http://ha:8123", "secret": "t", "verify": "on",
+                                                "full_every": "30"})
+    return tok, plugin
+
+
+CATALOG = [{"id": "sensor.door_battery", "name": "Door", "state": "80", "unit": "%", "kind": "battery"},
+           {"id": "sensor.oil", "name": "Oil", "state": "420", "unit": "L", "kind": ""},
+           {"id": "light.old", "name": "Old light", "state": "unavailable", "unit": "", "kind": ""}]
+
+
+def test_ha_page_connect_then_limits_then_entities(client, monkeypatch):
+    tok = setup_admin(client)
+    page = client.get("/modules/homeassistant").text
+    assert 'id="f-url"' in page and 'id="f-secret"' in page
+    assert 'cpu_sensor' not in page  # chosen under Checks and limits, after connecting
+    assert page.index('name="verify"') < page.index('id="f-full_every"') < page.index(">Connect<")
+    client.post("/logout", data={"csrf": tok})
+    client.cookies.clear()
+    client.rt.db.run("DELETE FROM users")
+    tok, plugin = _ha_connected(client, monkeypatch, CATALOG)
+    s = client.rt.db.get("module.homeassistant")
+    assert s["watch"] == [] and s["grafana"] == [] and s["entity_rules"] == {} and s["entities_v"] == 2
+    page = client.get("/modules/homeassistant").text
+    main = page.split('id="settings"')[1].split("</form>")[0]
+    assert "cpu_sensor" not in main
+    line = main.split('class="row tight one-line"')[1].split("</div>")[0]
+    assert 'class="digits4"' in line and "Full read every" in line  # and Read now on the same line
+    assert '>Read now</button>' in line and 'formaction="/modules/homeassistant/refresh"' in line
+    assert 'id="overview"' not in page  # no Last reading box
+    assert page.index('id="settings"') < page.index('id="thresholds"') < page.index('id="more"')
+    limits = page.split('id="thresholds"')[1].split("</form>")[0]
+    assert "Automatic backups" in limits and "Batteries" not in limits and "Entity rules" not in limits  # nothing watched
+    s = client.rt.db.get("module.homeassistant")
+    more = page.split('id="more"')[1].split("</form>")[0]
+    assert 'data-domain="light"' in more and 'data-domain="sensor"' in more and 'name="w.sensor.oil"' in more
+    assert "data-et-view" not in more and "couldn" in more  # no integrations / devices read: by domain, said why
+    assert 'name="g.sensor.oil"' not in more  # Grafana isn't running: no Show in Grafana column
+    assert 'name="r.sensor.oil" value="" class="et-rule" placeholder="tick Watch first"' in more and "readonly" in more
+    assert "below 200 warning; below 100 error" in more  # the rule help
+    assert "new</span>" not in more  # the first look: nothing is new
+    # host sensors: a list of the sensors in % in the Disk / Memory / CPU rows
+    cpu = limits.split('name="homeassistant.cpu.sensor"')[1].split("</select>")[0]
+    assert '<option value="" selected>System Monitor&#39;s (sensor.system_monitor_processor_use, not found)' in cpu
+    assert '<option value="sensor.door_battery" >Door · 80 % · sensor.door_battery</option>' in cpu
+    form = {"csrf": tok, "homeassistant.cpu.sensor": "sensor.door_battery", "homeassistant.disk.sensor": ""}
+    for d in plugin.checks:
+        if d.id not in plugin.hidden_checks(s):
+            form[f"homeassistant.{d.id}.enabled"] = "on"
+            for k in ("warn", "error"):
+                if k in d.editable:
+                    form[f"homeassistant.{d.id}.{k}"] = str(getattr(d, k))
+    assert "Saved" in client.post("/modules/homeassistant/thresholds", data=form).text
+    assert client.rt.db.get("module.homeassistant")["cpu_sensor"] == "sensor.door_battery"
+    bad = client.post("/modules/homeassistant/thresholds", data=form | {"homeassistant.cpu.sensor": "light.x"}).text
+    assert "CPU use sensor: an entity id" in bad
+    # the main box saves only its fields; the sensor stays
+    client.post("/modules/homeassistant", data={"csrf": tok, "_part": "main", "enabled": "on", "url": "http://ha:8123",
+                                                "full_every": "60"})
+    s = client.rt.db.get("module.homeassistant")
+    assert s["full_every"] == 60 and s["verify"] is False and s["cpu_sensor"] == "sensor.door_battery" and s["watch"] == []
+    plugin.snap = None
+
+
+def test_ha_entities_save_rules_new_badge_and_grafana(client, monkeypatch):
+    tok, plugin = _ha_connected(client, monkeypatch, CATALOG)
+    client.get("/modules/homeassistant")  # the first look: these are known
+    plugin._catalog = CATALOG + [{"id": "sensor.new_one", "name": "", "state": "1", "unit": "", "kind": ""}]
+    shown = '["sensor.door_battery", "sensor.oil", "light.old", "sensor.new_one"]'
+    base = {"csrf": tok, "_part": "more", "_entities": shown}
+    page = client.get("/modules/homeassistant").text
+    assert page.count("new</span>") == 1 and 'data-new="1"' in page
+    r = client.post("/modules/homeassistant", data=base | {"w.sensor.oil": "on", "w.sensor.door_battery": "on",
+                                                           "r.sensor.oil": " below 200 warning ;below 100 error ",
+                                                           "r.light.old": "is on error", "g.sensor.oil": "on"})
+    assert "Saved" in r.text
+    s = client.rt.db.get("module.homeassistant")
+    assert s["watch"] == ["sensor.door_battery", "sensor.oil"]
+    assert s["grafana"] == []  # the column wasn't on the page (Grafana off): ticks there change nothing
+    assert s["entity_rules"] == {"sensor.oil": "below 200 warning; below 100 error", "light.old": "is on error"}
+    page = client.get("/modules/homeassistant").text
+    assert "new</span>" not in page  # saving the box makes them known
+    limits = page.split('id="thresholds"')[1].split("</form>")[0]
+    assert "Batteries" in limits and "Entity rules" in limits and "Unavailable entities" in limits
+    assert "Alarm panels" not in limits
+    assert 'name="r.sensor.oil" value="below 200 warning; below 100 error"' in page
+    # a bad rule names the entity, saves nothing and keeps what was typed
+    r = client.post("/modules/homeassistant", data=base | {"w.sensor.oil": "on", "r.sensor.oil": "below lots"})
+    assert "Rule for sensor.oil" in r.text and 'name="r.sensor.oil" value="below lots"' in r.text
+    assert client.rt.db.get("module.homeassistant")["entity_rules"]["sensor.oil"].startswith("below 200")
+    # with Grafana running the column is there and its ticks count
+    client.rt.grafana_on = True
+    assert 'name="g.sensor.oil"' in client.get("/modules/homeassistant").text
+    client.post("/modules/homeassistant", data=base | {"_gcol": "1", "w.sensor.oil": "on", "g.sensor.oil": "on",
+                                                       "r.sensor.oil": "below 200 warning"})
+    s = client.rt.db.get("module.homeassistant")
+    assert s["grafana"] == ["sensor.oil"] and s["watch"] == ["sensor.oil"]
+    client.rt.grafana_on = False  # the System page asks Grafana itself: not running in the tests
+    assert "1 entities are still\n        stored for Grafana" in client.get("/system").text
+    plugin.snap = None
+
+
+def test_ha_unticked_entities_keep_or_delete_history(client, monkeypatch):
+    tok, plugin = _ha_connected(client, monkeypatch, CATALOG)
+    deleted = []
+
+    async def delete(match):
+        deleted.append(match)
+
+    monkeypatch.setattr(client.rt.metrics, "delete", delete)
+    shown = '["sensor.door_battery", "sensor.oil", "light.old"]'
+    base = {"csrf": tok, "_part": "more", "_entities": shown}
+    client.post("/modules/homeassistant", data=base | {"w.sensor.oil": "on", "w.sensor.door_battery": "on"})
+    client.post("/modules/homeassistant", data=base | {"w.sensor.oil": "on", "_history": "keep"})
+    assert deleted == [] and client.rt.db.get("module.homeassistant")["watch"] == ["sensor.oil"]
+    client.post("/modules/homeassistant", data=base | {"_history": "delete"})
+    assert deleted == ['{__name__=~"hw_ha_entity_.*",entity_id=~"sensor\\\\.oil"}']
+    saves = [r["detail"] for r in client.rt.db.all("SELECT detail FROM audit WHERE action='homeassistant' ORDER BY id")]
+    assert "watch: 2 (+2: sensor.door_battery, sensor.oil)" in saves[-4]  # counts and changes, not every id
+    assert "watch: 1 (−1: sensor.door_battery)" in saves[-3] and "show in Grafana: 0" in saves[-3]
+    row = client.rt.db.one("SELECT username, detail FROM audit WHERE detail LIKE 'history deleted%'")
+    assert row["username"] == "admin" and row["detail"] == "history deleted: sensor.oil"
+    plugin.snap = None
+
+
+def test_ha_hidden_checks_keep_their_limits(client, monkeypatch):
+    tok, plugin = _ha_connected(client, monkeypatch, CATALOG)
+    from homewatch.engine import thresholds
+
+    client.rt.db.run("INSERT INTO checks(site,check_key,enabled,warn,error) VALUES(?,?,?,?,?)",
+                     (client.rt.cfg.site, "homeassistant.batteries", 1, 30, 15))
+    form = {"csrf": tok}
+    for d in plugin.checks:  # every listed check ticked on
+        form[f"homeassistant.{d.id}.enabled"] = "on"
+        for k in ("warn", "error"):
+            if k in d.editable:
+                form[f"homeassistant.{d.id}.{k}"] = str(getattr(d, k))
+    form.pop("homeassistant.batteries.enabled")  # hidden: not on the page
+    form.pop("homeassistant.batteries.warn"), form.pop("homeassistant.batteries.error")
+    client.post("/modules/homeassistant/thresholds", data=form)
+    th = thresholds(client.rt.db, client.rt.cfg.site, "homeassistant", plugin.checks)["batteries"]
+    assert th.enabled and (th.warn, th.error) == (30, 15)
+    plugin.snap = None
+

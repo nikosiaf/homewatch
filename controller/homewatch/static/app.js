@@ -54,6 +54,8 @@ document.querySelectorAll("[data-enable-toggle]").forEach(function (box) {
   form.addEventListener("submit", function () { target.disabled = false; });
 });
 
+const dirtyForms = [];  // one function per form with a Save button: true while it has unsaved changes
+
 // Save buttons stay greyed out until something in their form changes.
 // Internet module: the Ookla license only shows for the Ookla engine, is required for it, and the
 // button says it will install the CLI when it isn't there yet.
@@ -61,7 +63,10 @@ document.querySelectorAll("button[data-save]").forEach(function (btn) {
   const form = btn.form;
   const engine = form.querySelector("[data-engine-select]");
   const eula = form.querySelector("[data-ookla-eula]");
-  const snap = function () { return new URLSearchParams(new FormData(form)).toString(); };
+  // what the form would send, in a fixed order: rows moved around (grouping) are not a change
+  const snap = function () {
+    return Array.from(new FormData(form).entries()).map(function (kv) { return kv[0] + "=" + kv[1]; }).sort().join("&");
+  };
   const initial = snap();
   function update() {
     let ok = snap() !== initial;
@@ -83,7 +88,16 @@ document.querySelectorAll("button[data-save]").forEach(function (btn) {
   }
   form.addEventListener("input", update);
   form.addEventListener("change", update);
+  form.addEventListener("submit", function () { form.dataset.submitting = "1"; });
+  dirtyForms.push(function () { return !form.dataset.submitting && snap() !== initial; });
   update();
+});
+// Leaving a page with unsaved changes in a form that has a Save button: the browser asks first.
+window.addEventListener("beforeunload", function (e) {
+  if (dirtyForms.some(function (dirty) { return dirty(); })) {
+    e.preventDefault();
+    e.returnValue = "";  // older browsers need it set
+  }
 });
 // The setup wizard uses the same Internet form without a Save button: just show / hide the license.
 document.querySelectorAll("[data-engine-select]").forEach(function (sel) {
@@ -403,3 +417,213 @@ document.querySelectorAll("table[data-page]").forEach(function (table) {
   }
   setTimeout(tick, 1500);
 })();
+
+// Home Assistant entities: one list of rows, grouped here by integration › device, area › device or domain,
+// with counts, tick-all per group and per device, search and a "show" filter. Rows are only moved and hidden,
+// so every tick and rule is still sent when saving. Without this script the list is one long table.
+document.querySelectorAll("[data-entity-table]").forEach(function (box) {
+  const search = box.querySelector("[data-et-search]");
+  const show = box.querySelector("[data-et-show]");
+  const viewSel = box.querySelector("[data-et-view]");
+  const total = box.querySelector("[data-et-total]");
+  const holder = box.querySelector("[data-et-groups]");
+  const source = box.querySelector("[data-et-source]");
+  const head = source.querySelector("tr");
+  const rows = Array.from(source.querySelectorAll("tr[data-e]"));
+  const grafana = box.dataset.grafana === "1";
+  const BIG = 50;  // ticking more than this at once asks first
+  let groups = [];  // [{el, rows, subs: [{el, rows}]}]
+
+  function ticked(r) {  // without the Grafana column (Grafana off), Show in Grafana stays as saved
+    const w = r.querySelector("[data-w]"), g = r.querySelector("[data-g]");
+    return (w && w.checked) || (g ? g.checked : r.dataset.gSaved === "1");
+  }
+  function count(rs, k) {
+    return rs.filter(function (r) { const b = r.querySelector("[data-" + k + "]"); return b && b.checked; }).length;
+  }
+  function ruleState(r) {
+    const w = r.querySelector("[data-w]"), rule = r.querySelector("[data-r]");
+    rule.readOnly = !w.checked;
+    rule.placeholder = w.checked ? "e.g. below 200 warning" : "tick Watch first";
+  }
+  function el(tag, cls, text) {
+    const x = document.createElement(tag);
+    if (cls) x.className = cls;
+    if (text !== undefined) x.textContent = text;
+    return x;
+  }
+  function allBox(k, label, rs, scope) {  // a tick-all inside a summary: it must not open / close the group
+    const l = el("label", "check et-all");
+    const b = el("input");
+    b.type = "checkbox";
+    b.dataset.etAll = k;
+    b.setAttribute("aria-label", label + " " + scope);
+    l.append(b, document.createTextNode(" " + label));
+    l.addEventListener("click", function (e) { e.stopPropagation(); });
+    b.addEventListener("click", function (e) {
+      e.stopPropagation();
+      const target = rs.filter(function (r) { return !r.hidden; });
+      if (b.checked && target.length > BIG && !confirm(label + ": all " + target.length + " entities of " + scope + "?")) {
+        e.preventDefault();
+        return;
+      }
+      target.forEach(function (r) { const x = r.querySelector("[data-" + k + "]"); if (x) { x.checked = b.checked; ruleState(r); } });
+      apply();
+    });
+    return l;
+  }
+  function table(rs) {
+    const wrap = el("div", "scroll");
+    const tb = el("table", "entities");
+    tb.appendChild(head.cloneNode(true));
+    rs.forEach(function (r) { tb.appendChild(r); });
+    wrap.appendChild(tb);
+    return wrap;
+  }
+  function order(a, b) {  // the kinds that usually matter first, then by name
+    return (b.dataset.first === "1") - (a.dataset.first === "1") || a.dataset.label.localeCompare(b.dataset.label);
+  }
+  function build(view) {
+    holder.textContent = "";
+    groups = [];
+    const outer = {};
+    rows.forEach(function (r) {
+      const k = view === "domain" ? r.dataset.domain : view === "area" ? (r.dataset.area || "No area")
+        : (r.dataset.integration || "Other");
+      (outer[k] = outer[k] || []).push(r);
+    });
+    Object.keys(outer).sort(function (a, b) {
+      const last = function (x) { return x === "No area" || x === "Other"; };
+      return last(a) - last(b) || a.localeCompare(b);
+    }).forEach(function (name) {
+      const rs = outer[name];
+      const d = el("details", "choices et-group");
+      const s = el("summary");
+      s.append(el("b", "", name), document.createTextNode(" "), el("span", "quiet small et-count"));
+      s.append(allBox("w", "Watch", rs, name));
+      if (grafana) s.append(allBox("g", "Show in Grafana", rs, name));
+      d.appendChild(s);
+      const g = {el: d, rows: rs, subs: []};
+      if (view === "domain") {
+        d.appendChild(table(rs.sort(order)));
+      } else {
+        const inner = {};
+        rs.forEach(function (r) { const k = r.dataset.device || "No device"; (inner[k] = inner[k] || []).push(r); });
+        Object.keys(inner).sort(function (a, b) {
+          return (a === "No device") - (b === "No device") || a.localeCompare(b);
+        }).forEach(function (dev) {
+          const drs = inner[dev].sort(order);
+          const dd = el("details", "et-dev");
+          const ds = el("summary");
+          ds.append(el("span", "et-dev-name", dev), document.createTextNode(" "), el("span", "quiet small et-count"));
+          ds.append(allBox("w", "Watch", drs, dev));
+          if (grafana) ds.append(allBox("g", "Show in Grafana", drs, dev));
+          dd.append(ds, table(drs));
+          d.appendChild(dd);
+          g.subs.push({el: dd, rows: drs});
+        });
+      }
+      holder.appendChild(d);
+      groups.push(g);
+    });
+    source.hidden = true;
+    apply();
+  }
+  function label(rs, visible, filtering) {
+    const nw = count(rs, "w"), ng = count(rs, "g");
+    const nn = rs.filter(function (r) { return r.dataset.new === "1"; }).length;
+    return rs.length + " · " + nw + " watched" + (grafana ? " · " + ng + " in Grafana" : "")
+      + (nn ? " · " + nn + " new" : "") + (filtering ? " · " + visible + " shown" : "");
+  }
+  function syncAll(summary, rs) {
+    summary.querySelectorAll(":scope > .et-all > [data-et-all]").forEach(function (b) {
+      const vis = rs.filter(function (r) { return !r.hidden; });
+      const on = count(vis, b.dataset.etAll);
+      b.checked = vis.length > 0 && on === vis.length;
+      b.indeterminate = on > 0 && on < vis.length;
+    });
+  }
+  function apply() {
+    const words = search.value.toLowerCase().split(/\s+/).filter(Boolean);
+    const f = show.value, filtering = words.length > 0 || f !== "";
+    rows.forEach(function (r) {
+      r.hidden = !(words.every(function (x) { return r.dataset.text.includes(x); })
+        && (f === "" || (f === "t" && ticked(r)) || (f === "u" && r.dataset.unavailable === "1")
+            || (f === "n" && r.dataset.new === "1")));
+    });
+    let shown = 0;
+    groups.forEach(function (g) {
+      const visible = g.rows.filter(function (r) { return !r.hidden; }).length;
+      const s = g.el.querySelector(":scope > summary");
+      s.querySelector(".et-count").textContent = label(g.rows, visible, filtering);
+      syncAll(s, g.rows);
+      g.el.hidden = filtering && visible === 0;
+      if (filtering) g.el.open = visible > 0 && visible <= 200;
+      g.subs.forEach(function (sub) {
+        const v = sub.rows.filter(function (r) { return !r.hidden; }).length;
+        const ss = sub.el.querySelector(":scope > summary");
+        ss.querySelector(".et-count").textContent = label(sub.rows, v, filtering);
+        syncAll(ss, sub.rows);
+        sub.el.hidden = filtering && v === 0;
+        if (filtering) sub.el.open = v > 0 && v <= 50;
+      });
+      shown += visible;
+    });
+    total.textContent = count(rows, "w") + " watched" + (grafana ? " · " + count(rows, "g") + " shown in Grafana" : "")
+      + (filtering ? " · " + shown + " of " + rows.length + " match" : "");
+  }
+  box.addEventListener("change", function (e) {
+    if (e.target.matches("[data-w]")) ruleState(e.target.closest("tr"));
+    if (!e.target.dataset.etAll) apply();
+  });
+  search.addEventListener("input", apply);
+  search.addEventListener("keydown", function (e) { if (e.key === "Enter") e.preventDefault(); });  // not a save
+  show.addEventListener("change", apply);
+  rows.forEach(function (r) {
+    r.querySelector("input.et-rule").addEventListener("keydown", function (e) { if (e.key === "Enter") e.preventDefault(); });
+  });
+  let view = "domain";
+  if (viewSel) {
+    try { view = localStorage.getItem("hw.ha.view") || "integration"; } catch (e) { view = "integration"; }
+    viewSel.value = view;
+    viewSel.addEventListener("change", function () {
+      try { localStorage.setItem("hw.ha.view", viewSel.value); } catch (e) { /* private window */ }
+      build(viewSel.value);
+    });
+  }
+  build(viewSel ? viewSel.value : "domain");
+
+  // Saving: entities that had a tick and now have none -> keep or delete their history
+  const form = box.closest("form");
+  const dialog = form.querySelector("[data-et-dialog]");
+  const history = form.querySelector("[data-et-history]");
+  let answered = false;
+  form.addEventListener("submit", function (e) {
+    if (answered || !dialog || typeof dialog.showModal !== "function") return;
+    const dropped = Array.from(box.querySelectorAll('tr[data-e][data-was="1"]')).filter(function (r) { return !ticked(r); });
+    if (!dropped.length) return;
+    e.preventDefault();
+    const list = dialog.querySelector("[data-et-dropped]");
+    list.textContent = "";
+    dropped.slice(0, 30).forEach(function (r) {
+      const li = document.createElement("li");
+      li.textContent = r.dataset.label;
+      list.appendChild(li);
+    });
+    if (dropped.length > 30) {
+      const li = document.createElement("li");
+      li.textContent = "and " + (dropped.length - 30) + " more";
+      list.appendChild(li);
+    }
+    dialog.showModal();
+  });
+  if (dialog) dialog.querySelectorAll("[data-et-choice]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      dialog.close();
+      if (!b.dataset.etChoice) return;
+      history.value = b.dataset.etChoice;
+      answered = true;
+      form.requestSubmit ? form.requestSubmit() : form.submit();
+    });
+  });
+});

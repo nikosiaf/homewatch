@@ -122,7 +122,7 @@ less install.sh          # please read it first; it's short (q to quit)
 <h2 id="grafana">Grafana dashboards</h2>
 <div class="card">
   <p>Grafana is optional. It shows everything homewatch stores (every device, port, guest, disk and the Home Assistant
-    entities you record) as dashboards at <code>https://&lt;homewatch&gt;/grafana/</code>. It has no login of its own:
+    entities you show in Grafana) as dashboards at <code>https://&lt;homewatch&gt;/grafana/</code>. It has no login of its own:
     you are signed in with your homewatch account. Admins are Grafana admins, viewers can only look.</p>
   <ul>
     <li><b>Turn it on or off</b> on the System page (Grafana and history). The first start downloads Grafana (about
@@ -133,8 +133,10 @@ less install.sh          # please read it first; it's short (q to quit)
     <li><b>Your own dashboards</b>: open a built-in one, choose <b>Save as</b> and save it in <b>My dashboards</b>.
       Updates never touch that folder. homewatch saves it every night next to the configuration exports (System →
       Grafana and history, last 14); to restore one, Dashboards → New → Import and paste its entry.</li>
-    <li><b>Home Assistant</b>: only the entities in the module's <i>Entities to record</i> list are kept (plus alarm,
-      safety, tamper and battery entities), every time the module reads (2 minutes by default).</li>
+    <li><b>Home Assistant</b>: only entities you tick under <i>Entities</i> on the module's page are stored (Watch or
+      Show in Grafana), every time the module reads (2 minutes by default); the dashboards show the <i>Show in Grafana</i>
+      ones and the host's CPU, memory and disk. While Grafana is off the column is hidden and the ticked entities are
+      still stored, so their history has no gap.</li>
     <li><b>Resolution</b> follows each module's <i>Read every</i> setting: a module read every 10 minutes has one point
       per 10 minutes.</li>
     <li><b>Data</b>: the data source <i>homewatch</i> is VictoriaMetrics (PromQL / MetricsQL). Metric names start with
@@ -194,7 +196,7 @@ less install.sh          # please read it first; it's short (q to quit)
   <tr><td>OPNsense: "lacks the privilege"</td><td>Add the named privilege to the homewatch user under System → Access → Users.</td></tr>
   <tr><td>"Probe data fresh" is in error</td><td>Check that the Telegraf container is running. If the host's clock jumps at boot, Telegraf stalls: on a Proxmox VM, set "Use local time for RTC" to No.</td></tr>
   <tr><td>The internet checks show nothing</td><td>Check that the Internet line module is enabled and at least one probe is ticked.</td></tr>
-  <tr><td>Home Assistant doesn't report an entity</td><td>Only essential entities are read by default. Turn on "Watch every entity" to include the rest; network RX/TX sensors are never reported.</td></tr>
+  <tr><td>Home Assistant doesn't report an entity</td><td>Only entities you tick under Watch (Modules → Home Assistant → Entities) are checked; nothing is ticked at first. Automations, scripts, scenes, buttons, cameras and similar domains aren't listed.</td></tr>
   <tr><td>A device's check is often down on purpose</td><td>Untick it in the module's lists, or switch the check off under Checks and limits on the module's page.</td></tr>
 </table></div>
 {% endblock %}

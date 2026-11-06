@@ -56,7 +56,7 @@ class Runtime:
     wake: asyncio.Event = field(default_factory=asyncio.Event)
     tasks: list[asyncio.Task] = field(default_factory=list)
     series_written: dict = field(default_factory=dict)  # module id -> reading_ts of the reading already written
-    grafana_for: frozenset | None = None  # the enabled modules the Grafana dashboards were last written for
+    grafana_for: tuple | None = None  # (enabled modules, recorded HA entities) the dashboards were last written for
     grafana_on: bool = False  # Grafana answered at the last run: the pages then link to it
 
     @classmethod
@@ -206,14 +206,38 @@ class Runtime:
             await self.heartbeat()
         return results
 
+    def ha_meta(self) -> list[dict]:
+        """The recorded Home Assistant entities as the dashboards name them; kept in the database, so a restart
+        (or Home Assistant being away) doesn't empty the dashboards until the next reading."""
+        saved = self.db.get("grafana.ha") or []
+        m = MODULES.get("homeassistant")
+        snap = getattr(m, "snap", None)
+        if not snap:
+            return saved
+        before = {e["id"]: e for e in saved}
+        meta = []
+        for e in snap.get("recorded", []):
+            # an entity unavailable right now has no numbers: it keeps the fields it had
+            fields = sorted(set(e["values"]) | set(before.get(e["entity_id"], {}).get("fields", [])))
+            if fields:
+                meta.append({"id": e["entity_id"], "name": e["name"], "unit": e["unit"], "dc": e["dc"],
+                             "domain": e["entity_id"].split(".", 1)[0], "fields": fields})
+        meta.sort(key=lambda e: e["id"])
+        if meta != saved:
+            self.db.set("grafana.ha", meta)
+        return meta
+
     def write_grafana(self) -> None:
-        """Keep Grafana's dashboards in line with the enabled modules (when the Grafana volume is there)."""
+        """Keep Grafana's dashboards in line with the enabled modules and the recorded Home Assistant entities
+        (when the Grafana volume is there)."""
         enabled = frozenset(m.id for m in MODULES.values() if m.enabled(m.load(self)))
-        if enabled == self.grafana_for:
+        ha = self.ha_meta() if "homeassistant" in enabled else []
+        key = (enabled, json.dumps(ha, sort_keys=True))
+        if key == self.grafana_for:
             return
         try:
-            grafana.write(self.cfg.grafana_dir, set(enabled))
-            self.grafana_for = enabled
+            grafana.write(self.cfg.grafana_dir, set(enabled), ha)
+            self.grafana_for = key
         except OSError as e:
             log.warning("Grafana provisioning: %s", e)
 

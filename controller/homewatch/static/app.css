@@ -377,3 +377,36 @@ label.legend { display: inline; margin: 0; font-size: inherit; color: inherit; }
 .result.ok svg { color: var(--ok); } .result.bad svg { color: var(--err); }
 .result p { margin: 4px 0 0; }
 @media (prefers-reduced-motion: reduce) { .steps li.now i { animation: none; } .progress div { transition: none; } }
+
+/* Home Assistant entities */
+table.entities { min-width: 640px; }  /* on a phone it scrolls sideways instead of squeezing the names */
+table.entities th:first-child { min-width: 220px; }
+table.entities th.tick, table.entities td.tick { width: 96px; text-align: center; white-space: nowrap; }
+table.entities th.tick label.check { justify-content: center; font-weight: 600; }
+table.entities td { vertical-align: middle; }
+table.entities .et-id { overflow-wrap: anywhere; }
+table.entities .et-state { max-width: 160px; overflow-wrap: anywhere; }
+table.entities .et-state.bad { color: var(--err, #d64545); font-weight: 600; }
+table.entities input.et-rule { width: 100%; min-width: 150px; font-family: var(--mono, monospace); font-size: 13px; }
+table.entities input.et-rule[readonly] { opacity: .5; }
+table.entities tr[hidden] { display: none; }
+.badge.new { font-size: 11px; padding: 1px 6px; }
+details.et-group > summary { padding: 6px 0; }
+details.rule-help { margin: 4px 0 12px; }
+details.rule-help table td, details.rule-help table th { padding: 4px 8px; }
+dialog[data-et-dialog] { max-width: 560px; }
+[data-entity-table] .choice-tools { flex-wrap: wrap; gap: 8px; }
+[data-entity-table] .choice-tools input[type="search"] { flex: 1 1 220px; min-width: 180px; max-width: 360px; width: auto; }
+[data-entity-table] .choice-tools select { flex: 0 1 auto; width: auto; max-width: 220px; }
+.side-buttons { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+table.audit { table-layout: auto; }
+table.audit td.nw { white-space: nowrap; }
+table.audit td.detail { overflow-wrap: anywhere; word-break: break-word; min-width: 200px; }
+select.limit-sensor { margin-top: 6px; max-width: 100%; width: 100%; font-size: 13px; }
+.one-line .grow { flex: 1; }
+details.et-group > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+details.et-dev { margin: 6px 0 6px 18px; border-left: 2px solid var(--line); padding-left: 10px; }
+details.et-dev > summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 4px 0; cursor: pointer; }
+.et-all { font-size: 13px; font-weight: 400; margin-left: auto; }
+.et-all + .et-all { margin-left: 0; }
+.et-dev-name { font-weight: 600; }

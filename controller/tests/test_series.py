@@ -154,7 +154,7 @@ def test_runtime_writes_each_reading_once(cfg, monkeypatch):
 
 
 def test_ha_entity_values():
-    from homewatch.modules.homeassistant.plugin import entity_values, record_patterns, recorded
+    from homewatch.modules.homeassistant.plugin import entity_values
 
     assert entity_values({"entity_id": "sensor.t", "state": "21.5"}) == {"value": 21.5}
     assert entity_values({"entity_id": "binary_sensor.door", "state": "open"}) == {"value": 1.0}
@@ -165,46 +165,4 @@ def test_ha_entity_values():
         "value": 1.0, "current_temperature": 20.5, "target_temperature": 21.0, "active": 1.0}
     assert entity_values({"entity_id": "light.tv", "state": "on", "attributes": {"brightness": 255}}) == {
         "value": 1.0, "brightness_percent": 100.0}
-    pats = record_patterns("# temps\nsensor.*_temperature\n\nclimate.*")
-    assert pats == ["sensor.*_temperature", "climate.*"]
-    assert recorded(pats, "sensor.kitchen_temperature") and not recorded(pats, "sensor.kitchen_humidity")
 
-
-def test_ha_record_setting_is_validated():
-    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
-
-    m = HomeAssistantModule()
-    base = {"url": "https://ha.example:8123", "full_every": 30, "rules": "", "record": ""}
-    _, err = m.validate(base | {"record": "sensor.ok_*\nnot an id"}, {})
-    assert "Entities to record" in err
-
-
-def test_ha_records_without_watching(monkeypatch):
-    import httpx
-
-    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
-
-    states = [{"entity_id": "sensor.kitchen_temperature", "state": "21.5",
-               "attributes": {"friendly_name": "Kitchen", "unit_of_measurement": "°C", "device_class": "temperature"}},
-              {"entity_id": "sensor.attic_temperature", "state": "unavailable", "attributes": {}},
-              {"entity_id": "sensor.other", "state": "5", "attributes": {}},
-              {"entity_id": "binary_sensor.hall_smoke", "state": "off", "attributes": {"device_class": "smoke"}}]
-
-    def handler(req):
-        if req.url.path.endswith("/config"):
-            return httpx.Response(200, json={"version": "2026.11.0", "state": "RUNNING"})
-        return httpx.Response(200, json=states)
-
-    real = httpx.AsyncClient
-    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
-    m = HomeAssistantModule()
-    s = {"url": "https://ha.example:8123", "verify": True, "record": "sensor.*_temperature", "rules": "",
-         "full_every": 30}
-    m.snap = asyncio.run(m.fetch(s, "t", 1000))
-    m.snap_ts = 1000
-    assert [e["entity_id"] for e in m.snap["recorded"]] == [  # a safety sensor is always kept
-        "sensor.kitchen_temperature", "sensor.attic_temperature", "binary_sensor.hall_smoke"]
-    assert m.snap["unavailable"] == []  # recorded only: an unavailable one is not reported
-    x, smoke = valid(m.series("home"))
-    assert x.startswith("hw_ha_entity,") and "entity_id=sensor.kitchen_temperature" in x and "value=21.5" in x
-    assert "device_class=smoke" in smoke and "value=0.0" in smoke

@@ -12,9 +12,23 @@ def all_panels(board):
     return [p for p in board["panels"]]
 
 
+META = [{"id": "sensor.kitchen_temperature", "name": 'Kitchen "main" $x', "unit": "°C", "dc": "temperature",
+         "domain": "sensor", "fields": ["value"]},
+        {"id": "sensor.hall_lux", "name": "Hall", "unit": "lx", "dc": "illuminance", "domain": "sensor", "fields": ["value"]},
+        {"id": "switch.pump", "name": "Pump", "unit": "", "dc": "", "domain": "switch", "fields": ["value"]},
+        {"id": "binary_sensor.front_door", "name": "Front, door", "unit": "", "dc": "door", "domain": "binary_sensor",
+         "fields": ["value"]},
+        {"id": "climate.living", "name": "Living", "unit": "", "dc": "", "domain": "climate",
+         "fields": ["active", "current_temperature", "target_temperature", "value"]}]
+
+
 def test_every_dashboard_is_valid():
     enabled = set(grafana.BUILDERS)
-    files = grafana.files(enabled)
+    for ha in (None, META):
+        check_files(enabled, grafana.files(enabled, ha))
+
+
+def check_files(enabled, files):
     uids = set()
     for rel, text in files.items():
         data = json.loads(text)
@@ -204,3 +218,75 @@ def test_status_and_menu_link_to_grafana_when_it_runs(client):  # noqa: F811
     page = client.get("/").text
     assert '<a href="/grafana/" target="_blank" rel="noopener"' in page
     assert 'class="gf-link when-open" href="/grafana/d/hw-ups" target="_blank"' in page
+
+
+def test_ha_dashboards_follow_recorded_entities(tmp_path):
+    exprs = [t["expr"] for p in grafana.homeassistant(META)["panels"] for t in p.get("targets", [])]
+    temps = next(e for e in exprs if "kitchen" in e and "current_temperature" not in e)
+    assert temps.startswith('label_map(label_copy(max by (entity_id) (hw_ha_entity_value{site="$site",entity_id=~"sensor' + chr(92) * 2 + '.kitchen_temperature"})')
+    assert '"sensor.kitchen_temperature", "Kitchen ' + chr(92) + '"main' + chr(92) + '" x"' in temps  # quotes escaped, no $ variable
+    titles = [p["title"] for p in grafana.homeassistant(META)["panels"]]
+    assert {"Temperatures", "Thermostats", "Heating", "Doors and contacts", "Illuminance (lx)", "Switch"} <= set(titles)
+    assert "Lights on" not in titles and "Power" not in titles  # nothing recorded for them
+    mixed = META + [{"id": "sensor.coffee_pressure", "name": "Coffee", "unit": "bar", "dc": "pressure", "domain": "sensor",
+                     "fields": ["value"]}, {"id": "sensor.out_pressure", "name": "Out", "unit": "hPa", "dc": "pressure",
+                                            "domain": "sensor", "fields": ["value"]}]
+    press = {p["title"]: p["fieldConfig"]["defaults"]["unit"] for p in grafana.homeassistant(mixed)["panels"]
+             if p["title"].startswith("Pressure")}
+    assert press == {"Pressure (bar)": "pressurebar", "Pressure (hPa)": "pressurehpa"}  # one unit per panel
+    many = [{"id": f"light.l{i:03}", "name": "N" * 60, "unit": "", "dc": "", "domain": "light", "fields": ["value"]}
+            for i in range(300)] + [{"id": f"sensor.t{i:03}", "name": "T" * 60, "unit": "°C", "dc": "temperature",
+                                     "domain": "sensor", "fields": ["value"]} for i in range(300)]
+    for b in (grafana.homeassistant(many), grafana.overview({"homeassistant"}, many)):
+        for p in b["panels"]:
+            for tg in p.get("targets", []):
+                assert len(tg["expr"].encode()) < 16384, p["title"]  # VictoriaMetrics' -search.maxQueryLen
+    empty = grafana.homeassistant([])["panels"]
+    assert empty[0]["type"] == "text" and "Show in Grafana" in empty[0]["options"]["content"]
+    ex = grafana.ha_explorer(META)
+    var = ex["templating"]["list"][-1]
+    assert var["name"] == "entity" and "Front  door · binary_sensor.front_door : binary_sensor.front_door" in var["query"]
+    assert var["current"]["value"] == ["sensor.kitchen_temperature"] and ex["panels"][0]["repeat"] == "entity"
+    assert 'entity_id=~"$entity"' in ex["panels"][0]["targets"][0]["expr"]  # Grafana sends a multi-value as a regex
+    d = tmp_path / "g"
+    d.mkdir()
+    assert grafana.write(str(d), {"homeassistant"}, META)
+    assert (d / "dashboards/homewatch/ha-explorer.json").exists()
+    assert grafana.write(str(d), {"homeassistant"}, META) is False
+    renamed = [e | {"name": "Kitchen"} if e["id"] == "sensor.kitchen_temperature" else e for e in META]
+    assert grafana.write(str(d), {"homeassistant"}, renamed)  # a new name rebuilds the dashboards
+    assert grafana.write(str(d), {"ups"})
+    assert not (d / "dashboards/homewatch/ha-explorer.json").exists()
+
+
+def test_runtime_keeps_ha_names(cfg, tmp_path):
+    from dataclasses import replace
+
+    from homewatch.modules.homeassistant.plugin import plugin
+    from homewatch.runtime import Runtime
+
+    rt = Runtime.create(replace(cfg, grafana_dir=""))
+    plugin.snap = {"recorded": [{"entity_id": "sensor.t", "values": {"value": 1.0}, "name": "T", "unit": "°C", "dc": ""}]}
+    assert rt.ha_meta()[0]["fields"] == ["value"]
+    plugin.snap = {"recorded": [{"entity_id": "sensor.t", "values": {}, "name": "T2", "unit": "°C", "dc": ""}]}
+    assert rt.ha_meta() == [{"id": "sensor.t", "name": "T2", "unit": "°C", "dc": "", "domain": "sensor", "fields": ["value"]}]
+    plugin.snap = None
+    assert rt.ha_meta()[0]["name"] == "T2"  # no reading: the saved list
+
+
+def test_entities_with_the_same_name_are_told_apart():
+    disk = {"name": "Disk pve: Samsung SSD 990 EVO Plus 1TB Temperature", "unit": "°C", "dc": "temperature",
+            "domain": "sensor", "fields": ["value"]}
+    meta = [disk | {"id": "sensor.disk_pve_samsung_ssd_970_evo_plus_1tb_dev_nvme0n1_temperature"},
+            disk | {"id": "sensor.disk_pve_samsung_ssd_980_1tb_dev_nvme1n1_temperature"},
+            {"id": "sensor.hall_temperature", "name": "Hall", "unit": "°C", "dc": "temperature", "domain": "sensor",
+             "fields": ["value"]},
+            {"id": "sensor.a_x", "name": "Same"}, {"id": "binary_sensor.a_x", "name": "same"}]
+    names = [e["name"] for e in grafana.unique_names(meta)]
+    assert names == ["Disk pve: Samsung SSD 990 EVO Plus 1TB Temperature (nvme0n1)",
+                     "Disk pve: Samsung SSD 990 EVO Plus 1TB Temperature (nvme1n1)", "Hall",
+                     "Same (sensor)", "same (binary_sensor)"]
+    temps = json.dumps(grafana.homeassistant(meta[:3]))
+    assert "Temperature (nvme0n1)" in temps and "Temperature (nvme1n1)" in temps
+    assert "(nvme1n1)" in json.dumps(grafana.ha_explorer(meta[:3])) and "(nvme0n1)" in json.dumps(
+        grafana.overview({"homeassistant"}, meta[:3]))

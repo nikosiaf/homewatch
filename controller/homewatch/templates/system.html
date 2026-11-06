@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_more.html" import more %}
 {% from "_note.html" import note with context %}
 {% block title %}System{% endblock %}
 {% block content %}
@@ -58,6 +59,9 @@
       <tr><td>Status</td><td>{% if grafana_on %}<span class="badge s0">running</span> <a href="/grafana/" target="_blank">Open Grafana</a>
         {% elif not grafana_ready %}<span class="quiet">not part of this install: download this release's docker-compose.yml, Caddyfile and update.sh, see Help → Grafana</span>
         {% else %}<span class="quiet">off</span>{% endif %}</td></tr>
+      {% if ha_grafana and not grafana_on %}<tr><td>Home Assistant</td><td class="small">{{ ha_grafana }} entities are still
+        stored for Grafana, so their history has no gap. To stop, untick Show in Grafana on the
+        <a href="/modules/homeassistant">module's page</a> while Grafana runs.</td></tr>{% endif %}
     </table>
     <div class="card-foot">
       {% if grafana_ready and 'grafana' in features %}
@@ -179,9 +183,9 @@
   </form>
 </div>
 <div class="card scroll">
-  <h2 class="card-title">Audit log</h2><table data-page="12">
+  <h2 class="card-title">Audit log</h2><table data-page="12" class="audit">
   <tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr>
-  {% for a in log %}<tr><td>{{ a.ts | ts('%d %b %H:%M') }}</td><td>{{ a.username }}</td><td>{{ a.action }}</td><td class="small">{{ a.detail }}</td></tr>
+  {% for a in log %}<tr><td class="nw">{{ a.ts | ts('%d %b %H:%M') }}</td><td>{{ a.username }}</td><td>{{ a.action }}</td><td class="small detail">{{ more(a.detail, n=200) }}</td></tr>
   {% else %}<tr><td colspan="4" class="quiet">Nothing yet.</td></tr>{% endfor %}
 </table></div>
 <dialog class="ask" id="ask-password">

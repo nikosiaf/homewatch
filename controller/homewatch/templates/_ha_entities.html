@@ -1,0 +1,80 @@
+{# Home Assistant: every entity, by domain. Nothing is ticked at first. #}
+{% macro rule_examples() %}
+<details class="rule-help"><summary class="small">How to write a rule</summary>
+  <p class="small">{{ rule_help }}</p>
+  <table class="small"><tr><th>Entity</th><th>Rule</th><th>Means</th></tr>
+    <tr><td>sensor.heating_oil</td><td><code>below 200 warning</code></td><td>WARNING when the tank has less than 200</td></tr>
+    <tr><td>sensor.heating_oil</td><td><code>below 200 warning; below 100 error</code></td><td>WARNING under 200, ERROR under 100</td></tr>
+    <tr><td>sensor.nvme_temperature</td><td><code>above 65 warning</code></td><td>WARNING when the disk is hotter than 65</td></tr>
+    <tr><td>binary_sensor.panel_ac_trouble</td><td><code>is on error</code></td><td>ERROR while the trouble is on</td></tr>
+    <tr><td>person.anna</td><td><code>is not home warning</code></td><td>WARNING while away</td></tr>
+    <tr><td>sensor.panel_link</td><td><code>is not online error</code></td><td>ERROR unless the state is exactly "online"</td></tr>
+  </table>
+</details>
+{% endmacro %}
+<fieldset class="reading"><legend>Entities</legend>
+{% if entity_groups %}
+  <p class="quiet small"><b>Watch</b>: homewatch checks it at every reading and reports it when it has been unavailable
+    for 30 minutes; alarm panels, safety and tamper sensors, batteries and add-on Running sensors also get their own
+    check. {% if grafana_col %}<b>Show in Grafana</b>: on the Home Assistant dashboards. {% endif %}A ticked entity's
+    values are kept for the history. <b>Rule</b>: your own condition on a watched entity.
+    States as of {{ entities_ts | ts('%d %b %H:%M') }}.</p>
+  {{ rule_examples() }}
+  <input type="hidden" name="_entities" value="{{ entities_shown }}">
+  {% if grafana_col %}<input type="hidden" name="_gcol" value="1">{% endif %}
+  <input type="hidden" name="_history" value="" data-et-history>
+  <div data-entity-table data-grafana="{{ '1' if grafana_col }}" data-views="{{ '1' if entity_views }}">
+    <div class="row choice-tools">
+      {% if entity_views %}<select data-et-view aria-label="Group by">
+        <option value="integration">By integration</option>
+        <option value="area">By area</option>
+        <option value="domain">By domain</option>
+      </select>{% endif %}
+      <input type="search" data-et-search placeholder="Search {{ entity_counts.all }} entities" aria-label="Search entities">
+      <select data-et-show aria-label="Show">
+        <option value="">All</option>
+        <option value="t">Ticked</option>
+        <option value="u">Unavailable</option>
+        <option value="n">New{{ ' (' ~ entity_counts.new ~ ')' if entity_counts.new }}</option>
+      </select>
+      <span class="quiet small" data-et-total role="status"></span>
+    </div>
+    {% if not entity_views %}<p class="quiet small">Grouped by domain: Home Assistant's integrations and devices couldn't
+      be read{{ ' (' ~ registry_error ~ ')' if registry_error }}. They come over its websocket API; a proxy in front of
+      Home Assistant must let websockets through.</p>{% endif %}
+    <div data-et-groups></div>
+    <div class="scroll" data-et-source><table class="entities">
+      <tr><th>Entity</th><th>State</th><th class="tick">Watch</th>{% if grafana_col %}<th class="tick">Show in Grafana</th>{% endif %}<th>Rule</th></tr>
+      {% for d, rows in entity_groups %}{% for e in rows %}
+      <tr data-e data-text="{{ (e.id ~ ' ' ~ e.name ~ ' ' ~ e.device ~ ' ' ~ e.integration) | lower }}"
+          data-domain="{{ e.domain }}" data-integration="{{ e.integration }}" data-device="{{ e.device }}" data-area="{{ e.area }}"
+          data-first="{{ '1' if e.first }}" data-unavailable="{{ '1' if e.state == 'unavailable' }}" data-new="{{ '1' if e.new }}"
+          data-was="{{ '1' if e.w or e.g }}" data-g-saved="{{ '1' if e.g }}" data-label="{{ e.name or e.id }}">
+        <td><span class="et-name">{{ e.name or e.id }}</span>{% if e.new %} <span class="badge new">new</span>{% endif %}
+          {% if e.name %}<br><span class="quiet small et-id">{{ e.id }}</span>{% endif %}</td>
+        <td class="small et-state{{ ' bad' if e.state == 'unavailable' }}">{{ e.state }}{{ ' ' ~ e.unit if e.unit }}</td>
+        <td class="tick"><input type="checkbox" name="w.{{ e.id }}" {{ 'checked' if e.w }} aria-label="Watch {{ e.id }}" data-w></td>
+        {% if grafana_col %}<td class="tick"><input type="checkbox" name="g.{{ e.id }}" {{ 'checked' if e.g }} aria-label="Show {{ e.id }} in Grafana" data-g></td>{% endif %}
+        <td><input type="text" name="r.{{ e.id }}" value="{{ e.rule }}" class="et-rule" placeholder="{{ 'e.g. below 200 warning' if e.w else 'tick Watch first' }}"
+                   aria-label="Rule for {{ e.id }}" autocomplete="off" spellcheck="false" data-r {{ 'readonly' if not e.w }}></td>
+      </tr>
+      {% endfor %}{% endfor %}
+    </table></div>
+  </div>
+  <dialog data-et-dialog class="card">
+    <h3 style="margin-top:0">Keep their history?</h3>
+    <p class="small">These entities are no longer watched{{ ' or shown in Grafana' if grafana_col }}, so homewatch stops
+      storing their values:</p>
+    <ul class="small" data-et-dropped></ul>
+    <p class="small">Keep what is stored so far (it stays until it is older than the history you keep), or delete it now?
+      Deleting can't be undone.</p>
+    <div class="row" style="justify-content:space-between">
+      <button type="button" data-et-choice="keep">Keep their history</button>
+      <button type="button" class="danger" data-et-choice="delete">Delete their history</button>
+      <button type="button" class="secondary" data-et-choice="">Cancel</button>
+    </div>
+  </dialog>
+{% else %}
+  <p class="quiet">Appears after the first reading.</p>
+{% endif %}
+</fieldset>

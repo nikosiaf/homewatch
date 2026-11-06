@@ -56,7 +56,7 @@
   {% for f in fs if f.kind == 'lines' %}
     <div style="margin-top:12px">{% if section == 'more' %}<fieldset class="reading"><legend><label for="f-{{ f.key }}" class="legend">{{ f.label }}</label></legend>{% else %}<label for="f-{{ f.key }}">{{ f.label }}</label>{% endif %}
       <textarea id="f-{{ f.key }}" name="{{ f.key }}" rows="6" spellcheck="false" placeholder="{{ f.placeholder }}"
-                style="width:100%;max-width:none;font-family:var(--mono, monospace)">{{ s[f.key] if s[f.key] is not none }}</textarea>
+                style="width:100%;max-width:none;font-family:var(--mono, monospace)">{% if boxes is defined and f.key in boxes %}{{ boxes[f.key] }}{% else %}{{ s[f.key] if s[f.key] is not none }}{% endif %}</textarea>
       {% if f.help %}<p class="quiet small" style="margin:4px 0 0">{{ f.help }}</p>{% endif %}{% if section == 'more' %}</fieldset>{% endif %}</div>
   {% endfor %}
   {% if section == '' %}{{ check_fields(fs) }}{% endif %}
@@ -64,7 +64,9 @@
   <div class="row tight one-line"><label for="f-{{ f.key }}">{{ f.label }}</label>
     <input id="f-{{ f.key }}" type="{{ 'number' if f.kind == 'number' else 'text' }}" class="digits4" name="{{ f.key }}"
            value="{{ s[f.key] | num if f.kind == 'number' else s[f.key] }}" placeholder="{{ f.placeholder }}" autocomplete="off">
-    {% if f.help %}<span class="quiet small">{{ f.help }}</span>{% endif %}</div>
+    {% if f.help %}<span class="quiet small">{{ f.help }}</span>{% endif %}
+    {% if configured and module.read_now_beside == f.key and s.enabled %}<span class="grow"></span><button class="secondary" formaction="/modules/{{ module.id }}/refresh" formnovalidate
+      title="{{ 'Last reading ' ~ (snap_ts | ts('%d %b %H:%M:%S')) ~ ', read every ' ~ read_every if snap else 'Read now' }}">Read now</button>{% endif %}</div>
   {% endfor %}
 {% endmacro %}
 
@@ -166,11 +168,17 @@
     {{ fields_html(s) }}
     {% if not module.more_title %}{{ lists_html() }}{% endif %}
   </fieldset>
-  <p class="row" style="justify-content:space-between"><button data-save>Save</button>
-    <button class="danger" name="remove" value="1" data-confirm="Remove {{ module.name }} and its saved login from homewatch?" formnovalidate>Remove</button></p>
+  <div class="row" style="justify-content:space-between;align-items:flex-end"><button data-save>Save</button>
+    <div class="side-buttons">
+    {% if module.read_now_in_settings and not module.read_now_beside and s.enabled %}<button class="secondary" formaction="/modules/{{ module.id }}/refresh" formnovalidate
+      title="Read {{ module.name }} again now{{ ' (last reading ' ~ (snap_ts | ts('%d %b %H:%M:%S')) ~ ', every ' ~ read_every ~ ')' if snap }}">Read now</button>{% endif %}
+    </div></div>
+  {% if module.read_now_in_settings and s.enabled and snap %}<p class="quiet small" style="text-align:right;margin:4px 0 0">Last reading {{ snap_ts | ts('%d %b %H:%M:%S') }} · read every {{ read_every }}</p>{% endif %}
 </form>
 
-{% if s.enabled and snap %}
+{% if module.limits_first %}{% include "_thresholds.html" %}{% endif %}
+
+{% if s.enabled and snap and module.last_reading_box %}
 <div class="card" id="overview">
   <form method="post" action="/modules/{{ module.id }}/refresh" class="row tight" style="justify-content:space-between;margin-top:0">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="overview">
@@ -193,12 +201,13 @@
   <input type="hidden" name="_part" value="more">
   <h2 style="margin-top:0">{{ module.more_title }}</h2>
   {{ note("more") }}
-  {{ lists_html(module.more_help) }}
+  {% if module.entity_table %}<p class="quiet small">{{ module.more_help }}</p>{% include "_ha_entities.html" %}
+  {% else %}{{ lists_html(module.more_help) }}{% endif %}
   {{ fields_html(s, 'more') }}
   <p><button data-save>Save</button></p>
 </form>
 {% endif %}
 {% endif %}
 {% include "_cert.html" %}
-{% if configured is not defined or configured %}{% include "_thresholds.html" %}{% endif %}
+{% if (configured is not defined or configured) and not module.limits_first %}{% include "_thresholds.html" %}{% endif %}
 {% endblock %}

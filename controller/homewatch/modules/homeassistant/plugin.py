@@ -1,9 +1,17 @@
-"""Home Assistant: long-lived token of a dedicated non-admin user; reads /api/config and /api/states."""
+"""Home Assistant: long-lived token of a dedicated non-admin user; reads /api/config and /api/states.
+
+Home Assistant's own health (core, updates, backups, host disk / memory / CPU) is checked from the start.
+Entities are the admin's choice, one by one, and nothing is ticked at first: "Watch" checks one (unavailable,
+plus what its kind means: an alarm triggered, a smoke sensor on, a low battery...) and allows a rule on it;
+"Show in Grafana" puts it on the Home Assistant dashboard. Either tick stores its values in VictoriaMetrics.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+import ssl
 from datetime import datetime
 from fnmatch import fnmatchcase
 
@@ -12,69 +20,78 @@ import httpx
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
 from ...metrics import lines, num
 from ..pinning import verify_for
-from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
+from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Field, https_url
 from . import rules as entity_rules
 
 CHECKS = [
     CheckDef("api", "HA reachable", "api", help="ERROR when homewatch can't read Home Assistant's API."),
     CheckDef("core", "Core", "api", help="WARNING when Home Assistant is starting, stopping or in safe / recovery mode."),
     CheckDef("unavailable", "Unavailable entities", "api", warn=1, error=10, editable=("warn", "error"),
-             help="Entities unavailable for 30 minutes or more, except ignored ones and domains you don't watch."),
+             help="Watched entities unavailable for 30 minutes or more."),
     CheckDef("alarm", "Alarm panels", "api",
-             help="ERROR when an alarm panel is triggered; WARNING when it is unavailable."),
+             help="Watched alarm panels: ERROR when one is triggered."),
     CheckDef("safety", "Safety sensors", "api",
-             help="ERROR when a smoke, water / moisture, gas, CO, heat or safety sensor detects something."),
-    CheckDef("tamper", "Tamper", "api", help="ERROR when a tamper sensor reports tampering."),
+             help="Watched smoke, water / moisture, gas, CO, heat or safety sensors: ERROR when one detects something."),
+    CheckDef("tamper", "Tamper", "api", help="Watched tamper sensors: ERROR when one reports tampering."),
     CheckDef("batteries", "Batteries", "api", unit="%", warn=25, error=10, editable=("warn", "error"),
-             lower_is_worse=True, help="Lowest battery level among the watched battery sensors."),
+             lower_is_worse=True, help="Lowest level among the watched battery sensors."),
     CheckDef("updates", "Updates", "api", help="WARNING when updates are available (skipped versions don't count)."),
     CheckDef("backups", "Automatic backups", "api", unit="h", warn=26, error=50, editable=("warn", "error"),
              help="Age of the last successful automatic backup; ERROR when the last attempt failed."),
     CheckDef("addons", "Add-ons", "api",
-             help="ERROR when a watched add-on is not running; WARNING when its Running sensor is unavailable. "
-                  "An add-on is watched when its Running sensor is enabled in Home Assistant."),
+             help="Watched add-on Running sensors: ERROR when the add-on is not running."),
     CheckDef("disk", "Disk", "api", unit="%", warn=80, error=90, editable=("warn", "error"),
-             help="Disk use of the Home Assistant host, from the disk sensor chosen in the settings."),
+             help="Disk use of the Home Assistant host, from the sensor below (System Monitor's by default)."),
     CheckDef("memory", "Memory", "api", unit="%", warn=80, error=90, editable=("warn", "error"),
-             help="Memory use of the Home Assistant host, from the memory sensor chosen in the settings."),
+             help="Memory use of the Home Assistant host, from the sensor below (System Monitor's by default)."),
     CheckDef("cpu", "CPU", "api", unit="%", warn=90, error=98, editable=("warn", "error"),
-             help="Processor use of the Home Assistant host, from the CPU sensor chosen in the settings. "
+             help="Processor use of the Home Assistant host, from the sensor below (System Monitor's by default). "
                   "Short peaks are normal, so the limits are high."),
     CheckDef("rules", "Entity rules", "api",
-             help="Your own rules on any entity (see Entity rules in the settings); the worst rule that fires sets "
-                  "the level. WARNING when a rule matches no entity or a number rule gets no number."),
+             help="The rules you gave watched entities (Rule column); the worst rule that fires sets the level. "
+                  "WARNING when a number rule gets no number."),
 ]
+# checks with nothing to look at until a fitting entity is watched: hidden until then
+BY_ENTITY = ("unavailable", "alarm", "safety", "tamper", "batteries", "addons", "rules")
 SETTLE = 30 * 60
-FULL_EVERY = 30  # minutes between full state reads, which find essential entities and new updates
+FULL_EVERY = 30  # minutes between full state reads, which find new entities and new updates
 FULL_MIN, FULL_MAX = 5, 1440
 NOT_READY = ("unavailable", "unknown")
-MAX_SINGLE = 100  # more essential entities than this: one bulk read is lighter than this many requests
+MAX_SINGLE = 100  # more entities than this: one bulk read is lighter than this many requests
 BACKUP = ("sensor.backup_last_successful_automatic_backup", "sensor.backup_last_attempted_automatic_backup")
-NOISE = re.compile(r"^sensor\..*_(rx|tx)$")  # per-client traffic counters; they drop out whenever a client sleeps
 SAFETY = {"smoke", "moisture", "gas", "carbon_monoxide", "heat", "safety"}  # binary_sensor device classes
 # System Monitor's sensors, used when the disk / memory / CPU sensor fields are left empty
 DISK, MEMORY = "sensor.system_monitor_disk_usage", "sensor.system_monitor_memory_usage"
 CPU = "sensor.system_monitor_processor_use"
 HOST = (("disk", "disk_sensor", "Disk use sensor", DISK), ("memory", "memory_sensor", "Memory use sensor", MEMORY),
         ("cpu", "cpu_sensor", "CPU use sensor", CPU))
+# domains with nothing worth watching or graphing: actions, services, or states that say little
+HIDDEN = {"automation", "script", "scene", "button", "input_button", "event", "update", "conversation", "stt", "tts",
+          "wake_word", "notify", "image", "camera", "tag", "calendar", "todo", "sun"}
+NOISE = re.compile(r"^sensor\..*_(rx|tx)$")  # per-client traffic counters, never watched by "watch every entity"
+ENTITY_ID = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+LEGACY = ("record", "watch_all", "skipped", "chosen", "rules")  # settings before the Entities table (0.35)
+KNOWN_KEY = "ha.known_entities"  # entity ids at the last save of the Entities box: newer ones get a "new" badge
 
-
-RECORD_LINE = re.compile(r"^[a-z0-9_*?]+\.[a-z0-9_*?]+$")
-RECORD_MAX = 500  # entities recorded per read; more is a sign of a too-wide pattern
-# states that mean on (1) or off (0) when an entity is recorded
+# states that mean on (1) or off (0) when an entity's values are stored
 ON = {"on", "open", "home", "true", "heating", "cooling", "heat", "cool", "heat_cool", "auto", "dry", "fan_only", "playing", "armed_home", "armed_away", "armed_night",
       "armed_vacation", "armed_custom_bypass", "triggered", "unlocked", "detected", "wet", "problem"}
 OFF = {"off", "closed", "not_home", "false", "idle", "paused", "standby", "disarmed", "locked", "clear", "dry", "ok"}
 CLIMATE_ATTRS = {"current_temperature": "current_temperature", "temperature": "target_temperature",
                  "current_humidity": "current_humidity"}
 
+RULE_HELP = (
+    "A rule makes homewatch warn about a watched entity's state. Write: is | is not | below | above, a value, "
+    "then warning or error. Several rules for one entity: put ; between them; the worst one that fires counts. "
+    "Examples: below 200 warning (an oil tank's litres) · below 200 warning; below 100 error (two levels) · "
+    "above 65 warning (a disk's temperature) · is on error (a trouble or problem sensor) · "
+    "is not home warning (a person or tracker) · is not online error (a connection status). "
+    "\"is\" compares the state as Home Assistant shows it under Developer tools → States, ignoring capitals. "
+    "A rule needs Watch: without it the rule is kept but not checked.")
 
-def record_patterns(text: str) -> list[str]:
-    return [x.strip() for x in (text or "").splitlines() if x.strip() and not x.strip().startswith("#")]
 
-
-def recorded(patterns: list[str], entity_id: str) -> bool:
-    return any(fnmatchcase(entity_id, p) for p in patterns)
+def _domain(eid: str) -> str:
+    return eid.split(".", 1)[0]
 
 
 def entity_values(e: dict) -> dict[str, float]:
@@ -85,7 +102,7 @@ def entity_values(e: dict) -> dict[str, float]:
         v = float(st.lower() in ON)
     if v is not None and st not in ("nan", "inf", "-inf"):
         out["value"] = v
-    dom = e["entity_id"].split(".", 1)[0]
+    dom = _domain(e["entity_id"])
     if dom == "climate":
         out |= {f: num(a.get(k)) for k, f in CLIMATE_ATTRS.items() if num(a.get(k)) is not None}
         if a.get("hvac_action"):
@@ -93,10 +110,6 @@ def entity_values(e: dict) -> dict[str, float]:
     elif dom == "light" and num(a.get("brightness")) is not None:
         out["brightness_percent"] = round(num(a["brightness"]) / 2.55, 1)
     return out
-
-
-def _domain(e) -> str:
-    return e["entity_id"].split(".", 1)[0]
 
 
 def _update(e) -> dict:
@@ -117,17 +130,133 @@ def _addon(e) -> bool:
             and attrs.get("device_class") == "running" and set(attrs) <= ADDON_ATTRS)
 
 
-def _special(e) -> bool:
-    """States the alarm / safety / tamper / battery / add-on checks look at."""
-    dom, dc = e["entity_id"].split(".", 1)[0], e.get("attributes", {}).get("device_class")
-    return (dom == "alarm_control_panel" or (dom == "binary_sensor" and (dc in SAFETY or dc == "tamper"))
-            or (dom == "sensor" and dc == "battery" and e.get("attributes", {}).get("unit_of_measurement") == "%")
-            or _addon(e))
+def kind(e: dict) -> str:
+    """Which check a watched entity feeds besides "unavailable": alarm, safety, tamper, battery, addon or ''."""
+    dom, a = _domain(e["entity_id"]), e.get("attributes") or {}
+    dc = a.get("device_class")
+    if dom == "alarm_control_panel":
+        return "alarm"
+    if dom == "binary_sensor" and dc in SAFETY:
+        return "safety"
+    if dom == "binary_sensor" and dc == "tamper":
+        return "tamper"
+    if dom == "sensor" and dc == "battery" and a.get("unit_of_measurement") == "%":
+        return "battery"
+    return "addon" if _addon(e) else ""
+
+
+KIND_CHECK = {"alarm": "alarm", "safety": "safety", "tamper": "tamper", "battery": "batteries", "addon": "addons"}
 
 
 def _sensors(s) -> dict:
     """Host sensors to read: the chosen ones, else System Monitor's."""
     return {cid: s.get(key) or default for cid, key, _, default in HOST}
+
+
+# integrations whose names aren't their domain with capitals
+INTEGRATIONS = {"esphome": "ESPHome", "mqtt": "MQTT", "hassio": "Supervisor", "unifi": "UniFi", "wled": "WLED",
+                "synology_dsm": "Synology DSM", "opnsense": "OPNsense", "nut": "NUT", "proxmoxve": "Proxmox VE",
+                "systemmonitor": "System Monitor", "zha": "ZHA", "zwave_js": "Z-Wave", "homekit": "HomeKit",
+                "hue": "Philips Hue", "mobile_app": "Mobile App", "tplink": "TP-Link", "upnp": "UPnP",
+                "dlna_dmr": "DLNA", "ipp": "IPP", "lg_webos_tv": "LG webOS TV", "webostv": "LG webOS TV",
+                "sun": "Sun", "met": "Met.no", "openweathermap": "OpenWeatherMap", "ookla_speedtest": "Speedtest"}
+# device classes that usually matter: listed first within a device
+FIRST = {"battery", "problem", "connectivity", "safety", "smoke", "moisture", "gas", "carbon_monoxide", "heat",
+         "tamper", "running", "update"}
+
+
+def integration_name(domain: str) -> str:
+    return INTEGRATIONS.get(domain) or domain.replace("_", " ").capitalize() if domain else ""
+
+
+def catalog_row(e: dict, reg: dict | None = None) -> dict:
+    """One entity as the Entities box shows it (the whole list comes with every full read), with its integration,
+    device and area from Home Assistant's registries when they could be read."""
+    a = e.get("attributes") or {}
+    r = (reg or {}).get(e["entity_id"]) or {}
+    dc = a.get("device_class") or ""
+    return {"id": e["entity_id"], "name": a.get("friendly_name") or "", "state": str(e.get("state", "")),
+            "unit": a.get("unit_of_measurement") or "", "kind": kind(e),
+            "integration": r.get("integration", ""), "device": r.get("device", ""), "area": r.get("area", ""),
+            "first": bool(kind(e)) or dc in FIRST}
+
+
+async def registries(url: str, token: str, verify) -> dict[str, dict]:
+    """entity id -> {integration, device, area}, from Home Assistant's websocket API (a non-admin user may read
+    the entity, device and area registries). {} when it can't be read: the box then groups by domain."""
+    from websockets.asyncio.client import connect
+
+    ws_url = ("wss" + url[5:] if url.startswith("https") else "ws" + url[4:]) + "/api/websocket"
+    ctx = None
+    if ws_url.startswith("wss"):
+        ctx = verify if isinstance(verify, ssl.SSLContext) else ssl.create_default_context()
+    async with connect(ws_url, ssl=ctx, max_size=64 * 1024 * 1024, open_timeout=10, close_timeout=2) as ws:
+        await ws.recv()  # auth_required
+        await ws.send(json.dumps({"type": "auth", "access_token": token}))
+        if json.loads(await ws.recv()).get("type") != "auth_ok":
+            return {}
+        out = {}
+        for n, cmd in enumerate(("config/entity_registry/list_for_display", "config/device_registry/list",
+                                 "config/area_registry/list"), 1):
+            await ws.send(json.dumps({"id": n, "type": cmd}))
+            while True:
+                r = json.loads(await asyncio.wait_for(ws.recv(), 20))
+                if r.get("id") == n:
+                    break
+            if not r.get("success"):
+                return {}
+            out[cmd] = r["result"]
+    areas = {x["area_id"]: x.get("name") or x["area_id"] for x in out["config/area_registry/list"]}
+    devices = {d["id"]: (d.get("name_by_user") or d.get("name") or "", d.get("area_id")) for d in out["config/device_registry/list"]}
+    reg = {}
+    for x in out["config/entity_registry/list_for_display"].get("entities", []):
+        dev, dev_area = devices.get(x.get("di"), ("", None))
+        reg[x["ei"]] = {"integration": integration_name(x.get("pl") or ""), "device": dev,
+                        "area": areas.get(x.get("ai") or dev_area, "")}
+    return reg
+
+
+def rule_lines(rules: dict, watched) -> str:
+    """The rules of watched entities as entity_rules lines ("<entity> below 200 warning")."""
+    return "\n".join(f"{eid} {part.strip()}" for eid in sorted(rules) if eid in watched
+                     for part in str(rules[eid]).split(";") if part.strip())
+
+
+def check_rule(eid: str, text: str) -> str:
+    """'' or what is wrong with one entity's rule text."""
+    for part in (x.strip() for x in str(text).split(";")):
+        if part and entity_rules.parse(f"{eid} {part}")[1]:
+            return (f"Rule for {eid}: \"{part}\" — write is | is not | below | above, a value, then warning or "
+                    f"error, e.g. below 200 warning")
+    return ""
+
+
+def convert(s: dict, states: list[dict]) -> dict:
+    """0.35 settings (patterns, "watch every entity", essential entities watched and recorded by themselves, an
+    ignore list) as ticks: what was watched stays watched, what was recorded is shown in Grafana, every rule moves
+    to each entity it matches now. Entities in hidden domains are left out."""
+    def skipped(eid):
+        sk = s.get("skipped") or []
+        return eid in sk or f"group:{_domain(eid)}" in sk
+
+    old_rules, _ = entity_rules.parse(s.get("rules", "") if isinstance(s.get("rules"), str) else "")
+    patterns = [x.strip() for x in str(s.get("record") or "").splitlines() if x.strip() and not x.strip().startswith("#")]
+    extra, ignored = set(s.get("watch") or []), set(s.get("chosen") or [])
+    watch, grafana, rules = set(), set(), {}
+    for e in states:
+        eid = e["entity_id"]
+        if _domain(eid) in HIDDEN:
+            continue
+        mine = [r for r in old_rules if r.matches(eid)]
+        if mine:
+            rules[eid] = "; ".join(f"{r.text()} {'error' if r.level == ERROR else 'warning'}" for r in mine)
+        noise = s.get("watch_all") and NOISE.match(eid) and not kind(e) and not mine  # never reported by 0.35
+        if eid in extra or ((s.get("watch_all") and not noise or kind(e) or mine) and not skipped(eid)):
+            if eid not in ignored or mine:
+                watch.add(eid)
+        if kind(e) or any(fnmatchcase(eid, p) for p in patterns):
+            grafana.add(eid)
+    return {"watch": sorted(watch), "grafana": sorted(grafana), "entity_rules": rules, "entities_v": 2}
 
 
 def _ts(value) -> float | None:
@@ -144,10 +273,11 @@ class HomeAssistantModule(ApiModule):
     headline = ("cpu", "host CPU")
     every_min = 2  # fast: alarms, safety sensors and power events must be reported quickly
     checks = CHECKS
-    description = ("Watches Home Assistant through the token of a non-admin user: core state, alarm panels, safety and "
-                   "tamper sensors, batteries, available updates, automatic backups, add-ons and the host's disk, "
-                   "memory and CPU, plus your own rules on any entity. Only those entities are read "
-                   "at each check; the full list is read every 30 minutes (you can change this) to find new ones and new updates, and isn't kept. "
+    description = ("Watches Home Assistant through the token of a non-admin user: core state, available updates, "
+                   "automatic backups and the host's disk, memory and CPU. Under Entities you choose entities to "
+                   "watch (alarm panels, safety sensors, batteries, add-ons, anything that must not go unavailable, "
+                   "with your own rules) and to show in Grafana. Only those are read at each check; the full list "
+                   "is read every 30 minutes (you can change this) to find new entities and updates. "
                    "Nothing in Home Assistant is changed.")
     setup_title = "First create an account and token for homewatch"
     setup = [
@@ -156,10 +286,11 @@ class HomeAssistantModule(ApiModule):
         ("text", "Log in as homewatch (a private browser window is easiest), open its profile → Security → "
                  "Long-lived access tokens → Create token, and paste the token below."),
         ("text", "Optional, add-ons: Settings → Devices & services → Home Assistant Supervisor → open an add-on's "
-                 "device and enable its \"Running\" sensor (disabled by default). Enable it for each add-on that must "
-                 "always run; homewatch reports it when it stops."),
-        ("text", "Optional, disk, memory and CPU: add the System Monitor integration with its disk use, memory use "
-                 "and processor use sensors, or name your own sensors after connecting."),
+                 "device and enable its \"Running\" sensor (disabled by default), then tick Watch for it here."),
+        ("text", "Optional, disk, memory and CPU: Home Assistant doesn't tell a non-admin user how its host is doing, "
+                 "so homewatch reads sensors for it. Add the System Monitor integration (Settings → Devices & "
+                 "services → Add integration → System Monitor) and enable its disk use, memory use and processor use "
+                 "sensors. homewatch uses those by itself; under Checks and limits you can pick other sensors in %."),
     ]
     fields = [
         Field("url", "Home Assistant address", "http://homeassistant.local:8123", width="wide"),
@@ -168,52 +299,60 @@ class HomeAssistantModule(ApiModule):
         Field("full_every", "Full read every (minutes)", "30", kind="number", default=FULL_EVERY,
               width="narrow", own_line=True,
               help=f"How often the whole entity list is read to find new entities and updates ({FULL_MIN} to {FULL_MAX})."),
-        Field("disk_sensor", "Disk use sensor", DISK, section="more",
-              help="Host disk use in %. Empty: System Monitor's."),
-        Field("memory_sensor", "Memory use sensor", MEMORY, section="more",
-              help="Host memory use in %. Empty: System Monitor's."),
-        Field("cpu_sensor", "CPU use sensor", CPU, section="more",
-              help="Host processor use in %. Empty: System Monitor's."),
-        Field("rules", "Entity rules", "binary_sensor.alarm_panel_trouble_* is on warning\nsensor.heating_oil below 200 warning",
-              kind="lines", section="more",
-              help="One rule per line: <entity or pattern> is | is not | below | above <value> warning | error. "
-                   "* and ? match any text in an entity id. Lines starting with # are notes. Examples: "
-                   "binary_sensor.panel_zone_*_tamper is on error · sensor.panel_link is not online error · "
-                   "sensor.oil_level below 100 error."),
-        Field("record", "Entities to record", "", kind="lines", section="more",
-              help="For the Grafana dashboards: one entity id per line, * and ? match any text, # starts a note. "
-                   "Their numbers (and on/off as 1/0) are kept for a year. Alarm, safety, tamper and battery "
-                   "entities are always kept. Example: sensor.*_temperature · "
-                   "sensor.heating_oil · climate.* · binary_sensor.front_door"),
-        Field("watch_all", "Watch every entity", kind="check", default=False, section="more",
-              help="Off: only the essential entities (alarm, safety, tamper, battery, add-on, backup, host and rule "
-                   "entities) are read and listed. On: all of them are read at every check, so any one that becomes "
-                   "unavailable can be reported (network traffic RX/TX sensors never are)."),
+        # chosen in the Disk / Memory / CPU rows of "Checks and limits" (limit_fields), not in a box of their own
+        Field("disk_sensor", "Disk use sensor", DISK, section="limits"),
+        Field("memory_sensor", "Memory use sensor", MEMORY, section="limits"),
+        Field("cpu_sensor", "CPU use sensor", CPU, section="limits"),
     ]
     secret_label = "Long-lived access token"
     secret_width = "wide"
-    more_title = "Additional configuration"
-    more_help = "Which entities to watch, which unavailable ones to ignore, the host sensors and your own rules."
-    more_fields_title = "Host sensors"
-    choices_empty = "Nothing is unavailable right now, so there is nothing to ignore."
     secret_placeholder = "eyJ0eXAiOiJKV1Qi…"
-    filter_title = "Entities to watch"
-    filter_help = ("Unticked entities are not checked or reported. New ones are watched, except in a domain where you "
-                   "untick everything.")
-    choices_title = "Unavailable entities to ignore"
-    choices_help = ("These are unavailable now, grouped by domain. Ticked ones are ignored (on purpose, or long gone). "
-                    "Entities that become unavailable later are reported; tick them here if that's expected.")
+    more_title = "Additional configuration"
+    more_help = ("Entities to watch and to show in Grafana. Nothing is ticked at first; values are stored only for "
+                 "ticked entities.")
+    entity_table = True  # the second box is the Entities box
+    last_reading_box = False  # what a reading finds shows in the checks and the Entities box
+    read_now_in_settings = True
+    read_now_beside = "full_every"  # the Read now button on that field's line
+    limits_first = True  # connection, then checks and limits, then the entities
 
     def __init__(self):
         super().__init__()
-        self._ids: list[str] | None = None  # essential entities found by the last full read
+        self._ids: list[str] | None = None  # entities read one by one between full reads
         self._updates: list[dict] = []
         self._total = 0
         self._found_ts = 0.0
+        self._catalog: list[dict] = []  # every entity (hidden domains left out) at the last full read
+        self._converted: dict | None = None  # 0.35 settings turned into ticks, saved by readings()
+        self._registry_error = ""  # why integrations / devices / areas couldn't be read ('' = they were)
 
     def reread(self):
         super().reread()
-        self._ids = None  # the rules or sensors may name other entities: a full read finds them
+        self._ids = None  # new ticks or sensors: a full read finds them
+
+    # ---- settings --------------------------------------------------------------------------
+    def load(self, rt) -> dict:
+        s = {"watch": [], "grafana": [], "entity_rules": {}} | super().load(rt)
+        if s.get("entities_v") or not s.get("_configured"):
+            for k in LEGACY:
+                if k != "rules" or not isinstance(s.get("rules"), dict):
+                    s.pop(k, None)
+        return s
+
+    def imported(self, settings: dict) -> tuple[dict, str]:
+        for k in ("watch", "grafana"):
+            v = settings.get(k, [])
+            if not isinstance(v, list) or not all(isinstance(x, str) and ENTITY_ID.match(x) for x in v):
+                return settings, f"{k}: must be a list of entity ids"
+        rules = settings.get("entity_rules", {})
+        if not isinstance(rules, dict):
+            return settings, "entity_rules: must be entity id: rule text"
+        for eid, text in rules.items():
+            err = "entity_rules: must be entity id: rule text" if not (ENTITY_ID.match(str(eid)) and isinstance(text, str)) \
+                else check_rule(eid, text)
+            if err:
+                return settings, err
+        return super().imported(settings)
 
     def validate(self, form, old):
         out, err = super().validate(form, old)
@@ -229,13 +368,104 @@ class HomeAssistantModule(ApiModule):
             if v and not re.fullmatch(r"sensor\.[a-z0-9_]+", v):
                 return out, f"{label}: an entity id like sensor.disk_use_percent"
             out[k] = v
-        bad = [x for x in record_patterns(out.get("record", "")) if not RECORD_LINE.match(x)]
-        if bad:
-            return out, f"Entities to record: \"{bad[0]}\" is not an entity id or pattern like sensor.*_temperature"
-        _, problem = entity_rules.parse(out.get("rules", ""))
-        if problem:
-            return out, problem
+        if "_new" in form:
+            out |= {"watch": [], "grafana": [], "entity_rules": {}, "entities_v": 2}
+        if form.get("_part") == "more" and "_entities" in form:
+            err = self._entities(form, old, out)
+            if err:
+                return out, err
         return out | {"url": url, "full_every": round(out["full_every"])}, ""
+
+    def _entities(self, form, old, out) -> str:
+        """The Entities box into the settings; entities not on the page this time keep theirs."""
+        shown = set(json.loads(form.get("_entities") or "[]"))
+        watch = {w for w in old.get("watch", []) if w not in shown} | {k[2:] for k in form if k.startswith("w.") and k[2:] in shown}
+        grafana = set(old.get("grafana", []))
+        if "_gcol" in form:  # the Show in Grafana column was on the page (Grafana is running)
+            grafana = {g for g in grafana if g not in shown} | {k[2:] for k in form if k.startswith("g.") and k[2:] in shown}
+        rules = {eid: r for eid, r in (old.get("entity_rules") or {}).items() if eid not in shown}
+        for k, v in form.items():
+            if k.startswith("r.") and k[2:] in shown and str(v).strip():
+                eid, text = k[2:], "; ".join(x.strip() for x in str(v).split(";") if x.strip())
+                err = check_rule(eid, text)
+                if err:
+                    return err
+                rules[eid] = text
+        if sum(len(str(r).split(";")) for r in rules.values()) > entity_rules.MAX_RULES:
+            return f"Entity rules: at most {entity_rules.MAX_RULES}"
+        out |= {"watch": sorted(watch), "grafana": sorted(grafana), "entity_rules": rules, "entities_v": 2}
+        return ""
+
+    async def prepare_save(self, rt, form: dict) -> str:
+        old = self.load(rt)
+        err = await super().prepare_save(rt, form)
+        if err or form.get("_part") != "more":
+            return err
+        new = json.loads(form.get("_validated", "{}"))
+        before = set(old.get("watch", [])) | set(old.get("grafana", []))
+        dropped = sorted(before - set(new.get("watch", [])) - set(new.get("grafana", [])))
+        if dropped and form.get("_history") == "delete":  # asked on the page; without an answer: kept
+            from ...metrics import MetricsError
+            ids = "|".join(d.replace(".", "\\\\.") for d in dropped)
+            try:
+                await rt.metrics.delete(f'{{__name__=~"hw_ha_entity_.*",entity_id=~"{ids}"}}')
+            except MetricsError as e:
+                return f"Nothing saved: deleting their history failed ({e})"
+            form["_deleted"] = json.dumps(dropped)
+        return ""
+
+    def save(self, rt, form: dict, user) -> str:
+        err = super().save(rt, form, user)
+        if err or form.get("_part") != "more":
+            return err
+        if form.get("_deleted"):
+            from ...auth import audit
+            audit(rt.db, user.username, self.id, "history deleted: " + ", ".join(json.loads(form["_deleted"])))
+        if self._catalog:
+            rt.db.set(KNOWN_KEY, sorted(c["id"] for c in self._catalog))  # the "new" badges start over
+        return ""
+
+    def audit_detail(self, old: dict, new: dict) -> str:
+        """Entity lists as counts and what changed ("watch: 1121 (+2: sensor.a, sensor.b)"), not 1000 ids."""
+        def diff(key, show):
+            a, b = set(old.get(key) or []), set(new.get(key) or [])
+            plus, minus = sorted(b - a), sorted(a - b)
+            parts = [f"+{len(plus)}" + (f": {', '.join(plus[:show])}{' …' if len(plus) > show else ''}" if plus else "")] if plus else []
+            parts += [f"−{len(minus)}" + (f": {', '.join(minus[:show])}{' …' if len(minus) > show else ''}" if minus else "")] if minus else []
+            return f"{len(b)}" + (f" ({'; '.join(parts)})" if parts else "")
+
+        plain = {k: v for k, v in new.items() if k not in ("watch", "grafana", "entity_rules", "chosen", "skipped", "_configured")}
+        rules_old, rules_new = old.get("entity_rules") or {}, new.get("entity_rules") or {}
+        changed = [f"{e}: {rules_new.get(e) or 'removed'}" for e in sorted(set(rules_old) | set(rules_new))
+                   if rules_old.get(e) != rules_new.get(e)]
+        return (json.dumps(plain) + f"; watch: {diff('watch', 10)}; show in Grafana: {diff('grafana', 10)}; "
+                f"rules: {len(rules_new)}" + (f" ({'; '.join(changed[:10])}{' …' if len(changed) > 10 else ''})" if changed else ""))
+
+    def hidden_checks(self, settings: dict) -> set[str]:
+        """Checks with no watched entity to look at: not listed, not run."""
+        watched = set(settings.get("watch") or [])
+        kinds = {c["kind"] for c in self._catalog if c["id"] in watched}
+        if not self._catalog and self.snap:
+            kinds = {e.get("kind", "") for e in self.snap.get("watched", [])}
+        hidden = {KIND_CHECK[k] for k in KIND_CHECK if k not in kinds}
+        if not watched:
+            hidden.add("unavailable")
+        if not rule_lines(settings.get("entity_rules") or {}, watched):
+            hidden.add("rules")
+        return hidden
+
+    # ---- reading ---------------------------------------------------------------------------
+    async def readings(self, rt, settings, now):
+        out = await super().readings(rt, settings, now)
+        if self._converted is not None:  # 0.35 settings found: store them as ticks, once
+            from ...auth import audit  # also stores the change as a configuration version, so it can be undone
+            saved = rt.db.get(self.key) or {}
+            new = {k: v for k, v in saved.items() if k not in LEGACY} | self._converted
+            rt.db.set(self.key, new)
+            audit(rt.db, "system", self.id, f"entities converted to ticks: {len(new['watch'])} watched, "
+                                            f"{len(new['grafana'])} shown in Grafana, {len(new['entity_rules'])} with rules")
+            self._converted = None
+        return out
 
     def notice(self, settings):
         if settings.get("url", "").startswith("http://"):
@@ -259,22 +489,31 @@ class HomeAssistantModule(ApiModule):
                 return r.json()
 
             config = await get("config")
-            rules, _ = entity_rules.parse(s.get("rules", ""))
-            keep = record_patterns(s.get("record", ""))
-            everything = bool(s.get("watch_all"))
-            full = (everything or self._ids is None or self.snap_ts == float("-inf")
-                    or now - self._found_ts >= s.get("full_every", FULL_EVERY) * 60 or len(self._ids) > MAX_SINGLE)
+            convert_now = not s.get("entities_v")
+            watch, grafana = set(s.get("watch") or []), set(s.get("grafana") or [])
+            rules = s.get("entity_rules") if isinstance(s.get("entity_rules"), dict) else {}
+            host = set(_sensors(s).values())
+            wanted = sorted(watch | grafana | host | set(BACKUP))
+            full = (convert_now or self._ids is None or self.snap_ts == float("-inf") or len(wanted) > MAX_SINGLE
+                    or now - self._found_ts >= s.get("full_every", FULL_EVERY) * 60)
             if full:
                 states = await get("states")
-                host = set(_sensors(s).values())
-                self._ids = [e["entity_id"] for e in states
-                             if _special(e) or e["entity_id"] in BACKUP or e["entity_id"] in host
-                             or entity_rules.wanted(rules, e["entity_id"]) or recorded(keep, e["entity_id"])]
+                if convert_now:
+                    self._converted = convert(s, states)
+                    watch, grafana = set(self._converted["watch"]), set(self._converted["grafana"])
+                    rules = self._converted["entity_rules"]
+                    wanted = sorted(watch | grafana | host | set(BACKUP))
+                try:
+                    reg = await asyncio.wait_for(registries(s["url"], secret, verify_for(s, s["url"])), 40)
+                    self._registry_error = ""
+                except Exception as e:  # noqa: BLE001 - an old Home Assistant, a proxy without websockets...
+                    reg, self._registry_error = {}, type(e).__name__
+                self._catalog = [catalog_row(e, reg) for e in states if _domain(e["entity_id"]) not in HIDDEN]
                 self._updates = [_update(e) for e in states
                                  if e["entity_id"].startswith("update.") and e.get("state") == "on"]
-                self._total, self._found_ts = len(states), now
-                if not everything:
-                    states = [e for e in states if e["entity_id"] in set(self._ids)]
+                self._total, self._found_ts, self._ids = len(states), now, wanted
+                keep = set(wanted)
+                states = [e for e in states if e["entity_id"] in keep]
             else:
                 gate = asyncio.Semaphore(8)
 
@@ -289,71 +528,44 @@ class HomeAssistantModule(ApiModule):
                 self._updates = [old if e.get("state") in NOT_READY else _update(e)
                                  for old, e in zip(self._updates, fresh, strict=True)
                                  if e and e.get("state") != "off"]
-        rec = [{"entity_id": e["entity_id"], "values": entity_values(e),
-                "name": (e.get("attributes") or {}).get("friendly_name") or "",
-                "unit": (e.get("attributes") or {}).get("unit_of_measurement") or "",
-                "dc": (e.get("attributes") or {}).get("device_class") or ""}
-               for e in states if recorded(keep, e["entity_id"]) or _special(e)][:RECORD_MAX]
-        if not everything:  # recorded only: kept for Grafana, not checked or reported as unavailable
-            host = set(_sensors(s).values())
-            states = [e for e in states if _special(e) or e["entity_id"] in BACKUP or e["entity_id"] in host
-                      or entity_rules.wanted(rules, e["entity_id"])]
-        states = [e for e in states if not NOISE.match(e["entity_id"])]
-        keep = ("entity_id", "state", "last_changed")
+
+        def about(e):
+            a = e.get("attributes") or {}
+            return {"entity_id": e["entity_id"], "state": e.get("state"), "name": a.get("friendly_name") or "",
+                    "unit": a.get("unit_of_measurement") or "", "dc": a.get("device_class") or ""}
+
+        watched = [about(e) | {"kind": kind(e)} for e in states if e["entity_id"] in watch]
         snap = {"config": {k: config.get(k) for k in ("version", "state", "safe_mode", "recovery_mode", "location_name")},
-                "unavailable": [{k: e.get(k) for k in keep} | {"name": e.get("attributes", {}).get("friendly_name", "")}
-                                for e in states if e.get("state") == "unavailable"],
+                "unavailable": [{"entity_id": e["entity_id"], "name": e["name"],
+                                 "last_changed": next((x.get("last_changed") for x in states if x["entity_id"] == e["entity_id"]), None)}
+                                for e in watched if e["state"] == "unavailable"],
                 "updates": self._updates,
                 "backup": {e["entity_id"].removeprefix("sensor.backup_"): e.get("state") for e in states
                            if e["entity_id"] in BACKUP},
                 "entities": self._total,
-                "recorded": rec,
-                "host": {k: next(([e.get("state"), e.get("attributes", {}).get("unit_of_measurement")]
+                "host": {k: next(([e.get("state"), (e.get("attributes") or {}).get("unit_of_measurement")]
                                   for e in states if e["entity_id"] == eid), None)
                          for k, eid in _sensors(s).items()},
-                "watch": [{"entity_id": e["entity_id"], "state": e.get("state"),
-                           "dc": e.get("attributes", {}).get("device_class"),
-                           "name": e.get("attributes", {}).get("friendly_name") or ""}
-                          for e in states if _special(e)],
-                "ruled": [{"entity_id": e["entity_id"], "state": e.get("state"),
-                           "unit": e.get("attributes", {}).get("unit_of_measurement") or "",
-                           "name": e.get("attributes", {}).get("friendly_name") or ""}
-                          for e in states if entity_rules.wanted(rules, e["entity_id"])],
-                "all": sorted([e["entity_id"], e.get("attributes", {}).get("friendly_name") or ""] for e in states
-                              if everything or (e["entity_id"] not in BACKUP
-                                                and e["entity_id"] not in set(_sensors(s).values())))}
-        snap["_summary"] = (f"Home Assistant {config.get('version', '?')}, "
-                            + (f"{len(states)} entities" if everything else f"{len(states)} of {self._total} entities read")
-                            + (f", {len(rec)} recorded" if rec else ""))
+                "watched": watched,
+                "rules": rule_lines(rules, watch),
+                # values kept in VictoriaMetrics: every ticked entity; "recorded" = the ones on the dashboards
+                "stored": [{"entity_id": e["entity_id"], "values": entity_values(e)} for e in states
+                           if e["entity_id"] in watch | grafana],
+                "recorded": [about(e) | {"values": entity_values(e)} for e in states if e["entity_id"] in grafana],
+                "catalog": self._catalog, "catalog_ts": self._found_ts}
+        snap["_summary"] = (f"Home Assistant {config.get('version', '?')}, {len(watch)} entities watched"
+                            + (f", {len(grafana)} shown in Grafana" if grafana else ""))
         return snap
 
-    def default_chosen(self, snap):
-        return sorted(e["entity_id"] for e in snap["unavailable"])
-
     def series(self, site: str) -> list[str]:
+        # Only labels that never change: a renamed entity or a new unit keeps its history. Grafana's dashboards
+        # look the names and units up in the module's last reading (Runtime.ha_meta).
         if not self.snap:
             return []
-        return lines("hw_ha_entity", [({"site": site, "entity_id": e["entity_id"], "domain": e["entity_id"].split(".")[0],
-                                        "name": e["name"], "unit": e["unit"], "device_class": e["dc"]}, e["values"])
-                                      for e in self.snap.get("recorded", [])], self.snap_ts)
+        return lines("hw_ha_entity", [({"site": site, "entity_id": e["entity_id"], "domain": _domain(e["entity_id"])},
+                                       e["values"]) for e in self.snap.get("stored", []) if e["values"]], self.snap_ts)
 
-    def choices(self, snap):
-        return [Choice(e["entity_id"], e.get("name") or e["entity_id"].split(".", 1)[1],
-                       e["entity_id"] if e.get("name") else "", group=_domain(e))
-                for e in sorted(snap["unavailable"], key=lambda e: e["entity_id"])]
-
-    def filters(self, snap):
-        return [Choice(eid, name or eid.split(".", 1)[1], eid if name else "", group=eid.split(".", 1)[0])
-                for eid, name in snap.get("all") or []]
-
-    @staticmethod
-    def _reported(s, snap):
-        """Unavailable entities that count: not ignored and in a watched domain."""
-        ignored, skipped = set(s.get("chosen", [])), set(s.get("skipped", []))
-        return [e for e in snap["unavailable"] if not NOISE.match(e["entity_id"])
-                and e["entity_id"] not in ignored and e["entity_id"] not in skipped
-                and f"group:{_domain(e)}" not in skipped]
-
+    # ---- checks ----------------------------------------------------------------------------
     def check(self, s, th, snap, now):
         out = []
 
@@ -369,14 +581,14 @@ class HomeAssistantModule(ApiModule):
         else:
             add("core", OK, f"{c.get('version')} running")
 
-        new = [e for e in self._reported(s, snap) if (now - (_ts(e.get("last_changed")) or now)) >= SETTLE]
-        n = len(new)
-        names = ", ".join((e.get("name") or e["entity_id"]) for e in new)  # all of them; the page shows the first part
-        quiet = len(snap["unavailable"]) - len(self._reported(s, snap))
-        add("unavailable", level(n, th["unavailable"]) if n else OK,
-            f"{n} unavailable: {names}" if n else f"none (ignoring {quiet})", n)
-
-        self._safety(s, th, snap, add)
+        watched = snap.get("watched", [])
+        if watched:
+            gone = [e for e in snap["unavailable"] if (now - (_ts(e.get("last_changed")) or now)) >= SETTLE]
+            n = len(gone)
+            add("unavailable", level(n, th["unavailable"]) if n else OK,
+                f"{n} unavailable: " + ", ".join(e.get("name") or e["entity_id"] for e in gone) if n
+                else f"{len(watched)} watched, none unavailable", n)
+        self._kinds(th, watched, add)
 
         ups = [u for u in snap["updates"] if not u.get("skipped_version") or u["skipped_version"] != u.get("latest_version")]
         add("updates", WARNING if ups else OK,
@@ -408,81 +620,105 @@ class HomeAssistantModule(ApiModule):
             else:
                 add(cid, level(v, th[cid]), f"{what} {v:.0f} % used", v)
 
-        rules, problem = entity_rules.parse(s.get("rules", ""))
-        if problem:
-            add("rules", WARNING, problem)
-        else:
-            st, detail, n = entity_rules.evaluate(rules, snap.get("ruled", []))
-            add("rules", st, detail, n)
+        if snap.get("rules"):
+            rules, problem = entity_rules.parse(snap["rules"])
+            if problem:
+                add("rules", WARNING, problem)
+            else:
+                st, detail, n = entity_rules.evaluate(rules, watched)
+                add("rules", st, detail, n)
         return out
 
-    def _safety(self, s, th, snap, add):
-        skipped = set(s.get("skipped", []))
-        mine = [e for e in snap.get("watch", [])
-                if e["entity_id"] not in skipped and f"group:{e['entity_id'].split('.', 1)[0]}" not in skipped]
-
+    @staticmethod
+    def _kinds(th, watched, add):
+        """The checks of watched alarm panels, safety and tamper sensors, batteries and add-ons; a check with
+        nothing watched gives no result at all (it isn't listed)."""
         def name(e):
             return e["name"] or e["entity_id"]
 
-        panels = [e for e in mine if e["entity_id"].startswith("alarm_control_panel.")]
-        trig = [name(e) for e in panels if e["state"] == "triggered"]
-        gone = [name(e) for e in panels if e["state"] in ("unavailable", "unknown", None)]
-        if trig:
-            add("alarm", ERROR, "TRIGGERED: " + ", ".join(trig))
-        elif gone:
-            add("alarm", WARNING, "unavailable: " + ", ".join(gone))
-        else:
-            add("alarm", OK, "; ".join(f"{name(e)} {str(e['state']).replace('_', ' ')}" for e in panels)
-                or "no alarm panels")
+        panels = [e for e in watched if e["kind"] == "alarm"]
+        if panels:
+            trig = [name(e) for e in panels if e["state"] == "triggered"]
+            if trig:
+                add("alarm", ERROR, "TRIGGERED: " + ", ".join(trig))
+            else:
+                add("alarm", OK, "; ".join(f"{name(e)} {str(e['state']).replace('_', ' ')}" for e in panels))
 
-        for cid, classes, what in (("safety", SAFETY, "safety sensors"), ("tamper", {"tamper"}, "tamper sensors")):
-            group = [e for e in mine if e["entity_id"].startswith("binary_sensor.") and e["dc"] in classes]
-            on = [f"{name(e)} ({e['dc'].replace('_', ' ')})" for e in group if e["state"] == "on"]
-            add(cid, ERROR if on else OK, ", ".join(on) if on else f"{len(group)} {what} clear" if group else f"no {what}")
+        for cid, what in (("safety", "safety sensors"), ("tamper", "tamper sensors")):
+            group = [e for e in watched if e["kind"] == cid]
+            if group:
+                on = [f"{name(e)} ({e['dc'].replace('_', ' ')})" for e in group if e["state"] == "on"]
+                add(cid, ERROR if on else OK, ", ".join(on) if on else f"{len(group)} {what} clear")
 
-        addons = [e for e in mine if e["entity_id"].startswith("binary_sensor.") and e["dc"] == "running"
-                  and e["entity_id"].endswith("_running")]
+        addons = [e for e in watched if e["kind"] == "addon"]
+        if addons:
+            def addon(e):  # "Node-RED Running" -> "Node-RED"; translated names stay as they are
+                n = name(e)
+                return n[:-8] if n.endswith(" Running") else n
 
-        def addon(e):  # "Node-RED Running" -> "Node-RED"; translated names stay as they are
-            n = name(e)
-            return n[:-8] if n.endswith(" Running") else n
+            off = [addon(e) for e in addons if e["state"] == "off"]
+            add("addons", ERROR if off else OK,
+                "not running: " + ", ".join(off) if off else f"{len(addons)} watched add-ons running", len(off))
 
-        off = [addon(e) for e in addons if e["state"] == "off"]
-        lost = [addon(e) for e in addons if e["state"] not in ("on", "off")]
-        if off:
-            add("addons", ERROR, "not running: " + ", ".join(off) + (f"; unavailable: {', '.join(lost)}" if lost else ""),
-                len(off))
-        elif lost:
-            add("addons", WARNING, "unavailable: " + ", ".join(lost), 0)
-        else:
-            add("addons", OK, f"{len(addons)} watched add-ons running" if addons
-                else "no add-ons watched (enable their Running sensors)", 0)
-
-        levels = []
-        for e in mine:
-            if e["entity_id"].startswith("sensor.") and e["dc"] == "battery":
+        bats = [e for e in watched if e["kind"] == "battery"]
+        if bats:
+            levels = []
+            for e in bats:
                 try:
                     v = float(e["state"])
                 except (TypeError, ValueError):
                     continue
                 if 0 <= v <= 100:  # e.g. a watch that isn't connected reports -1
                     levels.append((v, name(e)))
-        if levels:
-            v, who = min(levels)
-            add("batteries", level(v, th["batteries"], True), f"lowest {who} {v:.0f} % ({len(levels)} batteries)", v)
-        else:
-            add("batteries", OK, "no battery sensors")
+            if levels:
+                v, who = min(levels)
+                add("batteries", level(v, th["batteries"], True), f"lowest {who} {v:.0f} % ({len(levels)} batteries)", v)
+            else:
+                add("batteries", OK, "no battery reading now")
 
-    def tables(self, snap, s):
-        return [Table("Updates available", ["Update", "Installed", "Latest"],
-                      [[u.get("title") or u["entity_id"], u.get("installed_version"), u.get("latest_version")]
-                       for u in snap["updates"]]),
-                Table("Unavailable now, not ignored", ["Entity", "Name", "Since"],
-                      [[e["entity_id"], e.get("name"), str(e.get("last_changed", ""))[:16].replace("T", " ")]
-                       for e in self._reported(s, snap)]),
-                Table("Recorded for Grafana", ["Entity", "Name", "Value", "Unit"],
-                      [[e["entity_id"], e["name"], ", ".join(f"{k} {v:g}" for k, v in e["values"].items()) or "not a number",
-                        e["unit"]] for e in snap.get("recorded", [])])]
+    # ---- the page --------------------------------------------------------------------------
+    def limit_fields(self) -> dict[str, str]:
+        return {cid: key for cid, key, _, _ in HOST}
+
+    def limit_sensors(self, settings: dict) -> dict[str, dict]:
+        """For the Disk / Memory / CPU rows: the chosen sensor and every sensor in % to choose from."""
+        pct = sorted((c for c in self._catalog if c["id"].startswith("sensor.") and c["unit"] == "%"),
+                     key=lambda c: (not c["id"].startswith("sensor.system_monitor_"), (c["name"] or c["id"]).lower()))
+        ids = {c["id"] for c in pct}
+        out = {}
+        for cid, key, _, default in HOST:
+            now = settings.get(key) or ""
+            opts = [("", f"System Monitor's ({default}{'' if default in ids or not ids else ', not found'})")]
+            opts += [(c["id"], f"{c['name'] or c['id']} · {c['state']} % · {c['id']}") for c in pct if c["id"] != default]
+            if now and now not in ids:
+                opts.append((now, f"{now} (not found now)"))
+            out[cid] = {"value": now, "options": opts}
+        return out
+
+    def page_ctx(self, rt) -> dict:
+        ctx = super().page_ctx(rt)
+        s = self.load(rt)
+        watch, grafana = set(s.get("watch") or []), set(s.get("grafana") or [])
+        rules = s.get("entity_rules") or {}
+        known = rt.db.get(KNOWN_KEY)
+        if known is None and self._catalog:  # the first look: nothing is new yet
+            known = [c["id"] for c in self._catalog]
+            rt.db.set(KNOWN_KEY, known)
+        known = set(known or [])
+        rows = [c | {"domain": _domain(c["id"]), "w": c["id"] in watch, "g": c["id"] in grafana,
+                     "rule": rules.get(c["id"], ""), "new": c["id"] not in known}
+                for c in sorted(self._catalog, key=lambda c: c["id"])]
+        groups = {}
+        for r in rows:
+            groups.setdefault(r["domain"], []).append(r)
+        ctx |= {"entity_groups": sorted(groups.items()), "entities_ts": self._found_ts,
+                "entity_views": any(r.get("integration") for r in rows), "registry_error": self._registry_error,
+                "entities_shown": json.dumps([r["id"] for r in rows]),
+                "entity_counts": {"w": sum(r["w"] for r in rows), "g": sum(r["g"] for r in rows),
+                                  "new": sum(r["new"] for r in rows), "all": len(rows)},
+                "grafana_col": bool(getattr(rt, "grafana_on", False)), "rule_help": RULE_HELP,
+                "hidden_checks": self.hidden_checks(s), "limit_sensors": self.limit_sensors(s)}
+        return ctx
 
 
 plugin = HomeAssistantModule()

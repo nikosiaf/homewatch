@@ -47,8 +47,7 @@ disk health and backups. Nothing on Proxmox is changed.</p>
     <input type="hidden" name="_part" value="main">
     {{ fields(s) }}
   </fieldset>
-  <p class="row" style="justify-content:space-between"><button data-save>Save</button>
-    <button class="danger" name="remove" value="1" data-confirm="Remove this Proxmox host and its token from homewatch?" formnovalidate>Remove host</button></p>
+  <p class="row" style="justify-content:space-between"><button data-save>Save</button></p>
 </form>
 
 {% if s.enabled and snap %}

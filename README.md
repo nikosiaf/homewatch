@@ -32,7 +32,7 @@ with a year of history from every device, port and guest, and from the Home Assi
 - [ISP modem](#isp-modem-module-optional): DSL link, sync rate, noise margin, resyncs and PPP session from your provider's modem
 - [Proxmox VE](#proxmox-ve-module-optional): nodes, CPU and memory, guests, storage, disk health and backups through a read-only API token
 - [OPNsense](#opnsense-module-optional): gateways, CPU, services, HAProxy servers, certificates and firmware updates
-- [Home Assistant](#home-assistant-module-optional): core, unavailable entities, updates, backups, add-ons, alarm, safety, tamper and battery entities
+- [Home Assistant](#home-assistant-module-optional): core, updates, backups, host disk / memory / CPU, plus the entities you choose (unavailable, alarm, safety, tamper, battery, add-ons, your own rules)
 - [Synology NAS](#synology-nas-module-optional): system, CPU and memory, disks, pools and volumes and DSM updates over the DSM Web API
 - [MikroTik](#mikrotik-module-optional): ports up, port errors, CPU and memory, reboots and RouterBOOT over the REST API
 - [UniFi](#unifi-module-optional): devices online, CPU, Wi-Fi, restarts and firmware updates, as a view-only user
@@ -192,61 +192,71 @@ Grafana traffic graphs, also give it **Reporting: Traffic**.
 
 ### Home Assistant module (optional)
 
-Reads Home Assistant with the long-lived token of a dedicated **non-admin** user.
+Reads Home Assistant with the long-lived token of a dedicated **non-admin** user. Setting it up has
+three steps on the module's page: **connect** (address and token), review **Checks and limits** and
+the optional **host sensors**, then, if you want, tick **entities** under "Additional configuration".
+
+Home Assistant's own health is checked from the start:
 
 | Check | WARNING | ERROR |
 |---|---|---|
 | Core | starting, stopping, or safe / recovery mode | |
-| Unavailable entities (30 min or longer, not ignored) | ≥ 1 | ≥ 10 |
 | Updates (skipped versions don't count) | updates available | |
 | Automatic backups | last success > 26 h ago | > 50 h ago, or the last attempt failed |
-| Alarm panels | unavailable | triggered |
-| Safety sensors (smoke, water / moisture, gas, CO, heat, safety) | | detecting |
-| Tamper sensors | | tampered |
-| Batteries (lowest battery sensor, %) | < 25 % | < 10 % |
-| Add-ons (watched = Running sensor enabled) | Running sensor unavailable | not running |
 | Disk use of the host (%) | ≥ 80 % | ≥ 90 % |
 | Memory use of the host (%) | ≥ 80 % | ≥ 90 % |
 | CPU use of the host (%) | ≥ 90 % | ≥ 98 % |
-| Entity rules (your own) | a rule set to warning fires; a rule matches no entity | a rule set to error fires |
-
-The alarm, safety, tamper and battery checks find their sensors by Home Assistant's device class
-and follow the "Entities to watch" list: untick a phone there to keep its battery out of the check.
-
-**Add-ons** (Home Assistant OS / Supervised): a non-admin user can't read the Supervisor, so homewatch
-watches the add-ons' **Running** sensors instead. They are disabled by default: in Settings → Devices &
-services → Home Assistant Supervisor, open each add-on that must always run and enable its "Running"
-sensor. An add-on you stop on purpose: leave its sensor disabled, or untick it under "Entities to watch".
 
 **Disk, memory and CPU** come from the System Monitor integration's disk use, memory use and processor
-use sensors, or from any sensors in % you name under "Additional configuration". Without them, the
-checks stay OK with a note. CPU peaks are normal, so its limits start high (90 % / 98 %).
+use sensors, or from any sensors in % you name under **Host sensors** (after connecting). Without
+them, the checks stay OK with a note. CPU peaks are normal, so its limits start high (90 % / 98 %).
+Their values are always kept and shown on the Home Assistant dashboard in Grafana.
 
-**Entity rules** cover anything without a device class: an alarm panel's trouble sensors, a tank level,
-a link status. One rule per line, in the "Additional configuration" box on the module's page (it
-appears after connecting, below "Last reading"):
+**Entities.** Every entity is listed by domain with its state, and **nothing is ticked at first**.
+Domains with nothing worth watching or graphing (automations, scripts, scenes, buttons, events,
+updates, cameras, calendars, voice and notify services…) are left out. Entities that appeared since
+you last saved the list carry a **new** badge.
 
-```
-binary_sensor.panel_troubles_* is on warning
-binary_sensor.panel_zone_*_tamper is on error
-sensor.panel_link is not online error
-sensor.heating_oil below 200 warning
-sensor.heating_oil below 100 error
-```
+- **Watch**: homewatch reads it at every check (2 minutes by default) and reports it when it has been
+  unavailable for 30 minutes. Some kinds also get their own check:
 
-`is` / `is not` compare the state as text, `below` / `above` as a number; `*` and `?` match any text
-in an entity id. When several rules fire on one entity, the worst counts. A rule that matches no
-entity (a typo, or the entity was renamed) is a WARNING, so it doesn't go quiet unnoticed.
+  | Check (only listed once such an entity is watched) | WARNING | ERROR |
+  |---|---|---|
+  | Unavailable entities (30 min or longer) | ≥ 1 | ≥ 10 |
+  | Alarm panels | | triggered |
+  | Safety sensors (smoke, water / moisture, gas, CO, heat, safety) | | detecting |
+  | Tamper sensors | | tampered |
+  | Batteries (lowest watched battery, %) | < 25 % | < 10 % |
+  | Add-ons (their Running sensors) | | not running |
+  | Entity rules (your own) | a rule set to warning fires | a rule set to error fires |
 
-Entities that are unavailable when you connect are ignored (you can change the list), so only
-entities that *become* unavailable are reported.
+- **Show in Grafana** (only when [Grafana](#grafana-dashboards-optional) runs): the entity is on the
+  Home Assistant dashboards. Numbers are kept as they are, on/off-like states as 1/0; thermostats also
+  keep the current and target temperature and whether they heat, lights their brightness.
+- **Rule**: your own condition on a watched entity: `is` / `is not` compare the state as text,
+  `below` / `above` as a number, then `warning` or `error`; several rules with `;` between them, the
+  worst that fires counts.
 
-**Entities to record** (for [Grafana](#grafana-dashboards-optional)), in "Additional configuration":
-one entity id or pattern per line, e.g. `sensor.*_temperature`, `climate.*`, `sensor.heating_oil`.
-Their numbers are kept for a year, on/off-like states as 1/0; thermostats also keep the current and
-target temperature and whether they heat, lights their brightness. Alarm, safety, tamper and battery
-entities are always kept. Recording an entity doesn't watch it: a recorded-only entity that becomes
-unavailable isn't reported.
+  | Entity | Rule | Means |
+  |---|---|---|
+  | `sensor.heating_oil` | `below 200 warning; below 100 error` | WARNING under 200, ERROR under 100 |
+  | `sensor.nvme_temperature` | `above 65 warning` | a disk getting hot |
+  | `binary_sensor.panel_ac_trouble` | `is on error` | an alarm panel trouble |
+  | `person.anna` | `is not home warning` | away |
+  | `sensor.panel_link` | `is not online error` | anything but "online" |
+
+Values are stored only for ticked entities (either column). When you untick both boxes of an entity,
+homewatch asks whether to keep or delete what it has stored so far.
+
+**Add-ons** (Home Assistant OS / Supervised): a non-admin user can't read the Supervisor, so homewatch
+uses the add-ons' **Running** sensors. They are disabled by default: in Settings → Devices & services →
+Home Assistant Supervisor, open each add-on that must always run, enable its "Running" sensor, then
+tick Watch for it in homewatch.
+
+Upgrading from 0.35 or older: the old lists (entities to watch, unavailable ones to ignore, entities
+to record, rules by pattern) are turned into ticks once, at the first reading. What was watched stays
+watched, what was recorded is shown in Grafana, and a pattern rule is copied to each entity it
+matched. The change is a configuration version, so it can be undone under System.
 
 ### Synology NAS module (optional)
 
@@ -401,7 +411,7 @@ status and history.
 ## Grafana dashboards (optional)
 
 Grafana shows everything homewatch stores (every device, port, guest, disk, and the Home Assistant
-entities you record) at `https://<homewatch>/grafana/`. It has no login of its own: homewatch signs
+entities you show in Grafana) at `https://<homewatch>/grafana/`. It has no login of its own: homewatch signs
 you in. homewatch admins are Grafana admins, viewers can only look.
 
 - **On or off:** `install.sh` asks; later, **System → Grafana and history**. It needs about 2 GB of

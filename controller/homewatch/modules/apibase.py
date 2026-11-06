@@ -53,6 +53,7 @@ class Field:
     options: tuple = ()  # kind select: the values offered
     width: str = ""  # "" | wide | narrow: the size of the box
     section: str = ""  # "" = the connection (on the Add form too) | more = the module's second section, after connecting
+    #                    | limits = chosen in a row of "Checks and limits" (see limit_fields)
     when: str = ""  # check field key(s), space separated: the field shows only while they are all ticked
     own_line: bool = False  # on a line of its own, after the section's tick boxes
 
@@ -117,6 +118,23 @@ class ApiModule(PinnedTLS, Module):
     more_fields_title = ""  # heading over the second section's plain fields
     choices_empty = ""  # shown when the choice list has nothing in it
     list_search = True  # long tick lists get a search box and "only ticked"
+    entity_table = False  # the second box is a module's own entity list (_ha_entities.html), not the tick lists
+    last_reading_box = True  # the "Last reading" box with tables() and Read now
+    read_now_in_settings = False  # Read now in the connection box instead
+    read_now_beside = ""  # ...on the line of this field (own_line), else above Remove
+    limits_first = False  # "Checks and limits" before the second box
+
+    def audit_detail(self, old: dict, new: dict) -> str:
+        """What a save puts in the audit log: the settings (long lists are summed up by the module)."""
+        return json.dumps({k: v for k, v in new.items() if k not in ("chosen", "skipped", "_configured")})
+
+    def limit_fields(self) -> dict[str, str]:
+        """check id -> settings field chosen in that check's row of "Checks and limits" (e.g. a sensor)."""
+        return {}
+
+    def hidden_checks(self, settings: dict) -> set[str]:
+        """Checks that have nothing to look at with these settings: not listed on the page."""
+        return set()
     filters_first = True  # in the second box: the filter list (e.g. entities to watch) before the choice list
 
     def field(self, key: str) -> Field:
@@ -366,8 +384,7 @@ class ApiModule(PinnedTLS, Module):
         for f in self.fields:
             if f.secret and form.get(f.key, "").strip():
                 rt.secrets.put(self.field_secret_key(f), form[f.key].strip())
-        shown = {k: v for k, v in settings.items() if k not in ("chosen", "skipped")}
-        audit(rt.db, user.username, self.id, json.dumps(shown) + (" secret=replaced" if form.get("secret") else ""))
+        audit(rt.db, user.username, self.id, self.audit_detail(old, settings) + (" secret=replaced" if form.get("secret") else ""))
         rt.wake.set()
         return ""
 

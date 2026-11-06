@@ -1,10 +1,11 @@
-"""Home Assistant checks: core state, newly unavailable entities, updates, backups."""
+"""Home Assistant: health checks, ticked entities (watch / show in Grafana / rules), reading, the 0.35 conversion."""
 
+import asyncio
 import time
 from datetime import datetime, timezone
 
 from homewatch.modules import ERROR, OK, WARNING, Thresholds
-from homewatch.modules.homeassistant.plugin import plugin
+from homewatch.modules.homeassistant.plugin import HomeAssistantModule, plugin
 
 NOW = time.time()
 
@@ -15,8 +16,7 @@ def iso(ts):
 
 def snap(**over):
     s = {"config": {"version": "2026.10.4", "state": "RUNNING", "safe_mode": False, "recovery_mode": False},
-         "unavailable": [{"entity_id": "light.old", "state": "unavailable", "last_changed": iso(NOW - 9 * 86400),
-                          "name": "Old light"}],
+         "unavailable": [], "watched": [], "rules": "",
          "updates": [], "backup": {"last_successful_automatic_backup": iso(NOW - 20 * 3600),
                                    "last_attempted_automatic_backup": iso(NOW - 20 * 3600)},
          "_summary": "HA"}
@@ -24,96 +24,14 @@ def snap(**over):
     return s
 
 
-def run(sn, ignored=("light.old",)):
-    s = {"enabled": True, "chosen": list(ignored)}
+def run(sn):
+    s = {"enabled": True}
     th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
     return {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, sn, "", NOW))}
 
 
-def test_healthy_with_ignored_entity():
-    res = run(snap())
-    assert all(r.status == OK for r in res.values()) and "ignoring 1" in res["unavailable"].detail
-
-
-def test_new_unavailable_waits_30_minutes():
-    fresh = {"entity_id": "sensor.new", "state": "unavailable", "last_changed": iso(NOW - 600), "name": "New"}
-    assert run(snap(unavailable=[fresh]))["unavailable"].status == OK
-    old = fresh | {"last_changed": iso(NOW - 3600)}
-    res = run(snap(unavailable=[old]))
-    assert res["unavailable"].status == WARNING and "New" in res["unavailable"].detail
-
-
-def test_updates_backups_and_safe_mode():
-    res = run(snap(updates=[{"entity_id": "update.core", "title": "Core", "installed_version": "1",
-                             "latest_version": "2", "skipped_version": None},
-                            {"entity_id": "update.x", "title": "X", "installed_version": "1", "latest_version": "3",
-                             "skipped_version": "3"}],
-                   backup={"last_successful_automatic_backup": iso(NOW - 60 * 3600),
-                           "last_attempted_automatic_backup": iso(NOW - 3 * 3600)},
-                   config={"version": "2026.10.4", "state": "RUNNING", "safe_mode": True}))
-    assert res["updates"].status == WARNING and "Core 1 → 2" in res["updates"].detail and "X" not in res["updates"].detail
-    assert res["backups"].status == ERROR and "failed" in res["backups"].detail
-    assert res["core"].status == WARNING
-
-
-def test_no_backup_sensors():
-    assert run(snap(backup={}))["backups"].status == OK
-
-
-def test_unwatched_entity_or_domain_is_not_reported():
-    old = {"entity_id": "sensor.gone", "state": "unavailable", "last_changed": iso(NOW - 3600), "name": "Gone"}
-    sn = snap(unavailable=[old])
-    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
-    for skipped in (["sensor.gone"], ["group:sensor"]):
-        s = {"enabled": True, "chosen": [], "skipped": skipped}
-        res = {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, sn, "", NOW))}
-        assert res["unavailable"].status == OK and "ignoring 1" in res["unavailable"].detail
-    s = {"enabled": True, "chosen": [], "skipped": ["sensor.other"]}
-    assert plugin.evaluate(s, th, (s, sn, "", NOW))[2].status == WARNING
-
-
-def test_choices_and_watch_list_grouped_by_domain():
-    sn = snap(unavailable=[{"entity_id": "light.old", "name": "Old light"}, {"entity_id": "sensor.x", "name": ""}],
-              all=[["light.old", "Old light"], ["sensor.x", ""]])
-    assert [(c.group, c.label, c.detail) for c in plugin.choices(sn)] == [
-        ("light", "Old light", "light.old"), ("sensor", "x", "")]
-    assert [(c.group, c.value, c.label) for c in plugin.filters(sn)] == [
-        ("light", "light.old", "Old light"), ("sensor", "sensor.x", "x")]
-
-
-def test_alarm_safety_tamper_and_batteries():
-    watch = [{"entity_id": "alarm_control_panel.home", "state": "armed_home", "dc": None, "name": "Home"},
-             {"entity_id": "binary_sensor.kitchen_smoke", "state": "off", "dc": "smoke", "name": "Kitchen smoke"},
-             {"entity_id": "binary_sensor.boiler_leak", "state": "off", "dc": "moisture", "name": "Boiler leak"},
-             {"entity_id": "binary_sensor.zone1_tamper", "state": "off", "dc": "tamper", "name": "Zone 1 tamper"},
-             {"entity_id": "sensor.door_battery", "state": "60", "dc": "battery", "name": "Door"},
-             {"entity_id": "sensor.phone_battery", "state": "5", "dc": "battery", "name": "Phone"},
-             {"entity_id": "sensor.watch_battery", "state": "-1", "dc": "battery", "name": "Watch"}]
-    sn = snap(watch=watch)
-    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
-
-    def res(s_over=None, w=watch):
-        s = {"enabled": True, "chosen": ["light.old"], "skipped": []} | (s_over or {})
-        return {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, snap(watch=w), "", NOW))}
-
-    r = res()
-    assert r["alarm"].status == OK and "Home armed home" in r["alarm"].detail
-    assert r["safety"].status == OK and "2 safety sensors clear" in r["safety"].detail
-    assert r["batteries"].status == ERROR and "Phone 5 % (2 batteries)" in r["batteries"].detail
-    # unticking the phone in "Entities to watch" leaves the door battery
-    assert res({"skipped": ["sensor.phone_battery"]})["batteries"].status == OK
-    hot = [w | {"state": "on"} if w["dc"] in ("moisture", "tamper") else w for w in watch]
-    hot[0] = hot[0] | {"state": "triggered"}
-    r = res(w=hot)
-    assert r["alarm"].status == ERROR and r["safety"].status == ERROR and "Boiler leak (moisture)" in r["safety"].detail
-    assert r["tamper"].status == ERROR
-    assert res(w=[watch[0] | {"state": "unavailable"}])["alarm"].status == WARNING
-    assert sn["watch"] == watch
-
-
-def test_rx_tx_sensors_are_never_reported():
-    gone = {"entity_id": "sensor.phone_rx", "state": "unavailable", "last_changed": iso(NOW - 3600), "name": "Phone RX"}
-    assert run(snap(unavailable=[gone]))["unavailable"].status == OK
+def w(eid, state, kind="", name="", dc="", unit=""):
+    return {"entity_id": eid, "state": state, "kind": kind, "name": name, "dc": dc, "unit": unit}
 
 
 def _ha(monkeypatch, states):
@@ -132,115 +50,97 @@ def _ha(monkeypatch, states):
 
     real = httpx.AsyncClient
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+
+    async def no_registries(*a):
+        return {}
+
+    monkeypatch.setattr("homewatch.modules.homeassistant.plugin.registries", no_registries)
     return calls
 
 
-def test_only_essential_entities_are_read_after_discovery(monkeypatch):
-    import asyncio
+# ---- checks ---------------------------------------------------------------------------------------
 
-    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
-    door = {"entity_id": "sensor.door_battery", "state": "80",
-            "attributes": {"device_class": "battery", "unit_of_measurement": "%"}}
-    light = {"entity_id": "light.a", "state": "unavailable"}
-    rx = {"entity_id": "sensor.phone_rx", "state": "unavailable"}
-    upd = {"entity_id": "update.core", "state": "on", "attributes": {"latest_version": "2"}}
-    calls = _ha(monkeypatch, [door, light, rx, upd])
-    m = HomeAssistantModule()
-    s = {"url": "http://ha", "verify": False}
-    first = asyncio.run(m.fetch(s, "t", NOW))
-    assert "/api/states" in calls and first["unavailable"] == [] and first["updates"][0]["latest_version"] == "2"
-    assert [a[0] for a in first["all"]] == ["sensor.door_battery"] and first["entities"] == 4
-    calls.clear()
-    m.snap_ts = NOW
-    second = asyncio.run(m.fetch(s, "t", NOW + 120))
-    assert "/api/states" not in calls and "/api/states/sensor.door_battery" in calls
-    assert len(second["watch"]) == 1 and second["updates"] == first["updates"]
-    calls.clear()
-    asyncio.run(m.fetch(s, "t", NOW + 7 * 3600))
-    assert "/api/states" in calls
+def test_health_only_when_nothing_is_watched():
+    res = run(snap())
+    assert set(res) == {"api", "core", "updates", "backups", "disk", "memory", "cpu"}  # the rest has nothing to check
+    assert all(r.status == OK for r in res.values())
 
 
-def test_installed_update_clears_before_the_next_full_read(monkeypatch):
-    import asyncio
-
-    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
-    a = {"entity_id": "update.a", "state": "on", "attributes": {"title": "A", "latest_version": "2"}}
-    b = {"entity_id": "update.b", "state": "on", "attributes": {"title": "B", "latest_version": "5"}}
-    calls = _ha(monkeypatch, [a, b])
-    m = HomeAssistantModule()
-    s = {"url": "http://ha", "verify": False}
-
-    def read(minutes):
-        m.snap_ts = NOW
-        calls.clear()
-        return [u["entity_id"] for u in asyncio.run(m.fetch(s, "t", NOW + minutes * 60))["updates"]]
-
-    assert read(0) == ["update.a", "update.b"]
-    a["state"] = "unavailable"  # Home Assistant restarting installs nothing
-    assert read(2) == ["update.a", "update.b"] and "/api/states" not in calls
-    a["state"] = "off"
-    assert read(4) == ["update.b"] and "/api/states" not in calls
-    b["attributes"]["latest_version"] = "6"
-    m.snap_ts = NOW
-    assert asyncio.run(m.fetch(s, "t", NOW + 360))["updates"][0]["latest_version"] == "6"
+def test_updates_backups_and_safe_mode():
+    res = run(snap(updates=[{"entity_id": "update.core", "title": "Core", "installed_version": "1",
+                             "latest_version": "2", "skipped_version": None},
+                            {"entity_id": "update.x", "title": "X", "installed_version": "1", "latest_version": "3",
+                             "skipped_version": "3"}],
+                   backup={"last_successful_automatic_backup": iso(NOW - 60 * 3600),
+                           "last_attempted_automatic_backup": iso(NOW - 3 * 3600)},
+                   config={"version": "2026.10.4", "state": "RUNNING", "safe_mode": True}))
+    assert res["updates"].status == WARNING and "Core 1 → 2" in res["updates"].detail and "X" not in res["updates"].detail
+    assert res["backups"].status == ERROR and "failed" in res["backups"].detail
+    assert res["core"].status == WARNING
+    assert run(snap(backup={}))["backups"].status == OK
 
 
-def test_watch_every_entity_keeps_the_full_list_without_rx_tx(monkeypatch):
-    import asyncio
-
-    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
-    _ha(monkeypatch, [{"entity_id": "light.a", "state": "unavailable"}, {"entity_id": "sensor.phone_tx", "state": "1"}])
-    snap_all = asyncio.run(HomeAssistantModule().fetch({"url": "http://ha", "watch_all": True}, "t", NOW))
-    assert [a[0] for a in snap_all["all"]] == ["light.a"] and len(snap_all["unavailable"]) == 1
-
-
-def test_full_read_interval_is_a_setting(monkeypatch):
-    import asyncio
-
-    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
-    calls = _ha(monkeypatch, [{"entity_id": "update.a", "state": "off"}])
-    m = HomeAssistantModule()
-
-    def full_read(minutes, **settings):
-        m.snap_ts = NOW
-        calls.clear()
-        asyncio.run(m.fetch({"url": "http://ha", "verify": False} | settings, "t", NOW + minutes * 60))
-        return "/api/states" in calls
-
-    assert full_read(0)  # first read
-    assert not full_read(29) and full_read(31)  # settings saved before the field existed: 30 minutes
-    assert not full_read(40, full_every=10) and full_read(41.1, full_every=10)
-
-    form = {"url": "http://ha", "enabled": "on"}
-    assert m.validate(form, {})[0]["full_every"] == 30
-    assert m.validate(form | {"full_every": "60"}, {})[0]["full_every"] == 60
-    for bad in ("4", "1441", "x"):
-        assert m.validate(form | {"full_every": bad}, {})[1]
+def test_watched_unavailable_waits_30_minutes():
+    ent = w("sensor.oil", "unavailable", name="Oil")
+    fresh = snap(watched=[ent], unavailable=[{"entity_id": "sensor.oil", "name": "Oil", "last_changed": iso(NOW - 600)}])
+    assert run(fresh)["unavailable"].status == OK
+    old = snap(watched=[ent], unavailable=[{"entity_id": "sensor.oil", "name": "Oil", "last_changed": iso(NOW - 3600)}])
+    res = run(old)
+    assert res["unavailable"].status == WARNING and res["unavailable"].detail == "1 unavailable: Oil"
+    assert run(snap(watched=[w("sensor.oil", "5")]))["unavailable"].detail == "1 watched, none unavailable"
 
 
-def addon(eid, state, name):
-    return {"entity_id": eid, "state": state, "dc": "running", "name": name}
-
-
-def test_addons_running_stopped_and_unavailable():
-    ok = [addon("binary_sensor.mosquitto_broker_running", "on", "Mosquitto broker Running")]
-    res = run(snap(watch=ok))
-    assert res["addons"].status == OK and "1 watched" in res["addons"].detail
-    stopped = ok + [addon("binary_sensor.zigbee2mqtt_running", "off", "Zigbee2MQTT Running")]
-    res = run(snap(watch=stopped))
+def test_kinds_alarm_safety_tamper_batteries_addons():
+    watched = [w("alarm_control_panel.home", "armed_away", "alarm", "Home"),
+               w("binary_sensor.kitchen_smoke", "off", "safety", "Kitchen smoke", "smoke"),
+               w("binary_sensor.panel_tamper", "off", "tamper", "Panel", "tamper"),
+               w("sensor.door_battery", "40", "battery", "Door"), w("sensor.watch_battery", "-1", "battery", "Watch"),
+               w("binary_sensor.z2m_running", "on", "addon", "Zigbee2MQTT Running", "running")]
+    res = run(snap(watched=watched))
+    assert all(res[c].status == OK for c in ("alarm", "safety", "tamper", "batteries", "addons"))
+    assert res["batteries"].detail == "lowest Door 40 % (1 batteries)"  # -1: a device that doesn't report it
+    watched[0]["state"], watched[1]["state"], watched[2]["state"] = "triggered", "on", "on"
+    watched[3]["state"], watched[5]["state"] = "8", "off"
+    res = run(snap(watched=watched))
+    assert res["alarm"].status == ERROR and "TRIGGERED: Home" in res["alarm"].detail
+    assert res["safety"].status == ERROR and "Kitchen smoke (smoke)" in res["safety"].detail
+    assert res["tamper"].status == ERROR and res["batteries"].status == ERROR
     assert res["addons"].status == ERROR and res["addons"].detail == "not running: Zigbee2MQTT"
-    gone = ok + [addon("binary_sensor.zigbee2mqtt_running", "unavailable", "Zigbee2MQTT Running")]
-    assert run(snap(watch=gone))["addons"].status == WARNING
+    only = run(snap(watched=[w("sensor.door_battery", "40", "battery")]))
+    assert "batteries" in only and "alarm" not in only and "addons" not in only
 
 
-def test_addons_unticked_and_other_running_sensors_ignored():
-    w = [addon("binary_sensor.node_red_running", "off", "Node-RED Running"),
-         addon("binary_sensor.qemu_win11_200_status", "off", "QEMU Win11 Status"),  # Proxmox VM, not an add-on
-         addon("binary_sensor.brew_switch", "off", "Brew Switch")]
-    s = {"enabled": True, "chosen": ["light.old"], "skipped": ["binary_sensor.node_red_running"]}
-    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
-    res = {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, snap(watch=w), "", NOW))}
-    assert res["addons"].status == OK and "no add-ons watched" in res["addons"].detail
+def test_rules_on_watched_entities():
+    ents = [w("sensor.oil", "150", name="Heating oil", unit="L"), w("sensor.panel_link", "unavailable"),
+            w("binary_sensor.trouble", "off")]
+    rules = "sensor.oil below 200 warning\nsensor.oil below 100 error\nsensor.panel_link is not online error\n" \
+            "binary_sensor.trouble is on warning"
+    r = run(snap(watched=ents, rules=rules))["rules"]
+    assert r.status == ERROR and r.value == 2
+    assert "Heating oil 150 L (below 200)" in r.detail and "panel_link unavailable (is not online)" in r.detail
+    ents[0]["state"] = "abc"
+    r = run(snap(watched=ents, rules="sensor.oil below 200 warning"))["rules"]
+    assert r.status == WARNING and "no reading" in r.detail
+    assert "rules" not in run(snap(watched=ents))  # no rules: not listed
+
+
+def test_rule_lines_and_check_rule():
+    from homewatch.modules.homeassistant.plugin import check_rule, rule_lines
+
+    rules = {"sensor.oil": "below 200 warning; below 100 error", "sensor.x": "is on error"}
+    assert rule_lines(rules, {"sensor.oil"}) == "sensor.oil below 200 warning\nsensor.oil below 100 error"
+    assert check_rule("sensor.oil", "below 200 warning; above 9 error") == ""
+    assert "Rule for sensor.oil" in check_rule("sensor.oil", "below lots warning")
+    assert check_rule("sensor.oil", "under 5 warning")
+
+
+def test_hidden_checks_follow_the_ticks():
+    m = HomeAssistantModule()
+    m._catalog = [{"id": "sensor.door_battery", "kind": "battery"}, {"id": "sensor.oil", "kind": ""}]
+    assert m.hidden_checks({}) == {"unavailable", "alarm", "safety", "tamper", "batteries", "addons", "rules"}
+    s = {"watch": ["sensor.door_battery", "sensor.oil"], "entity_rules": {"sensor.oil": "below 1 error"}}
+    assert m.hidden_checks(s) == {"alarm", "safety", "tamper", "addons"}
+    assert "rules" in m.hidden_checks({"watch": ["sensor.door_battery"], "entity_rules": {"sensor.oil": "below 1 error"}})
 
 
 def test_disk_and_memory():
@@ -251,134 +151,206 @@ def test_disk_and_memory():
     res = run(snap(host={"disk": None, "memory": ["12", "GB"]}))
     assert res["disk"].status == OK and "no disk sensor" in res["disk"].detail
     assert res["memory"].status == WARNING and "not a percentage" in res["memory"].detail
-    assert run(snap())["disk"].status == OK  # older snapshots have no host part
 
 
-def test_addon_entities_are_essential_and_sensor_fields_validated():
-    from homewatch.modules.homeassistant.plugin import _addon, _sensors, _special
+def test_kind_and_sensor_fields():
+    from homewatch.modules.homeassistant.plugin import _addon, _sensors, kind
     e = {"entity_id": "binary_sensor.samba_share_running", "attributes": {"device_class": "running"}}
-    assert _addon(e) and _special(e)
-    assert not _addon({"entity_id": "binary_sensor.washer_status", "attributes": {"device_class": "running"}})
+    assert _addon(e) and kind(e) == "addon"
     pve = {"entity_id": "binary_sensor.node_pve_backup_running", "attributes": {  # Proxmox VE integration, not an add-on
-        "running_since": None, "running_guests": None, "device_class": "running", "icon": "mdi:backup-restore",
-        "friendly_name": "Node pve Backup running"}}
-    assert not _addon(pve) and not _special(pve)
-    assert _addon({"entity_id": "binary_sensor.tv_hyper_muter_running",
-                   "attributes": {"device_class": "running", "friendly_name": "TV hyper muter Εκτελείται"}})
-    assert _sensors({}) == {"disk": "sensor.system_monitor_disk_usage", "memory": "sensor.system_monitor_memory_usage",
-                            "cpu": "sensor.system_monitor_processor_use"}
+        "running_since": None, "device_class": "running", "friendly_name": "Node pve Backup running"}}
+    assert kind(pve) == ""
+    assert kind({"entity_id": "sensor.b", "attributes": {"device_class": "battery", "unit_of_measurement": "%"}}) == "battery"
+    assert kind({"entity_id": "binary_sensor.leak", "attributes": {"device_class": "moisture"}}) == "safety"
+    assert _sensors({})["cpu"] == "sensor.system_monitor_processor_use"
     base = {"url": "http://ha.local:8123", "full_every": "30"}
     out, err = plugin.validate(base | {"disk_sensor": " sensor.my_disk ", "memory_sensor": ""}, {})
     assert not err and out["disk_sensor"] == "sensor.my_disk" and out["memory_sensor"] == ""
     assert "entity id" in plugin.validate(base | {"disk_sensor": "light.x"}, {})[1]
+    out, _ = plugin.validate(base | {"_new": "1"}, {})
+    assert out["watch"] == [] and out["grafana"] == [] and out["entities_v"] == 2  # a new install: nothing ticked
 
 
-def test_addon_and_host_sensors_read_between_full_reads(monkeypatch):
-    import asyncio
+# ---- reading --------------------------------------------------------------------------------------
 
-    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
-    z2m = {"entity_id": "binary_sensor.zigbee2mqtt_running", "state": "on",
-           "attributes": {"device_class": "running", "friendly_name": "Zigbee2MQTT Running"}}
-    vm = {"entity_id": "binary_sensor.qemu_win11_status", "state": "off", "attributes": {"device_class": "running"}}
-    disk = {"entity_id": "sensor.system_monitor_disk_usage", "state": "17.7", "attributes": {"unit_of_measurement": "%"}}
-    mem = {"entity_id": "sensor.ram", "state": "40", "attributes": {"unit_of_measurement": "%"}}
-    calls = _ha(monkeypatch, [z2m, vm, disk, mem])
+STATES = [
+    {"entity_id": "sensor.oil", "state": "420", "attributes": {"friendly_name": "Oil", "unit_of_measurement": "L"}},
+    {"entity_id": "sensor.hall_temperature", "state": "21.5",
+     "attributes": {"friendly_name": "Hall", "unit_of_measurement": "°C", "device_class": "temperature"}},
+    {"entity_id": "binary_sensor.kitchen_smoke", "state": "off", "attributes": {"device_class": "smoke"}},
+    {"entity_id": "automation.lights", "state": "on", "attributes": {}},
+    {"entity_id": "update.core", "state": "on", "attributes": {"title": "Core", "installed_version": "1",
+                                                               "latest_version": "2"}},
+    {"entity_id": "sensor.system_monitor_disk_usage", "state": "17", "attributes": {"unit_of_measurement": "%"}},
+]
+
+
+def test_nothing_ticked_reads_only_health(monkeypatch):
+    calls = _ha(monkeypatch, [dict(e) for e in STATES])
     m = HomeAssistantModule()
-    s = {"url": "http://ha", "verify": False, "memory_sensor": "sensor.ram"}
+    s = {"url": "http://ha", "verify": False, "entities_v": 2}
     first = asyncio.run(m.fetch(s, "t", NOW))
-    assert first["host"] == {"disk": ["17.7", "%"], "memory": ["40", "%"], "cpu": None}
-    assert [e["entity_id"] for e in first["watch"]] == ["binary_sensor.zigbee2mqtt_running"]
+    assert "/api/states" in calls and first["watched"] == [] and first["stored"] == [] and first["recorded"] == []
+    assert [c["id"] for c in first["catalog"]] == ["sensor.oil", "sensor.hall_temperature", "binary_sensor.kitchen_smoke",
+                                                   "sensor.system_monitor_disk_usage"]  # automation / update hidden
+    assert first["catalog"][2]["kind"] == "safety" and first["updates"][0]["entity_id"] == "update.core"
+    assert first["host"]["disk"] == ["17", "%"]
+    m.snap, m.snap_ts = first, NOW
     calls.clear()
-    m.snap_ts = NOW
-    z2m["state"] = "off"
-    second = asyncio.run(m.fetch(s, "t", NOW + 120))
-    assert "/api/states" not in calls and "/api/states/sensor.ram" in calls
-    assert "/api/states/binary_sensor.qemu_win11_status" not in calls
-    assert second["watch"][0]["state"] == "off" and second["host"]["disk"] == ["17.7", "%"]
+    asyncio.run(m.fetch(s, "t", NOW + 120))
+    assert "/api/states" not in calls and "/api/states/sensor.oil" not in calls
+    assert "/api/states/sensor.system_monitor_disk_usage" in calls and "/api/states/update.core" in calls
 
 
-RULES = """# alarm panel
-binary_sensor.panel_troubles_* is on warning
-binary_sensor.panel_zone_*_tamper is on error
-sensor.panel_link is not online error
-sensor.oil below 200 warning
-sensor.oil below 100 error"""
-
-
-def ruled(eid, state, name="", unit=""):
-    return {"entity_id": eid, "state": state, "name": name, "unit": unit}
-
-
-def run_rules(entities, rules=RULES):
-    s = {"enabled": True, "chosen": [], "rules": rules}
-    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
-    res = {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, snap(ruled=entities), "", NOW))}
-    return res["rules"]
-
-
-QUIET = [ruled("binary_sensor.panel_troubles_ac", "off"), ruled("binary_sensor.panel_troubles_phone", "off"),
-         ruled("binary_sensor.panel_zone_kitchen_tamper", "off"), ruled("sensor.panel_link", "online"),
-         ruled("sensor.oil", "640", "Heating oil", "L")]
-
-
-def test_entity_rules_all_fine():
-    r = run_rules(QUIET)
-    assert r.status == OK and r.detail == "5 rules, 5 entities fine"
-
-
-def test_entity_rules_fire_with_the_worst_rule_per_entity():
-    ents = [dict(e) for e in QUIET]
-    ents[1]["state"] = "on"      # a trouble -> warning
-    ents[4]["state"] = "80"      # below 200 and below 100 -> one line, error
-    r = run_rules(ents)
-    assert r.status == ERROR and r.value == 2
-    assert r.detail.startswith("Heating oil 80 L (below 100)") and "binary_sensor.panel_troubles_phone on (is on)" in r.detail
-    assert "below 200" not in r.detail
-
-
-def test_entity_rules_is_not_counts_an_unavailable_link():
-    ents = [dict(e) for e in QUIET]
-    ents[3]["state"] = "unavailable"
-    r = run_rules(ents)
-    assert r.status == ERROR and "is not online" in r.detail
-
-
-def test_entity_rules_warn_on_no_match_and_no_number():
-    ents = [e for e in QUIET if e["entity_id"] != "sensor.panel_link"]
-    ents[-1] = ruled("sensor.oil", "unknown")
-    r = run_rules(ents)
-    assert r.status == WARNING
-    assert "no entity matches sensor.panel_link" in r.detail and "sensor.oil: no reading (unknown)" in r.detail
-
-
-def test_entity_rules_empty_and_bad_lines():
-    assert run_rules([], rules="").status == OK
-    base = {"url": "http://ha.local:8123", "full_every": "30"}
-    out, err = plugin.validate(base | {"rules": "sensor.oil below lots warning"}, {})
-    assert "line 1" in err and "number" in err
-    out, err = plugin.validate(base | {"rules": "\n# note\nsensor.oil is low\n"}, {})
-    assert "line 3" in err
-    out, err = plugin.validate(base | {"rules": " sensor.oil  below 100   ERROR \r\n\r\nsensor.x is not on warning"}, {})
-    assert not err and out["rules"] == "sensor.oil  below 100   ERROR\n\nsensor.x is not on warning"
-
-
-def test_rule_entities_are_read_between_full_reads(monkeypatch):
-    import asyncio
-
-    from homewatch.modules.homeassistant.plugin import HomeAssistantModule
-    trouble = {"entity_id": "binary_sensor.panel_troubles_ac", "state": "off", "attributes": {"friendly_name": "AC loss"}}
-    oil = {"entity_id": "sensor.oil", "state": "300", "attributes": {"unit_of_measurement": "L"}}
-    other = {"entity_id": "sensor.other", "state": "1"}
-    calls = _ha(monkeypatch, [trouble, oil, other])
+def test_ticked_entities_are_read_stored_and_shown(monkeypatch):
+    states = [dict(e) for e in STATES]
+    calls = _ha(monkeypatch, states)
     m = HomeAssistantModule()
-    s = {"url": "http://ha", "verify": False, "rules": RULES}
-    first = asyncio.run(m.fetch(s, "t", NOW))
-    assert sorted(e["entity_id"] for e in first["ruled"]) == ["binary_sensor.panel_troubles_ac", "sensor.oil"]
-    assert first["ruled"][0]["name"] == "AC loss" and first["ruled"][1]["unit"] == "L"
-    calls.clear()
+    s = {"url": "http://ha", "verify": False, "entities_v": 2, "watch": ["sensor.oil", "binary_sensor.kitchen_smoke"],
+         "grafana": ["sensor.hall_temperature", "sensor.oil"], "entity_rules": {"sensor.oil": "below 500 warning",
+                                                                              "sensor.hall_temperature": "above 1 error"},
+         "full_every": 30}
+    m.snap = asyncio.run(m.fetch(s, "t", NOW))
     m.snap_ts = NOW
-    trouble["state"] = "on"
+    assert [e["entity_id"] for e in m.snap["watched"]] == ["sensor.oil", "binary_sensor.kitchen_smoke"]
+    assert m.snap["rules"] == "sensor.oil below 500 warning"  # a rule on an unwatched entity is kept, not checked
+    assert sorted(e["entity_id"] for e in m.snap["stored"]) == ["binary_sensor.kitchen_smoke", "sensor.hall_temperature",
+                                                               "sensor.oil"]
+    assert [e["entity_id"] for e in m.snap["recorded"]] == ["sensor.oil", "sensor.hall_temperature"]
+    out = m.series("home")
+    assert len(out) == 3 and all("name=" not in x and "unit=" not in x for x in out)
+    assert any("entity_id=sensor.oil" in x and "domain=sensor" in x and " value=420" in x for x in out)
+    states[0]["state"] = "unavailable"
+    states[4]["state"] = "off"  # the update got installed
+    calls.clear()
     second = asyncio.run(m.fetch(s, "t", NOW + 120))
-    assert "/api/states" not in calls and "/api/states/binary_sensor.panel_troubles_ac" in calls
-    assert "/api/states/sensor.other" not in calls
-    assert next(e for e in second["ruled"] if e["entity_id"].startswith("binary"))["state"] == "on"
+    assert "/api/states" not in calls and "/api/states/sensor.oil" in calls
+    assert second["unavailable"][0]["entity_id"] == "sensor.oil" and second["updates"] == []
+    calls.clear()
+    asyncio.run(m.fetch(s | {"full_every": 5}, "t", NOW + 400))
+    assert "/api/states" in calls  # the full read follows the setting
+
+
+# ---- 0.35 settings turned into ticks --------------------------------------------------------------
+
+def test_convert_old_settings():
+    from homewatch.modules.homeassistant.plugin import convert
+    states = [
+        {"entity_id": "sensor.phone_battery", "state": "50", "attributes": {"device_class": "battery", "unit_of_measurement": "%"}},
+        {"entity_id": "sensor.door_battery", "state": "80", "attributes": {"device_class": "battery", "unit_of_measurement": "%"}},
+        {"entity_id": "binary_sensor.kitchen_smoke", "state": "off", "attributes": {"device_class": "smoke"}},
+        {"entity_id": "sensor.hall_temperature", "state": "21", "attributes": {}},
+        {"entity_id": "binary_sensor.panel_trouble_ac", "state": "off", "attributes": {}},
+        {"entity_id": "binary_sensor.panel_trouble_bell", "state": "off", "attributes": {}},
+        {"entity_id": "sensor.oil", "state": "400", "attributes": {}},
+        {"entity_id": "light.old", "state": "unavailable", "attributes": {}},
+        {"entity_id": "automation.x", "state": "on", "attributes": {}},
+        {"entity_id": "sensor.phone_rx", "state": "5", "attributes": {}},
+    ]
+    old = {"skipped": ["sensor.phone_battery"], "chosen": ["light.old"], "watch": ["sensor.oil"],
+           "record": "# temps\nsensor.*_temperature\nautomation.*",
+           "rules": "binary_sensor.panel_trouble_* is on warning\nsensor.oil below 100 error\nsensor.gone below 1 error"}
+    new = convert(old, states)
+    assert new["watch"] == ["binary_sensor.kitchen_smoke", "binary_sensor.panel_trouble_ac",
+                            "binary_sensor.panel_trouble_bell", "sensor.door_battery", "sensor.oil"]
+    assert new["grafana"] == ["binary_sensor.kitchen_smoke", "sensor.door_battery", "sensor.hall_temperature",
+                              "sensor.phone_battery"]  # always recorded before; automations aren't listed now
+    assert new["entity_rules"] == {"binary_sensor.panel_trouble_ac": "is on warning",
+                                   "binary_sensor.panel_trouble_bell": "is on warning", "sensor.oil": "below 100 error"}
+    every = convert({"watch_all": True, "chosen": ["light.old"], "skipped": ["group:sensor"]}, states)
+    assert every["watch"] == ["binary_sensor.kitchen_smoke", "binary_sensor.panel_trouble_ac",
+                              "binary_sensor.panel_trouble_bell"]  # light.old ignored, sensors skipped as a domain
+    every = convert({"watch_all": True}, states)
+    assert "sensor.phone_rx" not in every["watch"] and "sensor.oil" in every["watch"]  # RX/TX were never reported
+
+
+def test_conversion_is_saved_once(monkeypatch, cfg):
+    from dataclasses import replace
+
+    from homewatch.runtime import Runtime
+
+    _ha(monkeypatch, [dict(e) for e in STATES])
+    rt = Runtime.create(replace(cfg, grafana_dir=""))
+    rt.db.set("module.homeassistant", {"url": "http://ha", "verify": False, "enabled": True, "chosen": [],
+                                        "skipped": [], "record": "sensor.*_temperature", "watch_all": False,
+                                        "rules": "sensor.oil below 100 error"})
+    m = HomeAssistantModule()
+    asyncio.run(m.readings(rt, m.load(rt), NOW))
+    s = rt.db.get("module.homeassistant")
+    assert s["entities_v"] == 2 and not {"record", "watch_all", "skipped", "chosen", "rules"} & set(s)
+    assert s["watch"] == ["binary_sensor.kitchen_smoke", "sensor.oil"]
+    assert s["grafana"] == ["binary_sensor.kitchen_smoke", "sensor.hall_temperature"]
+    assert s["entity_rules"] == {"sensor.oil": "below 100 error"}
+    assert [e["entity_id"] for e in m.snap["watched"]] == ["sensor.oil", "binary_sensor.kitchen_smoke"]
+    assert rt.db.one("SELECT detail FROM audit WHERE action=?", ("homeassistant",))["detail"].startswith("entities converted")
+    v = rt.db.one("SELECT username, summary FROM config_versions ORDER BY id DESC LIMIT 1")
+    assert v["username"] == "system" and "Home Assistant" in v["summary"]  # a version: Restore undoes it
+    m.reread()
+    asyncio.run(m.readings(rt, m.load(rt), NOW + 120))
+    assert rt.db.get("module.homeassistant") == s  # once
+
+
+def test_registries_give_integration_device_and_area(monkeypatch):
+    import json
+
+    from homewatch.modules.homeassistant import plugin as ha
+
+    answers = {
+        "config/entity_registry/list_for_display": {"entities": [
+            {"ei": "sensor.door_battery", "pl": "esphome", "di": "d1"},
+            {"ei": "sensor.oil", "pl": "garmin_connect", "di": "d2", "ai": "kitchen"},
+            {"ei": "input_boolean.x", "pl": "input_boolean"}]},
+        "config/device_registry/list": [{"id": "d1", "name": "sh_basement_door", "area_id": "basement"},
+                                        {"id": "d2", "name": "Tank", "name_by_user": "Oil tank", "area_id": None}],
+        "config/area_registry/list": [{"area_id": "basement", "name": "Basement"}, {"area_id": "kitchen", "name": "Kitchen"}]}
+    seen = {}
+
+    class FakeWS:
+        def __init__(self):
+            self.out = [json.dumps({"type": "auth_required"})]
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def recv(self):
+            return self.out.pop(0)
+
+        async def send(self, text):
+            msg = json.loads(text)
+            if msg["type"] == "auth":
+                seen["token"] = msg["access_token"]
+                self.out.append(json.dumps({"type": "auth_ok"}))
+            else:
+                self.out.append(json.dumps({"id": msg["id"], "type": "result", "success": True, "result": answers[msg["type"]]}))
+
+    def fake_connect(url, **kw):
+        seen["url"], seen["ssl"] = url, kw.get("ssl")
+        return FakeWS()
+
+    monkeypatch.setattr("websockets.asyncio.client.connect", fake_connect)
+    reg = asyncio.run(ha.registries("https://ha.example:8123", "tok", True))
+    assert seen["url"] == "wss://ha.example:8123/api/websocket" and seen["token"] == "tok" and seen["ssl"] is not None
+    assert reg["sensor.door_battery"] == {"integration": "ESPHome", "device": "sh_basement_door", "area": "Basement"}
+    assert reg["sensor.oil"] == {"integration": "Garmin connect", "device": "Oil tank", "area": "Kitchen"}
+    assert reg["input_boolean.x"] == {"integration": "Input boolean", "device": "", "area": ""}
+    asyncio.run(ha.registries("http://ha.local:8123", "tok", True))
+    assert seen["url"] == "ws://ha.local:8123/api/websocket" and seen["ssl"] is None
+    row = ha.catalog_row({"entity_id": "sensor.door_battery", "state": "80",
+                          "attributes": {"device_class": "battery", "unit_of_measurement": "%"}}, reg)
+    assert row["integration"] == "ESPHome" and row["device"] == "sh_basement_door" and row["first"] is True
+
+
+def test_registry_failure_falls_back_to_domains(monkeypatch):
+    calls = _ha(monkeypatch, [dict(e) for e in STATES])
+
+    async def broken(*a):
+        raise OSError("no websockets through the proxy")
+
+    monkeypatch.setattr("homewatch.modules.homeassistant.plugin.registries", broken)
+    m = HomeAssistantModule()
+    first = asyncio.run(m.fetch({"url": "http://ha", "verify": False, "entities_v": 2}, "t", NOW))
+    assert "/api/states" in calls and len(first["catalog"]) == 4 and first["catalog"][0]["integration"] == ""
+    assert m._registry_error == "OSError"

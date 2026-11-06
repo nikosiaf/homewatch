@@ -154,7 +154,7 @@ def _pct_steps(warn=80, error=90):
     return [(None, "green"), (warn, "yellow"), (error, "red")]
 
 
-def overview(enabled: set[str]) -> dict:
+def overview(enabled: set[str], ha: list[dict] | None = None) -> dict:
     on = enabled.__contains__
     p = [row("Status"),
          stat("Problems now", f"count(hw_check_status_value{{{S}}} > 0) or vector(0)", w=4, h=5,
@@ -240,13 +240,15 @@ def overview(enabled: set[str]) -> dict:
                    steps=[(None, "red"), (600, "yellow"), (1200, "green")]),
               ts("Power draw", [(f"hw_ups_power_watts{{{S}}}", "{{ups}}")], "watt", w=12, h=4, minimum=0)]
     if on("homeassistant"):
-        v = f'hw_ha_entity_value{{{S}'
-        p += [row("Home"),
-              stat("Doors open", f'sum({v},domain="binary_sensor",device_class=~"door|window|opening|garage_door"}}) or vector(0)',
-                   w=4, h=7, steps=[(None, "green"), (1, "orange")]),
-              stat("Home Assistant CPU", f'hw_check_value_value{{{S},check="homeassistant.cpu"}}', "percent", w=4, h=7,
-                   steps=_pct_steps()),
-              ts("Temperatures", [(f'{v},device_class="temperature",domain="sensor"}}', "{{name}}")], "celsius", w=16, h=7)]
+        meta = sorted(unique_names(ha or []), key=lambda e: (e.get("name") or e["id"]).lower())
+        doors, temps = _pick(meta, "binary_sensor", DOORS), _pick(meta, "sensor", "temperature")
+        p.append(row("Home"))
+        if doors:
+            p.append(stat("Doors open", f"sum({hq(doors)}) or vector(0)", w=4, h=7, steps=[(None, "green"), (1, "orange")]))
+        p += [stat("Home Assistant CPU", f'hw_check_value_value{{{S},check="homeassistant.cpu"}}', "percent", w=4, h=7,
+                   steps=_pct_steps())]
+        if temps:
+            p.append(ts("Temperatures", [(hq(temps[:PER_PANEL]), "{{name}}")], "celsius", w=16, h=7))
     return dashboard("hw-overview", "homewatch Overview", p, "Every module at a glance.", time="now-24h")
 
 
@@ -467,53 +469,244 @@ def docker() -> dict:
     ], "Containers per host.")
 
 
-def homeassistant() -> dict:
-    v = f'hw_ha_entity_value{{{S}'
-    return dashboard("hw-homeassistant", "Home Assistant", [
-        row("Climate"),
-        ts("Temperatures", [(f'{v},device_class="temperature",domain="sensor"}}', "{{name}}")], "celsius"),
-        ts("Humidity", [(f'{v},device_class="humidity",domain="sensor"}}', "{{name}}")], "percent"),
-        ts("Thermostats", [(f'hw_ha_entity_current_temperature{{{S}}}', "{{name}} now"),
-                           (f'hw_ha_entity_target_temperature{{{S}}}', "{{name}} target")], "celsius"),
-        timeline("Heating", [(f'hw_ha_entity_active{{{S}}}', "{{name}}")], w=12, mappings=[{"type": "value", "options": {
-            "0": {"text": "idle", "color": QUIET}, "1": {"text": "heating", "color": "orange"}}}]),
-        ts("Heating hours per day", [(f'avg_over_time(hw_ha_entity_active{{{S}}}[1d]) * 24', "{{name}}")], "h", w=12,
-           minimum=0, desc="Hours the thermostat was actually heating (or cooling) in the 24 h before each point."),
-        ts("Pressure", [(f'{v},device_class=~"pressure|atmospheric_pressure"}}', "{{name}}")], "pressurehpa"),
-        row("Energy"),
-        ts("Power", [(f'{v},device_class="power"}}', "{{name}}")], "watt", minimum=0),
-        ts("Energy per day", [(f'increase({v},device_class="energy"}}[1d]) > 0', "{{name}}")], "kwatth", minimum=0,
-           desc="Counters that restart (some plugs do at midnight or at a restart) are handled by increase()."),
-        row("Security"),
-        stat("Doors open now", f'sum({v},domain="binary_sensor",device_class=~"door|window|opening|garage_door"}}) or vector(0)',
-             w=12, h=4, steps=[(None, "green"), (1, "orange")]),
-        stat("Batteries below 20 %", f'({v},device_class="battery",domain="sensor"}} >= 0) < 20', "percent", legend="{{name}}",
-             w=12, h=4, steps=[(None, "green"), (0, "orange")], text_mode="value_and_name", none="none",
-             desc="Each battery under 20 %. Readings below 0 (a device that doesn't report its battery) are left out."),
-        timeline("Alarm panels", [(f'{v},domain="alarm_control_panel"}}', "{{name}}")], h=5, mappings=[
-            {"type": "value", "options": {"0": {"text": "disarmed", "color": "green"}, "1": {"text": "armed", "color": "blue"}}}]),
-        timeline("Doors and contacts", [(f'{v},domain="binary_sensor",device_class=~"door|window|opening|garage_door"}}',
-                                         "{{name}}")], h=10, mappings=[
-            {"type": "value", "options": {"0": {"text": "closed", "color": QUIET}, "1": {"text": "open", "color": "orange"}}}]),
-        timeline("Safety sensors", [(f'{v},domain="binary_sensor",device_class=~"smoke|moisture|gas|carbon_monoxide|heat|safety"}}',
-                                     "{{name}}")], h=6, mappings=[
-            {"type": "value", "options": {"0": {"text": "clear", "color": "green"}, "1": {"text": "ALARM", "color": "red"}}}]),
-        ts("Batteries", [(f'{v},device_class="battery",domain="sensor"}} >= 0', "{{name}}")], "percent", minimum=0, maximum=100),
-        row("Lights"),
-        ts("Lights: hours on per day", [(f'avg_over_time({v},domain="light"}}[1d]) * 24 > 0', "{{name}}")], "h", w=24, h=7,
-           minimum=0, desc="Hours each light was on in the 24 h before each point."),
-        timeline("Lights on", [(f'{v},domain="light"}}', "{{name}}")], h=12, mappings=[
-            {"type": "value", "options": {"0": {"text": "off", "color": QUIET}, "1": {"text": "on", "color": "yellow"}}}]),
-        row("Home Assistant host"),
-        ts("Host CPU, memory and disk", [(f'hw_check_value_value{{{S},check="homeassistant.cpu"}}', "CPU"),
-                                         (f'hw_check_value_value{{{S},check="homeassistant.memory"}}', "memory"),
-                                         (f'hw_check_value_value{{{S},check="homeassistant.disk"}}', "disk")], "percent",
-           w=24, h=7, minimum=0, maximum=100, desc="From the host sensors in the module settings."),
-        row("Everything recorded"),
-        table("Other recorded sensors", [f'{v},domain="sensor",device_class!~"temperature|humidity|power|energy|battery|pressure|atmospheric_pressure"}}'],
-              {"name": "Name", "entity_id": "Entity", "Value": "Now", "unit": "Unit"}, h=12, hide=("domain", "device_class"),
-              desc="Recorded sensors not shown above. Explore (left menu) graphs any of them over time."),
-    ], "The entities you chose to record (Home Assistant module → Entities to record).")
+# ---- Home Assistant: built from the recorded entities (names and units as Home Assistant has them now) --------
+
+UNITS = {"°C": "celsius", "°F": "fahrenheit", "%": "percent", "W": "watt", "kW": "kwatt", "kWh": "kwatth",
+         "Wh": "watth", "V": "volt", "A": "amp", "lx": "lux", "hPa": "pressurehpa", "mbar": "pressurembar", "bar": "pressurebar", "psi": "pressurepsi",
+         "ppm": "ppm", "dB": "dB", "dBm": "dBm", "s": "s", "min": "m", "h": "h", "B": "bytes", "MB": "decmbytes",
+         "GB": "decgbytes", "Mbit/s": "Mbits", "kB/s": "KBs", "MB/s": "MBs", "Hz": "hertz", "m³": "m3",
+         "L": "litre", "µg/m³": "µg/m3", "km/h": "velocitykmh", "mm": "lengthmm", "km": "lengthkm"}
+NUMERIC = {"sensor", "number", "input_number", "counter"}
+DOORS = {"door", "window", "opening", "garage_door"}
+SAFETY_DC = {"smoke", "moisture", "gas", "carbon_monoxide", "heat", "safety"}
+PER_PANEL = 12  # series per auto-built panel
+LONG = 40  # entities per query at most: names travel in the query, which VictoriaMetrics caps at 16 KB
+
+
+def unique_names(meta: list[dict]) -> list[dict]:
+    """Entities that share a name (two disks of the same model, say) get a part of their id after it, the one
+    nearest the end that tells them apart: "Disk Temperature (nvme0n1)", "Disk Temperature (nvme1n1)"."""
+    by: dict[str, list] = {}
+    for e in meta:
+        by.setdefault((e.get("name") or e["id"]).casefold(), []).append(e)
+    out = []
+    for e in meta:
+        same = [o for o in by[(e.get("name") or e["id"]).casefold()] if o is not e]
+        if not same:
+            out.append(e)
+            continue
+        def parts(eid):  # the domain whole (binary_sensor), then the words of the object id
+            dom, _, obj = eid.partition(".")
+            return [dom, *obj.split("_")]
+
+        mine, theirs = parts(e["id"]), [parts(o["id"]) for o in same]
+        tag = next((mine[-i] for i in range(1, len(mine) + 1)
+                    if all(len(o) < i or o[-i] != mine[-i] for o in theirs)), e["id"])
+        out.append(e | {"name": f"{e.get('name') or e['id']} ({tag})"})
+    return out
+
+
+def _lit(text: str) -> str:
+    """Text inside a "..." literal of a query; $ would be taken for a Grafana variable."""
+    return str(text).replace("\\", "\\\\").replace('"', '\\"').replace("$", "").replace("\n", " ")
+
+
+def hq(ents: list[dict], metric="value", inner="{sel}") -> str:
+    """A query over these entities, one series each (series written before 0.36 carried name/unit labels:
+    max by entity_id joins them with the newer ones), with the entity's current name as the "name" label."""
+    ids = "|".join(e["id"].replace(".", "\\\\.") for e in ents)
+    sel = f'hw_ha_entity_{metric}{{{S},entity_id=~"{ids}"}}'
+    pairs = ", ".join(f'"{e["id"]}", "{_lit(e.get("name") or e["id"])}"' for e in ents)
+    return (f'label_map(label_copy(max by (entity_id) ({inner.replace("{sel}", sel)}), "entity_id", "name"), '
+            f'"name", {pairs})')
+
+
+def _pick(meta, domain=None, dc=None, field="value"):
+    dcs = {dc} if isinstance(dc, str) else dc
+    return [e for e in meta if field in e.get("fields", ("value",)) and (domain is None or e["domain"] == domain)
+            and (dcs is None or e.get("dc") in dcs)]
+
+
+def _chunks(ents, size=PER_PANEL):
+    return [ents[i:i + size] for i in range(0, len(ents), size)] or [[]]
+
+
+def _units(ents):
+    """The entities per unit, the most common unit first: one panel can't show °C and °F, or bar and hPa."""
+    out: dict[str, list] = {}
+    for e in ents:
+        out.setdefault(e.get("unit") or "", []).append(e)
+    return sorted(out.items(), key=lambda kv: -len(kv[1]))
+
+
+def _by_unit(title, ents, fallback, inner="{sel}", suffix="", **kw):
+    """Time series panels for these entities: one per unit, at most PER_PANEL lines each."""
+    groups, out = _units(ents), []
+    for unit, part_all in groups:
+        name = title + (f" ({unit})" if len(groups) > 1 and unit else "")
+        parts = _chunks(part_all)
+        for i, part in enumerate(parts):
+            out.append(ts(_title(name, i, len(parts)), [(hq(part, inner=inner) + suffix, "{{name}}")],
+                          UNITS.get(unit, fallback if len(groups) == 1 else "short"), **kw))
+    return out
+
+
+def _title(text, i, n):
+    return f"{text} ({i + 1} of {n})" if n > 1 else text
+
+
+ONOFF = [{"type": "value", "options": {"0": {"text": "off", "color": QUIET}, "1": {"text": "on", "color": "blue"}}}]
+
+
+def _auto(meta, used: set) -> list:
+    """Every recorded entity not on a fixed panel: numbers by device class / unit, on/off by domain."""
+    groups: dict[tuple, list] = {}
+    for e in meta:
+        if e["id"] in used or "value" not in e.get("fields", ("value",)):
+            continue
+        if e["domain"] in NUMERIC or e.get("unit"):
+            key = ("n", e.get("dc") or "", e.get("unit") or "")
+        else:
+            key = ("b", e["domain"], e.get("dc") or "")
+        groups.setdefault(key, []).append(e)
+    out = []
+    for (kind, a, b), ents in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1] or "~", kv[0][2])):
+        ents.sort(key=lambda e: (e.get("name") or e["id"]).lower())
+        parts = _chunks(ents)
+        for i, part in enumerate(parts):
+            if kind == "n":
+                what = (a.replace("_", " ").capitalize() if a else "Other numbers") + (f" ({b})" if b else "")
+                out.append(ts(_title(what, i, len(parts)), [(hq(part), "{{name}}")], UNITS.get(b, "short"), w=12))
+            else:
+                what = a.replace("_", " ").capitalize() + (f" · {b.replace('_', ' ')}" if b else "")
+                out.append(timeline(_title(what, i, len(parts)), [(hq(part), "{{name}}")], w=12,
+                                    h=max(4, 2 + len(part)), mappings=ONOFF))
+    return out
+
+
+def homeassistant(meta: list[dict] | None = None) -> dict:
+    meta = sorted(unique_names(meta or []), key=lambda e: (e.get("name") or e["id"]).lower())
+    used: set = set()
+
+    def take(ents):
+        used.update(e["id"] for e in ents)
+        return ents
+
+    p = []
+    temps, hum = take(_pick(meta, "sensor", "temperature")), take(_pick(meta, "sensor", "humidity"))
+    press = take(_pick(meta, "sensor", {"pressure", "atmospheric_pressure"}))
+    now_t = _pick(meta, "climate", field="current_temperature")[:LONG]
+    target, active = _pick(meta, "climate", field="target_temperature")[:LONG], _pick(meta, "climate", field="active")[:LONG]
+    take(now_t + target + active)
+    if temps or hum or press or now_t or target or active:
+        p.append(row("Climate"))
+    p += _by_unit("Temperatures", temps, "celsius") + _by_unit("Humidity", hum, "percent")
+    if now_t or target:
+        p.append(ts("Thermostats", ([(hq(now_t, "current_temperature"), "{{name}} now")] if now_t else [])
+                    + ([(hq(target, "target_temperature"), "{{name}} target")] if target else []), "celsius"))
+    if active:
+        p += [timeline("Heating", [(hq(active, "active"), "{{name}}")], w=12, mappings=[{"type": "value", "options": {
+                  "0": {"text": "idle", "color": QUIET}, "1": {"text": "heating", "color": "orange"}}}]),
+              ts("Heating hours per day", [(hq(active, "active", "avg_over_time({sel}[1d]) * 24"), "{{name}}")], "h",
+                 w=12, minimum=0, desc="Hours the thermostat was actually heating (or cooling) in the 24 h before each point.")]
+    p += _by_unit("Pressure", press, "pressurehpa")
+
+    power, energy = take(_pick(meta, None, "power")[:LONG]), take(_pick(meta, None, "energy")[:LONG])
+    if power or energy:
+        p.append(row("Energy"))
+    p += _by_unit("Power", power, "watt", minimum=0)
+    p += _by_unit("Energy per day", energy, "kwatth", inner="increase({sel}[1d])", suffix=" > 0", minimum=0,
+                  desc="Counters that restart (some plugs do at midnight or at a restart) are handled by increase().")
+
+    doors = take(_pick(meta, "binary_sensor", DOORS)[:LONG])
+    bats = take(_pick(meta, "sensor", "battery")[:LONG])
+    alarm, safety = take(_pick(meta, "alarm_control_panel")[:LONG]), take(_pick(meta, "binary_sensor", SAFETY_DC)[:LONG])
+    if doors or bats or alarm or safety:
+        p.append(row("Security"))
+    if doors:
+        p.append(stat("Doors open now", f"sum({hq(doors)}) or vector(0)", w=12, h=4, steps=[(None, "green"), (1, "orange")]))
+    if bats:
+        p.append(stat("Batteries below 20 %", f"({hq(bats)} >= 0) < 20", "percent", legend="{{name}}", w=12 if doors else 24,
+                      h=4, steps=[(None, "green"), (0, "orange")], text_mode="value_and_name", none="none",
+                      desc="Each battery under 20 %. Readings below 0 (a device that doesn't report its battery) are left out."))
+    if alarm:
+        p.append(timeline("Alarm panels", [(hq(alarm), "{{name}}")], h=5, mappings=[
+            {"type": "value", "options": {"0": {"text": "disarmed", "color": "green"}, "1": {"text": "armed", "color": "blue"}}}]))
+    if doors:
+        p.append(timeline("Doors and contacts", [(hq(doors), "{{name}}")], h=max(5, 2 + len(doors)), mappings=[
+            {"type": "value", "options": {"0": {"text": "closed", "color": QUIET}, "1": {"text": "open", "color": "orange"}}}]))
+    if safety:
+        p.append(timeline("Safety sensors", [(hq(safety), "{{name}}")], h=max(5, 2 + len(safety)), mappings=[
+            {"type": "value", "options": {"0": {"text": "clear", "color": "green"}, "1": {"text": "ALARM", "color": "red"}}}]))
+    if bats:
+        p.append(ts("Batteries", [(f"{hq(bats)} >= 0", "{{name}}")], "percent", w=24, minimum=0, maximum=100))
+
+    lights = take(_pick(meta, "light"))
+    if lights:
+        p.append(row("Lights"))
+        parts = _chunks(lights, LONG)
+        for i, part in enumerate(parts):
+            p.append(ts(_title("Lights: hours on per day", i, len(parts)),
+                        [(hq(part, inner="avg_over_time({sel}[1d]) * 24") + " > 0", "{{name}}")],
+                        "h", w=24, h=7, minimum=0, desc="Hours each light was on in the 24 h before each point."))
+        for i, part in enumerate(parts):
+            p.append(timeline(_title("Lights on", i, len(parts)), [(hq(part), "{{name}}")], h=max(5, 2 + len(part)),
+                              mappings=[{"type": "value", "options": {"0": {"text": "off", "color": QUIET},
+                                                                      "1": {"text": "on", "color": "yellow"}}}]))
+
+    auto = _auto(meta, used)
+    if auto:
+        p += [row("Other recorded entities")] + auto
+    p += [row("Home Assistant host"),
+          ts("Host CPU, memory and disk", [(f'hw_check_value_value{{{S},check="homeassistant.cpu"}}', "CPU"),
+                                           (f'hw_check_value_value{{{S},check="homeassistant.memory"}}', "memory"),
+                                           (f'hw_check_value_value{{{S},check="homeassistant.disk"}}', "disk")], "percent",
+             w=24, h=7, minimum=0, maximum=100, desc="From the host sensors in the module settings.")]
+    if meta:
+        # every entity in one query: names as value mappings, not in the query (VictoriaMetrics caps a query at 16 KB)
+        # watched-only entities are stored too: list the dashboard's ones, 150 ids per query (16 KB)
+        ids = ["|".join(e["id"].replace(".", "\\\\.") for e in meta[i:i + 150]) for i in range(0, len(meta), 150)]
+        latest = table("Latest values", [f'label_copy(max by (entity_id) (hw_ha_entity_value{{{S},entity_id=~"{x}"}}), '
+                                         f'"entity_id", "name")' for x in ids],
+                       {"name": "Name", "entity_id": "Entity", "Value": "Now"}, h=12, hide=("domain",),
+                       desc="Every recorded entity's latest number (on/off as 1/0). "
+                            "The Entity explorer dashboard graphs any of them.")
+        latest["fieldConfig"]["overrides"].append({"matcher": {"id": "byName", "options": "Name"}, "properties": [
+            {"id": "mappings", "value": [{"type": "value", "options": {
+                e["id"]: {"text": e.get("name") or e["id"], "index": i} for i, e in enumerate(meta)}}]}]})
+        p += [row("Everything recorded"), latest]
+    else:
+        p.insert(0, {"type": "text", "title": "", "_w": 24, "_h": 3, "options": {"mode": "markdown", "content": (
+            "No entities shown yet. In homewatch, open **Modules › Home Assistant**, and under **Entities** tick "
+            "**Show in Grafana** for the ones you want here.")}})
+    return dashboard("hw-homeassistant", "Home Assistant", p,
+                     "Built from the entities ticked Show in Grafana (Home Assistant module → Entities). Rebuilt when that list, "
+                     "an entity's name or its unit changes.")
+
+
+def _opt(text: str) -> str:
+    return re.sub(r"[,:\\$]", " ", text).strip()  # the custom variable's syntax uses , and :
+
+
+def ha_explorer(meta: list[dict] | None = None) -> dict:
+    """Pick any recorded entities and see each on its own graph."""
+    meta = sorted([e for e in unique_names(meta or []) if "value" in e.get("fields", ("value",))],
+                  key=lambda e: (e.get("name") or e["id"]).lower())
+    opts = [(f"{_opt(e.get('name') or e['id'])}{' (' + _opt(e['unit']) + ')' if e.get('unit') else ''} · {e['id']}", e["id"])
+            for e in meta]
+    first = next((o for o in opts if o[1].startswith("sensor.") and "temperature" in o[1]), opts[0] if opts else None)
+    panel = ts("${entity:text}", [(f'max by (entity_id) (hw_ha_entity_value{{{S},entity_id=~"$entity"}})', "value")],
+               w=12, h=8, fill=20)
+    panel |= {"repeat": "entity", "repeatDirection": "h", "maxPerRow": 2}
+    panel["options"]["legend"]["showLegend"] = False  # one line, named in the title
+    board = dashboard("hw-ha-explorer", "Home Assistant · Entity explorer", [panel],
+                      "Choose entities (the ones shown in Grafana) at the top; each gets its own graph.", tags=("homeassistant",))
+    board["templating"]["list"].append({
+        "name": "entity", "label": "Entities", "type": "custom", "multi": True, "includeAll": False,
+        "query": ", ".join(f"{t} : {v}" for t, v in opts),
+        "options": [{"text": t, "value": v, "selected": first is not None and v == first[1]} for t, v in opts],
+        "current": {"text": [first[0]], "value": [first[1]]} if first else {}})
+    return board
 
 
 BUILDERS = {"internet": internet, "speedport": speedport, "opnsense": opnsense, "proxmox": proxmox,
@@ -532,7 +725,7 @@ WELCOME = dashboard("hw-my-welcome", "About My dashboards", [{
 
 # ---- provisioning files ---------------------------------------------------------------------------
 
-def files(enabled: set[str]) -> dict[str, str]:
+def files(enabled: set[str], ha: list[dict] | None = None) -> dict[str, str]:
     """Relative path -> content of every provisioning file for this set of enabled modules."""
     ds = {"apiVersion": 1, "datasources": [{
         "name": "homewatch", "uid": DS["uid"], "type": "prometheus", "access": "proxy",
@@ -549,18 +742,21 @@ def files(enabled: set[str]) -> dict[str, str]:
     out = {"datasources/homewatch.yaml": json.dumps(ds, indent=1),  # JSON is valid YAML
            "dashboards/homewatch.yaml": json.dumps(providers, indent=1),
            "dashboards/my/welcome.json": json.dumps(WELCOME, indent=1),
-           "dashboards/homewatch/overview.json": json.dumps(overview(enabled), indent=1)}
+           "dashboards/homewatch/overview.json": json.dumps(overview(enabled, ha), indent=1)}
     for mid in sorted(enabled):
-        if mid in BUILDERS:
+        if mid == "homeassistant":
+            out["dashboards/homewatch/homeassistant.json"] = json.dumps(homeassistant(ha), indent=1)
+            out["dashboards/homewatch/ha-explorer.json"] = json.dumps(ha_explorer(ha), indent=1)
+        elif mid in BUILDERS:
             out[f"dashboards/homewatch/{mid}.json"] = json.dumps(BUILDERS[mid](), indent=1)
     return out
 
 
-def write(directory: str, enabled: set[str]) -> bool:
+def write(directory: str, enabled: set[str], ha: list[dict] | None = None) -> bool:
     """Bring the provisioning directory in line with the enabled modules; True when anything changed."""
     if not directory or not os.path.isdir(directory):
         return False
-    want = files(enabled)
+    want = files(enabled, ha)
     changed = False
     for rel, text in want.items():
         path = os.path.join(directory, rel)
