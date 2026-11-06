@@ -1,9 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 330 80" width="660" height="160" role="img" aria-label="homeWatch">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 342 80" width="684" height="160" role="img" aria-label="homeWatch">
   <g transform="translate(8 8)">
     <rect width="64" height="64" rx="14" fill="#0F172A"/>
     <path d="M32 12 L52 29 V48 a4 4 0 0 1 -4 4 H16 a4 4 0 0 1 -4 -4 V29 Z" fill="none" stroke="#E2E8F0" stroke-width="3.5" stroke-linejoin="round"/>
     <path d="M17 38 H24 L27.5 31 L31.5 45 L35.5 24 L39 38 H44" fill="none" stroke="#EF4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
     <circle cx="47.5" cy="38" r="2.5" fill="#EF4444"/>
   </g>
-  <text x="88" y="53" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="38" letter-spacing="-0.5"><tspan font-weight="700" fill="#0F172A">home</tspan><tspan font-weight="500" fill="#DC2626">watch</tspan></text>
+  <text x="188" y="53" text-anchor="end" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="38" letter-spacing="-0.5" font-weight="700" fill="#0F172A">home</text>
+  <g transform="translate(191 20.6) scale(1.25)" fill="#DC2626"><path d="M2 3.5Q2 1.5 4 1.5L8 1.5Q9.6 1.5 10.4 3L16.5 14L8 16Z"/><path d="M46 3.5Q46 1.5 44 1.5L40 1.5Q38.4 1.5 37.6 3L31.5 14L40 16Z"/><path d="M18 15.5L24 7.5L30 15.5" fill="none" stroke="#DC2626" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="13" cy="21.5" r="8.6"/><circle cx="35" cy="21.5" r="8.6"/><rect x="20" y="19" width="8" height="5" rx="2.5"/><circle cx="13" cy="21.5" r="5.4" fill="#38BDF8"/><circle cx="35" cy="21.5" r="5.4" fill="#38BDF8"/><circle cx="11.2" cy="19.6" r="1.7" fill="#fff" opacity=".9"/><circle cx="33.2" cy="19.6" r="1.7" fill="#fff" opacity=".9"/></g>
+  <text x="254" y="53" font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="38" letter-spacing="-0.5" font-weight="500" fill="#DC2626">atch</text>
 </svg>
