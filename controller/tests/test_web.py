@@ -140,7 +140,6 @@ def test_speedport_module_settings(client):
     assert client.rt.secrets.get("module.speedport.password") == "s3cret"
     assert "s3cret" not in client.get("/modules/speedport").text
     assert "speedport.snr.warn" in client.get("/modules/speedport").text
-    assert "DSL sync" in client.get("/").text
 
 
 def test_pages_render(client):
@@ -1418,3 +1417,12 @@ def test_status_page_hero_and_module_tiles(client, monkeypatch):
     assert "Less than 24 hours so far: UPS." in client.get("/").text
     assert web.spark([1]) is None and web.spark([2, 2])["y"] == 17.0
     assert web._release_notes("## A\n- b\n  more\ntext") == [("h", "A"), ("li", "b more"), ("p", "text")]
+
+
+def test_status_has_no_charts_box_and_modules_show_icons(client):
+    setup_admin(client)
+    page = client.get("/").text
+    assert 'class="card charts"' not in page and "uPlot" not in page
+    assert client.get("/api/series").status_code == 404
+    mods = client.get("/modules").text
+    assert mods.count('<span class="mt-ico">') == 11 and '<b class="mt-name name" title="UPS (NUT)">' in mods

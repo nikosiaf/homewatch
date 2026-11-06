@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Modules{% endblock %}
+{% from "_icons.html" import icon %}
 {% block content %}
 <h1>Modules</h1>
 <p class="quiet">Each module watches one kind of system. Open one to connect it; modules you do not use stay off.</p>
@@ -7,7 +8,7 @@
 {% for id, name, ready in CATALOG %}
   {% set st = mod_state.get(id) %}
   {% if ready and st %}<a class="tile {{ ('s' ~ st.worst) if st.on else 'off' }}" href="/modules/{{ id }}" style="text-decoration:none;color:inherit">
-    <div class="name">{{ name }}</div>
+    <div class="mt-top"><span class="mt-ico">{{ icon(icons.get(id, 'server')) }}</span><b class="mt-name name" title="{{ name }}">{{ name }}</b></div>
     <div class="detail">{% if not st.on %}Off · configure
       {% elif not st.checks %}On · waiting for the first checks
       {% elif st.problems %}On · {{ LEVEL_WORD[st.worst] }} · {{ st.problems }} of {{ st.checks }} checks

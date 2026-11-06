@@ -62,6 +62,10 @@ h2 { font-size: 17px; margin: 24px 0 10px; }
 .tile.sup { border-left-color: var(--line); opacity: .75; }
 .tile.off { border-left-color: var(--line); }
 .tile .name { font-weight: 600; } .tile .detail { color: var(--quiet); font-size: 13px; margin-top: 4px; }
+/* Modules page: the module's icon in its state colour, as on the Status tiles (grey when off) */
+a.tile { --state: var(--ok); } a.tile.s1 { --state: var(--warn); } a.tile.s2 { --state: var(--err); }
+a.tile.off { --state: var(--quiet); }
+a.tile .mt-top + .detail { margin-top: 8px; }
 .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; color: #fff; }
 .badge.s0 { background: var(--ok); } .badge.s1 { background: var(--warn); } .badge.s2 { background: var(--err); }
 .badge.mute { background: var(--quiet); }
@@ -92,8 +96,6 @@ fieldset.off { opacity: .55; }
 .steps { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
 .steps span { padding: 3px 10px; border-radius: 999px; background: var(--muted-bg); color: var(--quiet); font-size: 13px; }
 .steps span.on { background: var(--accent); color: #fff; }
-.chart { min-height: 220px; }
-.charttabs button { padding: 4px 10px; font-size: 13px; }
 code { background: var(--muted-bg); padding: 1px 5px; border-radius: 4px; }
 .narrow { max-width: 460px; margin: 40px auto; }
 @media (max-width: 600px) { .wrap { padding: 12px; } h1 { font-size: 19px; } }

@@ -80,7 +80,7 @@
   <form method="post" action="/system/retention" class="card col" data-ask-password="Change how long history is kept? Data older than that is deleted and can't be brought back." data-ask-action="Change" data-ask-danger>
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="grafana"><input type="hidden" name="current">
     <b>History</b>
-    <p class="quiet small">How long measurements are kept for the charts and Grafana. Issues, speed tests and settings
+    <p class="quiet small">How long measurements are kept for the Status page lines and Grafana. Issues, speed tests and settings
       are not affected. When the disk gets full, keep less: data older than the new length is deleted
       (VictoriaMetrics drops whole months, so it can take up to a month to free the space).</p>
     <table>

@@ -37,18 +37,6 @@ COOKIE = "hw_session"
 PRE = "hw_pre"
 SETUP_STEPS = ["account", "home", "internet", "equipment", "notify", "healthchecks"]
 SNOOZE_CHOICES = {"1h": 3600, "4h": 4 * 3600, "24h": 24 * 3600}
-RANGES = {"24h": (24 * 3600, 300), "7d": (7 * 86400, 1800), "30d": (30 * 86400, 7200)}
-CHARTS = {
-    "latency": ('min by (url) (avg_over_time(ping_average_response_ms{{site="{s}",role="public"}}[{w}]))', "ms"),
-    "loss": ('avg_over_time(ping_percent_packet_loss{{site="{s}",role="public"}}[{w}])', "%"),
-    "jitter": ('avg_over_time(ping_standard_deviation_ms{{site="{s}",role="public"}}[{w}])', "ms"),
-    "speed": ('last_over_time(hw_speedtest_download_mbps{{site="{s}"}}[{w}]) or '
-              'label_set(last_over_time(hw_speedtest_upload_mbps{{site="{s}"}}[{w}]), "url", "upload")', "Mbit/s"),
-    "sync": ('label_set(last_over_time(hw_dsl_sync_down_kbps{{site="{s}"}}[{w}]) / 1000, "url", "download") or '
-             'label_set(last_over_time(hw_dsl_sync_up_kbps{{site="{s}"}}[{w}]) / 1000, "url", "upload")', "Mbit/s"),
-    "snr": ('label_set(last_over_time(hw_dsl_snr_down_db{{site="{s}"}}[{w}]), "url", "down") or '
-            'label_set(last_over_time(hw_dsl_snr_up_db{{site="{s}"}}[{w}]), "url", "up")', "dB"),
-}
 
 templates = Jinja2Templates(directory=os.path.join(HERE, "templates"))
 
@@ -323,7 +311,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if user is None:
             return RedirectResponse("/login", status_code=303)
         request.state.user = user
-        viewer_ok = path in ("/", "/history", "/help", "/partials/status", "/api/series", "/logout", "/password")
+        viewer_ok = path in ("/", "/history", "/help", "/partials/status", "/logout", "/password")
         if not user.is_admin and not viewer_ok:
             return HTMLResponse("Admins only", status_code=403)
         resp = await call_next(request)
@@ -459,30 +447,6 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt.db.set(f"status.filling_seen.{user.id}", sorted(n for n in (await _status_full(request))["filling_names"]))
         return RedirectResponse("/", status_code=303)
 
-    @app.get("/api/series")
-    async def series(request: Request, chart: str = "latency", range: str = "24h"):  # noqa: A002
-        rt = rt_of(request)
-        if chart not in CHARTS or range not in RANGES:
-            return JSONResponse({"error": "unknown chart"}, status_code=400)
-        span, step = RANGES[range]
-        q, unit = CHARTS[chart]
-        expr = q.format(s=rt.cfg.site, w=f"{step}s")
-        now = time.time()
-        try:
-            data = await rt.metrics.query_range(expr, now - span, now, step)
-        except Exception as e:  # noqa: BLE001
-            return JSONResponse({"error": str(e)[:200]}, status_code=502)
-        stamps = sorted({t for _, vals in data for t, _ in vals})
-        idx = {t: i for i, t in enumerate(stamps)}
-        series_out = []
-        for labels, vals in data:
-            col = [None] * len(stamps)
-            for t, v in vals:
-                col[idx[t]] = round(v, 2)
-            name = labels.get("url") or ("download" if chart == "speed" else "value")
-            series_out.append({"name": name, "data": col})
-        return JSONResponse({"unit": unit, "x": stamps, "series": series_out})
-
     @app.get("/history")
     async def history(request: Request, module: str = "", level: str = "", days: int = 30):
         rt = rt_of(request)
@@ -538,7 +502,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
 
     @app.get("/modules")
     async def modules_page(request: Request):
-        return page(request, "modules.html", request.state.user, mod_state=_module_states(rt_of(request)))
+        return page(request, "modules.html", request.state.user, mod_state=_module_states(rt_of(request)),
+                    icons={m.id: m.icon for m in MODULES.values()})
 
     @app.get("/modules/{mid}")
     async def module_page(request: Request, mid: str):

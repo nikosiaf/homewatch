@@ -1,18 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Status{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/uPlot.min.css?v={{ version }}"><script src="/static/uPlot.iife.min.js?v={{ version }}"></script><script src="/static/charts.js?v={{ version }}" defer></script>{% endblock %}
 {% block content %}
 <div id="status-body" hx-get="/partials/status" hx-trigger="every 30s" hx-swap="innerHTML">
 {% include "_status_body.html" %}
-</div>
-<div class="card charts">
-  <h2 class="card-title">Charts</h2>
-  <div class="row charttabs" style="justify-content:space-between">
-    <div>{% for c, label in [('latency','Latency'),('loss','Packet loss'),('jitter','Jitter'),('speed','Speed')] + ([('sync','DSL sync'),('snr','SNR margin')] if dsl else []) %}
-      <button class="secondary" data-chart="{{ c }}">{{ label }}</button>{% endfor %}</div>
-    <div>{% for r in ['24h','7d','30d'] %}<button class="secondary" data-range="{{ r }}">{{ r }}</button>{% endfor %}</div>
-  </div>
-  <div id="chart" class="chart"></div>
-  <p id="chart-note" class="quiet small"></p>
 </div>
 {% endblock %}
