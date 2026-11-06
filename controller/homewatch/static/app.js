@@ -378,7 +378,7 @@ document.querySelectorAll("table[data-page]").forEach(function (table) {
       setStep(4); setPct(100);
       title.textContent = "Update OK";
       result.innerHTML = '<div class="result ok" role="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M7.5 12.5l3 3 6-6.5"/></svg><div><b></b><p>Taking you to the Status page in <span class="num">3</span> s…</p></div></div>';
-      result.querySelector("b").textContent = "homewatch " + to + " is running.";
+      result.querySelector("b").textContent = "homeWatch " + to + " is running.";
       let n = 3;
       const t = setInterval(function () {
         n--; result.querySelector(".num").textContent = n;
@@ -409,7 +409,7 @@ document.querySelectorAll("table[data-page]").forEach(function (table) {
       else if (st && !st.asked && st.state === "running") { setStep(1); setPct(Math.min(58, 18 + elapsed / 2500)); }
       else { setPct(Math.min(16, 5 + elapsed / 1000)); }
       if (elapsed > LIMIT) {
-        finish(false, to + " didn't answer within 5 minutes. homewatch " + (health ? "is still on " + health.version : "isn't answering") + ".");
+        finish(false, to + " didn't answer within 5 minutes. homeWatch " + (health ? "is still on " + health.version : "isn't answering") + ".");
         return;
       }
       setTimeout(tick, 2500);
@@ -460,8 +460,13 @@ document.querySelectorAll("[data-entity-table]").forEach(function (box) {
     b.setAttribute("aria-label", label + " " + scope);
     l.append(b, document.createTextNode(" " + label));
     l.addEventListener("click", function (e) { e.stopPropagation(); });
+    let wasPartial = false;
+    b.addEventListener("pointerdown", function () { wasPartial = b.indeterminate; });
+    b.addEventListener("keydown", function () { wasPartial = b.indeterminate; });
     b.addEventListener("click", function (e) {
       e.stopPropagation();
+      if (wasPartial || b.indeterminate) b.checked = false;  // a partly ticked group: the click clears it
+      wasPartial = false;
       const target = rs.filter(function (r) { return !r.hidden; });
       if (b.checked && target.length > BIG && !confirm(label + ": all " + target.length + " entities of " + scope + "?")) {
         e.preventDefault();

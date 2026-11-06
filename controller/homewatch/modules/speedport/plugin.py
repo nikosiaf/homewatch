@@ -41,14 +41,14 @@ class SpeedportModule(Module):
     description = ("Reads the DSL line from your provider's modem: sync rate, attainable rate, SNR margin, attenuation, "
                    "line uptime and resyncs. Values are only read, never changed.")
     setup = [
-        ("text", "The modem has only its admin login, so homewatch needs that password. It is stored encrypted and never "
+        ("text", "The modem has only its admin login, so homeWatch needs that password. It is stored encrypted and never "
                  "shown again."),
         ("text", "Each reading logs in, which ends any open browser session on the modem's web page. Keep the interval at "
                  "15 minutes or more."),
-        ("text", "After a rejected login the modem slows down further attempts, so homewatch waits 6 hours (or until you "
+        ("text", "After a rejected login the modem slows down further attempts, so homeWatch waits 6 hours (or until you "
                  "save new credentials)."),
-        ("text", "The modem's certificate is self-signed, so homewatch trusts the one it sees at the first reading and "
-                 "logs in only to that one. If it changes, homewatch stops logging in until you accept the new one."),
+        ("text", "The modem's certificate is self-signed, so homeWatch trusts the one it sees at the first reading and "
+                 "logs in only to that one. If it changes, homeWatch stops logging in until you accept the new one."),
         ("text", "This host must be able to reach the modem's address. Behind a separate router or firewall that may need "
                  "a rule there."),
     ]
@@ -150,12 +150,12 @@ class SpeedportModule(Module):
             st.update(last_error=f"{e}", rejected=False, cert_changed=True)
             rt.db.set(STATE, st)
             log.warning("speedport: the modem's certificate changed, not logging in")
-            return f"{e}. homewatch did not log in."
+            return f"{e}. homeWatch did not log in."
         except client.LoginRejected as e:
             st.update(last_error=str(e), rejected=True, backoff_until=now + BACKOFF)
             rt.db.set(STATE, st)
             log.warning("speedport: login rejected, next try in 6 h")
-            return f"{e}. homewatch waits 6 hours before trying again (or until you save new credentials)."
+            return f"{e}. homeWatch waits 6 hours before trying again (or until you save new credentials)."
         except (httpx.HTTPError, OSError, ValueError) as e:
             msg = f"{type(e).__name__}: {e}"[:200] if str(e) else type(e).__name__
             st.update(last_error=msg, rejected=False)

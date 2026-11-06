@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# homewatch updater. install.sh sets it up as a systemd unit (homewatch-update.path / .service) that runs this
+# homeWatch updater. install.sh sets it up as a systemd unit (homewatch-update.path / .service) that runs this
 # script when the System page leaves a request in update/ask/. The request is one of a few fixed words; anything
 # else, or an unreadable request, means "update". The page can't choose a version, a file or a command:
 #   update           read the latest release from GitHub, set HW_VERSION in .env to it, pull and restart the stack.
@@ -107,6 +107,6 @@ back() {  # put the previous release back
 docker compose -f docker-compose.yml pull || back "the download failed"
 docker compose -f docker-compose.yml up -d || back "it didn't start"
 healthy || back "it didn't become healthy within 3 minutes, so the previous release is back"
-# Grafana reads its data source only when it starts; the new homewatch may have changed it
+# Grafana reads its data source only when it starts; the new homeWatch may have changed it
 docker compose -f docker-compose.yml restart grafana >/dev/null 2>&1 || true
 status ok "$latest installed (was ${current:-?})"

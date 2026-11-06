@@ -12,7 +12,7 @@ from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
 CHECKS = [
-    CheckDef("api", "PBS reachable", "api", help="ERROR when homewatch can't read the PBS API."),
+    CheckDef("api", "PBS reachable", "api", help="ERROR when homeWatch can't read the PBS API."),
     CheckDef("datastores", "Datastores", "api", unit="%", warn=85, error=95, editable=("warn", "error"),
              help="Fullest datastore; ERROR when a datastore reports an error (e.g. not mounted)."),
     CheckDef("backups", "Backups", "api", unit="h", warn=26, error=50, editable=("warn", "error"),
@@ -52,9 +52,9 @@ class PBSModule(ApiModule):
     secret_label = "Token secret"
     secret_placeholder = "xxxxxxxx-xxxx-…"
     more_title = "Additional configuration"
-    more_help = "After connecting: the backups homewatch checks."
+    more_help = "After connecting: the backups homeWatch checks."
     choices_title = "VMs, containers and hosts to watch"
-    choices_help = ("homewatch checks that each of these gets a fresh backup. When you connect, the ones backed up in "
+    choices_help = ("homeWatch checks that each of these gets a fresh backup. When you connect, the ones backed up in "
                     "the last 26 hours are ticked; old backups of guests you no longer back up are left unticked.")
 
     def validate(self, form, old):

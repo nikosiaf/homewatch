@@ -23,7 +23,7 @@ CHECKS = [
     CheckDef("unhealthy", "Health checks", "api",
              help="WARNING when a watched container's own health check reports unhealthy."),
     CheckDef("removed", "Containers removed", "api",
-             help="WARNING when a watched container disappears from its host (seen since homewatch started). "
+             help="WARNING when a watched container disappears from its host (seen since homeWatch started). "
                   "Save the module's page to accept a removal."),
 ]
 PORT = 2375
@@ -45,10 +45,10 @@ class DockerModule(ApiModule):
                    "socket: containers that stop, crash loops, failing health checks and removed containers. "
                    "Containers with a restart policy are watched; nothing on the hosts is changed.")
     setup = [
-        ("text", "homewatch never gets the Docker socket itself (that would be root on the host). On every host, run "
+        ("text", "homeWatch never gets the Docker socket itself (that would be root on the host). On every host, run "
                  "a small proxy that only allows reading containers. Reading includes each container's settings and "
-                 "environment variables (often passwords), so only homewatch may reach it."),
-        ("text", "On the host where homewatch runs: no open port, the proxy joins homewatch's own network. "
+                 "environment variables (often passwords), so only homeWatch may reach it."),
+        ("text", "On the host where homeWatch runs: no open port, the proxy joins homewatch's own network. "
                  "Enter socket-proxy as its address below."),
         ("code", "services:\n"
                  "  socket-proxy:\n"
@@ -77,7 +77,7 @@ class DockerModule(ApiModule):
               help=f"Addresses of the proxies, separated by commas; port {PORT} when none is given."),
     ]
     more_title = "Additional configuration"
-    more_help = "After connecting: the containers homewatch watches."
+    more_help = "After connecting: the containers homeWatch watches."
     filter_title = "Containers to watch"
     filter_help = ("Containers with a restart policy, per host, with their compose project. Unticked ones are not checked. "
                    "New containers with a restart policy are watched.")
@@ -115,7 +115,7 @@ class DockerModule(ApiModule):
             try:
                 r = await http.get(f"{base}/{path}")
             except httpx.HTTPError as e:
-                raise ApiError(f"can't reach the Docker proxy ({why(e)}); is it running and port open to homewatch?") \
+                raise ApiError(f"can't reach the Docker proxy ({why(e)}); is it running and port open to homeWatch?") \
                     from None
             if r.status_code == 403:
                 raise ApiError(f"the proxy refuses {path.split('?')[0]}: set CONTAINERS=1 and INFO=1")

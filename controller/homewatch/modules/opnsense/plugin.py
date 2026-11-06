@@ -12,7 +12,7 @@ from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
 CHECKS = [
-    CheckDef("api", "API reachable", "api", help="ERROR when homewatch can't read the OPNsense API."),
+    CheckDef("api", "API reachable", "api", help="ERROR when homeWatch can't read the OPNsense API."),
     CheckDef("gateways", "Gateways", "api", help="ERROR when a gateway is down; WARNING on packet loss or delay."),
     CheckDef("cpu", "CPU", "api", unit="%", warn=85, error=95, editable=("warn", "error"),
              help="Average of the readings in the last 10 minutes, so short bursts stay quiet."),
@@ -54,7 +54,7 @@ class OPNsenseModule(ApiModule):
         ("code", "Lobby: Dashboard\nSystem: Gateways\nDiagnostics: System Activity\nStatus: Services\n"
                  "System: Firmware\nSystem: Trust: Certificates\nServices: HAProxy (only if you use it)\n"
                  "Reporting: Traffic (only for the Grafana traffic graphs)"),
-        ("text", "Lobby: Dashboard is what lets homewatch read CPU, memory, disk, uptime and the version."),
+        ("text", "Lobby: Dashboard is what lets homeWatch read CPU, memory, disk, uptime and the version."),
         ("text", "Save, then press \"+\" under API keys to create a key. OPNsense downloads a file with the key "
                  "and secret: paste them below."),
     ]
@@ -70,7 +70,7 @@ class OPNsenseModule(ApiModule):
     more_help = "After connecting: the services that must run and the HAProxy servers to watch."
     filters_first = False
     choices_title = "Services that must run"
-    choices_help = "homewatch alerts when one of these stops. The ones running when you connected are ticked."
+    choices_help = "homeWatch alerts when one of these stops. The ones running when you connected are ticked."
     filter_title = "HAProxy servers to watch"
     filter_help = ("Untick a server that is down on purpose (e.g. a device that is often off); it stays in the "
                    "table below but no longer raises the HAProxy check.")

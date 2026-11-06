@@ -26,7 +26,7 @@
   {% else %}<p class="quiet">No reading yet.</p>{% endif %}
   {% if st.last_error %}<p style="color:var(--err)">Last attempt {{ st.last_try | ts('%d %b %H:%M') }}: {{ st.last_error }}</p>{% endif %}
   {% if st.cert_changed %}
-  <p>homewatch is not logging in, because this could be another device posing as the modem. Trust the new certificate only if you
+  <p>homeWatch is not logging in, because this could be another device posing as the modem. Trust the new certificate only if you
     replaced the modem or updated its firmware.</p>
   <p class="small">Trusted: <code>{{ cert_fp }}</code>{% if cert_new_fp %}<br>Now: <code>{{ cert_new_fp }}</code>{% endif %}</p>
   {% if cert_new_fp %}<form method="post" action="/modules/speedport/trust-certificate">

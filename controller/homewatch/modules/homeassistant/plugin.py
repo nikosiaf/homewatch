@@ -24,7 +24,7 @@ from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Field, https_url
 from . import rules as entity_rules
 
 CHECKS = [
-    CheckDef("api", "HA reachable", "api", help="ERROR when homewatch can't read Home Assistant's API."),
+    CheckDef("api", "HA reachable", "api", help="ERROR when homeWatch can't read Home Assistant's API."),
     CheckDef("core", "Core", "api", help="WARNING when Home Assistant is starting, stopping or in safe / recovery mode."),
     CheckDef("unavailable", "Unavailable entities", "api", warn=1, error=10, editable=("warn", "error"),
              help="Watched entities unavailable for 30 minutes or more."),
@@ -81,7 +81,7 @@ CLIMATE_ATTRS = {"current_temperature": "current_temperature", "temperature": "t
                  "current_humidity": "current_humidity"}
 
 RULE_HELP = (
-    "A rule makes homewatch warn about a watched entity's state. Write: is | is not | below | above, a value, "
+    "A rule makes homeWatch warn about a watched entity's state. Write: is | is not | below | above, a value, "
     "then warning or error. Several rules for one entity: put ; between them; the worst one that fires counts. "
     "Examples: below 200 warning (an oil tank's litres) · below 200 warning; below 100 error (two levels) · "
     "above 65 warning (a disk's temperature) · is on error (a trouble or problem sensor) · "
@@ -288,9 +288,9 @@ class HomeAssistantModule(ApiModule):
         ("text", "Optional, add-ons: Settings → Devices & services → Home Assistant Supervisor → open an add-on's "
                  "device and enable its \"Running\" sensor (disabled by default), then tick Watch for it here."),
         ("text", "Optional, disk, memory and CPU: Home Assistant doesn't tell a non-admin user how its host is doing, "
-                 "so homewatch reads sensors for it. Add the System Monitor integration (Settings → Devices & "
+                 "so homeWatch reads sensors for it. Add the System Monitor integration (Settings → Devices & "
                  "services → Add integration → System Monitor) and enable its disk use, memory use and processor use "
-                 "sensors. homewatch uses those by itself; under Checks and limits you can pick other sensors in %."),
+                 "sensors. homeWatch uses those by itself; under Checks and limits you can pick other sensors in %."),
     ]
     fields = [
         Field("url", "Home Assistant address", "http://homeassistant.local:8123", width="wide"),

@@ -53,14 +53,14 @@ class MikroTikModule(ApiModule):
     description = ("Watches MikroTik switches and routers (RouterOS 7) through the REST API with a read-only user: "
                    "CPU, memory, temperature, ports, port errors, reboots and RouterBOOT firmware.")
     setup = [
-        ("text", "On every device (WinBox → New Terminal), create a read-only user and allow this homewatch host "
+        ("text", "On every device (WinBox → New Terminal), create a read-only user and allow this homeWatch host "
                  "to reach the web service the REST API runs on:"),
         ("code", "/user add name=homewatch group=read password=\"a-long-password\"\n"
                  "# HTTPS for the REST API, with the device's own self-signed certificate:\n"
                  "/certificate add name=www common-name=<device address> key-usage=key-cert-sign,tls-server\n"
                  "/certificate sign www\n"
                  "/ip service set www-ssl certificate=www disabled=no\n"
-                 "# if www-ssl has an 'available-from' list, add this homewatch host's address to it:\n"
+                 "# if www-ssl has an 'available-from' list, add this homeWatch host's address to it:\n"
                  "/ip service set www-ssl available-from=<existing list>,<homewatch ip>/32"),
         ("text", "Use the same user and password on every device, then list their addresses below. That certificate is "
                  "self-signed, so untick \"Check the HTTPS certificate\" unless you installed a trusted one."),
@@ -75,9 +75,9 @@ class MikroTikModule(ApiModule):
     ]
     secret_label = "Password"
     choices_title = "Ports that should be up"
-    choices_help = "homewatch alerts when one of these goes down. The ports running when you connected are ticked."
+    choices_help = "homeWatch alerts when one of these goes down. The ports running when you connected are ticked."
     more_title = "Additional configuration"
-    more_help = "After connecting: the ports homewatch watches."
+    more_help = "After connecting: the ports homeWatch watches."
     list_search = False
 
     def __init__(self):

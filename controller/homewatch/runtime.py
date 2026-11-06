@@ -72,7 +72,7 @@ class Runtime:
                 db.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         versions.scrub_exports(os.path.join(cfg.data_dir, "exports"))
         db.run("DELETE FROM settings WHERE key='status.tiles' OR key LIKE 'status.open.%'")  # settings of 0.16.1 to 0.16.4
-        versions.record(db, "system", "startup")  # also catches changes made while homewatch was stopped
+        versions.record(db, "system", "startup")  # also catches changes made while homeWatch was stopped
         rt = cls(cfg, db, secrets, Metrics(cfg.vm_url), Notifier(db, secrets), Engine(db, cfg.site))
         rt.write_grafana()  # before Grafana starts (it waits for a healthy controller): it reads them once at start
         return rt
@@ -351,7 +351,7 @@ class Runtime:
         return self.preview(snap) if snap else None
 
     def restore_version(self, vid: int, username: str) -> bool:
-        """Put an earlier configuration back and make every part of homewatch use it."""
+        """Put an earlier configuration back and make every part of homeWatch use it."""
         if versions.restore(self.db, vid, before=self.guard_credentials) is None:
             return False
         self._config_replaced(username, "config.restore", f"version {vid}")

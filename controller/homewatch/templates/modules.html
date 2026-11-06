@@ -1,19 +1,29 @@
 {% extends "base.html" %}
 {% block title %}Modules{% endblock %}
-{% from "_icons.html" import icon %}
+{% from "_icons.html" import icon, sparkline %}
 {% block content %}
 <h1>Modules</h1>
 <p class="quiet">Each module watches one kind of system. Open one to connect it; modules you do not use stay off.</p>
-<div class="tiles">
+<div class="module-grid">
 {% for id, name, ready in CATALOG %}
-  {% set st = mod_state.get(id) %}
-  {% if ready and st %}<a class="tile {{ ('s' ~ st.worst) if st.on else 'off' }}" href="/modules/{{ id }}" style="text-decoration:none;color:inherit">
-    <div class="mt-top"><span class="mt-ico">{{ icon(icons.get(id, 'server')) }}</span><b class="mt-name name" title="{{ name }}">{{ name }}</b></div>
-    <div class="detail">{% if not st.on %}Off · configure
-      {% elif not st.checks %}On · waiting for the first checks
-      {% elif st.problems %}On · {{ LEVEL_WORD[st.worst] }} · {{ st.problems }} of {{ st.checks }} checks
-      {% else %}On · {{ st.checks }} checks OK{% endif %}</div></a>
-  {% else %}<div class="tile sup"><div class="name">{{ name }}</div><div class="detail">Coming soon</div></div>{% endif %}
+  {% set st = mod_state.get(id) %}{% set c = cards.get(id) %}
+  {% if ready and st and st.on and c %}
+  {% set unread = c.worst == 0 and not module_info.get(id, {}).get('observed') %}
+  <a class="module s{{ c.worst }} {{ 'unread' if unread }}" href="/modules/{{ id }}">
+    <div class="mt-top"><span class="mt-ico">{{ icon(c.icon) }}</span><b class="mt-name" title="{{ name }}">{{ name }}</b>
+      {% if unread %}<span class="badge mute">UNKNOWN</span>{% elif c.worst %}<span class="badge s{{ c.worst }}">{{ LEVEL_WORD[c.worst] }}</span>{% else %}<span class="mt-dot" title="OK"></span>{% endif %}</div>
+    {% if c.label %}<div class="mt-metric"><span class="mt-big num">{{ c.value }}<small>{{ ' ' ~ c.unit if c.unit }}</small></span><span class="mt-right">{{ sparkline(c.spark) }}</span></div>{% endif %}
+    <div class="mt-sub">{% if c.probs %}{{ c.probs[0].r.name }}: {{ c.probs[0].r.detail }}{% if c.probs | length > 1 %} (+{{ c.probs | length - 1 }} more){% endif %}
+      {% elif unread %}Not read yet{% elif c.label %}{{ c.label }} · {{ c.tiles | length }} checks OK{% else %}{{ c.tiles | length }} checks OK{% endif %}</div>
+  </a>
+  {% elif ready and st %}
+  <a class="module off" href="/modules/{{ id }}">
+    <div class="mt-top"><span class="mt-ico">{{ icon(icons.get(id, 'server')) }}</span><b class="mt-name" title="{{ name }}">{{ name }}</b>
+      <span class="badge mute">{{ 'OFF' if not st.on else 'STARTING' }}</span></div>
+    <div class="mt-sub">{{ 'Off · open to set it up' if not st.on else 'On · waiting for the first checks' }}</div>
+  </a>
+  {% else %}<div class="module off soon"><div class="mt-top"><span class="mt-ico">{{ icon('server') }}</span><b class="mt-name">{{ name }}</b></div>
+    <div class="mt-sub">Coming soon</div></div>{% endif %}
 {% endfor %}
 </div>
 {% endblock %}

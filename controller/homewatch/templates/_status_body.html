@@ -18,7 +18,7 @@
 {% if filling %}<div class="callout filling" role="note">
   <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
   <div><b>The 24-hour lines are still filling in.</b>
-    <p class="small" style="margin:4px 0 0">homewatch keeps a reading every 5 minutes for each tile's big number. A tile's line appears
+    <p class="small" style="margin:4px 0 0">homeWatch keeps a reading every 5 minutes for each tile's big number. A tile's line appears
       after two readings (about 10 minutes) and covers the full 24 hours after a day of readings.
       {% if filling.missing %}No line yet: {{ filling.missing | join(', ') }}.{% endif %}
       {% if filling.partial %}Less than 24 hours so far: {{ filling.partial | join(', ') }}.{% endif %}</p></div>

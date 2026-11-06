@@ -14,7 +14,7 @@ import re
 
 DS = {"type": "prometheus", "uid": "homewatch-vm"}
 S = 'site="$site"'  # every query is for the chosen site
-FOLDER = "homewatch"
+FOLDER = "homeWatch"  # the folder's title; its uid stays "homewatch"
 MY_FOLDER = "My dashboards"
 
 STATUS_MAP = [{"type": "value", "options": {
@@ -249,7 +249,7 @@ def overview(enabled: set[str], ha: list[dict] | None = None) -> dict:
                    steps=_pct_steps())]
         if temps:
             p.append(ts("Temperatures", [(hq(temps[:PER_PANEL]), "{{name}}")], "celsius", w=16, h=7))
-    return dashboard("hw-overview", "homewatch Overview", p, "Every module at a glance.", time="now-24h")
+    return dashboard("hw-overview", "homeWatch Overview", p, "Every module at a glance.", time="now-24h")
 
 
 def internet() -> dict:
@@ -677,7 +677,7 @@ def homeassistant(meta: list[dict] | None = None) -> dict:
         p += [row("Everything recorded"), latest]
     else:
         p.insert(0, {"type": "text", "title": "", "_w": 24, "_h": 3, "options": {"mode": "markdown", "content": (
-            "No entities shown yet. In homewatch, open **Modules › Home Assistant**, and under **Entities** tick "
+            "No entities shown yet. In homeWatch, open **Modules › Home Assistant**, and under **Entities** tick "
             "**Show in Grafana** for the ones you want here.")}})
     return dashboard("hw-homeassistant", "Home Assistant", p,
                      "Built from the entities ticked Show in Grafana (Home Assistant module → Entities). Rebuilt when that list, "
@@ -716,7 +716,7 @@ BUILDERS = {"internet": internet, "speedport": speedport, "opnsense": opnsense, 
 WELCOME = dashboard("hw-my-welcome", "About My dashboards", [{
     "type": "text", "title": "", "_w": 24, "_h": 7, "options": {"mode": "markdown", "content": (
         "### Your own dashboards\n"
-        "The dashboards in the **homewatch** folder are rebuilt with every update, so they can't be saved. "
+        "The dashboards in the **homeWatch** folder are rebuilt with every update, so they can't be saved. "
         "To change one, open it, choose **Save as** and save the copy here, in **My dashboards**. "
         "Copies here are yours: updates never touch them.\n\n"
         "Data source: **homewatch** (VictoriaMetrics, PromQL/MetricsQL). Metric names start with `hw_`; "

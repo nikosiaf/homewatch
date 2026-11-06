@@ -3,7 +3,7 @@
   <h2 style="margin-top:0">Trusted certificates</h2>
   <table><tr><th>Device</th><th>SHA-256 fingerprint</th></tr>
   {% for c in cert_rows %}<tr><td>{{ c.host }}</td><td class="small"><code>{{ c.fp }}</code>
-    {% if c.new_fp %}<p style="color:var(--err)">Changed. It now shows <code>{{ c.new_fp }}</code>. homewatch has stopped logging in, because this could be
+    {% if c.new_fp %}<p style="color:var(--err)">Changed. It now shows <code>{{ c.new_fp }}</code>. homeWatch has stopped logging in, because this could be
       another device posing as this one. Trust it only if you replaced the device or renewed its certificate.</p>
     <form method="post" action="/modules/{{ module.id }}/trust-certificate"><input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="hidden" name="host" value="{{ c.host }}"><input type="hidden" name="fingerprint" value="{{ c.new_fp }}">

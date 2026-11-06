@@ -75,11 +75,11 @@ class UPSModule(ApiModule):
                    "mains power, battery charge, runtime, load and battery health. Reading needs no login.")
     setup_title = "Before you connect"
     setup = [
-        ("text", "homewatch reads from an existing NUT server; no account is needed. The NUT server must listen on "
+        ("text", "homeWatch reads from an existing NUT server; no account is needed. The NUT server must listen on "
                  "the network, not only on 127.0.0.1. In /etc/nut/upsd.conf on the NUT host, for example:"),
         ("code", "LISTEN 0.0.0.0 3493   # or the host's LAN address\n# then: systemctl restart nut-server"),
         ("text", "Synology DSM's built-in network UPS server only allows the addresses you list under "
-                 "Control Panel → Hardware & Power → UPS → Permitted DiskStation Devices: add this homewatch host."),
+                 "Control Panel → Hardware & Power → UPS → Permitted DiskStation Devices: add this homeWatch host."),
     ]
     fields = [
         Field("host", "NUT server address", "192.168.1.10"),

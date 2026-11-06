@@ -66,7 +66,7 @@ def test_yaml_round_trip_and_bad_files(db):
     db.set("speedport.state", {"x": 1})  # runtime state: not exported
     db.run("INSERT INTO checks(site, check_key, enabled, warn, error) VALUES('home', 'ups.load', 1, 70, 90)")
     text = versions.to_yaml(db)
-    assert text.startswith("# homewatch configuration export") and "speedport.state" not in text
+    assert text.startswith("# homeWatch configuration export") and "speedport.state" not in text
     snap, err = versions.from_yaml(text)
     assert not err and snap == versions.snapshot(db)
     for bad, why in (("a: [", "not valid YAML"), ("format: 2", "format 1"),

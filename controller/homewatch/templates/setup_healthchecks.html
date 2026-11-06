@@ -4,8 +4,8 @@
 <div class="card narrow">
   <h1>Heartbeat (optional)</h1>
   {% include "_steps.html" %}
-  <p class="quiet">If this host, its power or your internet goes down, homewatch can't tell you. A free
-  <a href="https://healthchecks.io" target="_blank" rel="noopener">healthchecks.io</a> check can: homewatch pings it after every run,
+  <p class="quiet">If this host, its power or your internet goes down, homeWatch can't tell you. A free
+  <a href="https://healthchecks.io" target="_blank" rel="noopener">healthchecks.io</a> check can: homeWatch pings it after every run,
   and healthchecks.io alerts you when the pings stop. Create a check with a 5-minute period and paste its ping URL.</p>
   <form method="post" action="/setup/healthchecks">
     <input type="hidden" name="csrf" value="{{ csrf }}">

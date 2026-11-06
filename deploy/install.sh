@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# homewatch installer. Please read it before running it; it is short and only does this:
+# homeWatch installer. Please read it before running it; it is short and only does this:
 #   1. creates .env from .env.example with a new master key, this host's time zone and
 #      its gateway / DNS server as defaults for the setup wizard (skipped if .env exists)
 #   2. creates a self-signed HTTPS certificate in ./certs (skipped if one exists)
 #   3. offers the updater: a systemd unit that runs update.sh when the System page's "Update" button asks
-#      (needs sudo once; homewatch itself gets no Docker access, it only leaves a file in update/ask/)
+#      (needs sudo once; homeWatch itself gets no Docker access, it only leaves a file in update/ask/)
 #   4. asks whether to add Grafana (COMPOSE_PROFILES=grafana in .env; System → Grafana can change it later)
 #   5. pulls the images and starts the stack with docker compose
 # Usage: ./install.sh               (release images from ghcr.io)
@@ -110,7 +110,7 @@ if [[ $updater == 1 ]]; then
 fi
 mkdir -p update  # the controller mounts it; without the updater it stays empty
 
-# Grafana: optional dashboards at https://<homewatch>/grafana/, signed in with the homewatch login
+# Grafana: optional dashboards at https://<homewatch>/grafana/, signed in with the homeWatch login
 if [[ $grafana == ask ]] && ! grep -qE '^COMPOSE_PROFILES=.*grafana' .env; then
   grafana=no
   if [[ -t 0 ]]; then
@@ -133,7 +133,7 @@ else
 fi
 
 echo
-echo "homewatch is starting. Open https://${host_ip:-<this host>} and follow the setup wizard."
+echo "homeWatch is starting. Open https://${host_ip:-<this host>} and follow the setup wizard."
 echo "Your browser will warn about the certificate once. Its SHA-256 fingerprint is:"
 openssl x509 -in certs/cert.pem -noout -fingerprint -sha256 | cut -d= -f2
 echo

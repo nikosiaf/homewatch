@@ -1,7 +1,7 @@
-"""The host's updater, as homewatch sees it.
+"""The host's updater, as homeWatch sees it.
 
 install.sh can add a small systemd unit on the host that installs the latest release when homewatch asks.
-homewatch has no Docker access: it only leaves a file in <update dir>/ask/, and the host's script (deploy/update.sh)
+homeWatch has no Docker access: it only leaves a file in <update dir>/ask/, and the host's script (deploy/update.sh)
 reads the latest version from GitHub itself, so the request can't choose a version. The script writes how it went
 to <update dir>/status as "<unix time> <running|ok|failed> <text>".
 """
@@ -16,7 +16,7 @@ STALE = 15 * 60  # "running" for longer than this: the updater is gone or stuck
 
 
 def state(update_dir: str, now: float | None = None) -> dict:
-    """{ready, state, status}: ready = the updater is installed and homewatch may ask it."""
+    """{ready, state, status}: ready = the updater is installed and homeWatch may ask it."""
     ask = os.path.join(update_dir, "ask")
     ready = os.path.isdir(ask) and os.access(ask, os.W_OK)
     out = {"ready": ready, "state": "", "status": "", "summary": "", "asked": os.path.exists(os.path.join(ask, "request"))}

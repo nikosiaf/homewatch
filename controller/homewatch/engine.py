@@ -6,7 +6,7 @@ Rules (defaults from running it in a real home):
 - snoozed checks and maintenance windows record issues but hold their notifications; anything
   still open when the silence ends is sent then
 - open issues are repeated every REMIND_H hours
-- after FAIL_ALERT runs in a row that can't read data, homewatch alerts about itself
+- after FAIL_ALERT runs in a row that can't read data, homeWatch alerts about itself
 """
 
 from __future__ import annotations

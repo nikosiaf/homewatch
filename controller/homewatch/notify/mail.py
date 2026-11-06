@@ -78,7 +78,7 @@ def _send_sync(config: dict, secret: str, msg: EmailMessage) -> None:
                     smtp.starttls(context=ctx)
                     smtp.ehlo()
                 elif config.get("username"):
-                    raise RuntimeError("the server offers no STARTTLS; homewatch won't send the password unencrypted")
+                    raise RuntimeError("the server offers no STARTTLS; homeWatch won't send the password unencrypted")
             if config.get("username"):
                 smtp.login(config["username"], secret)
             smtp.send_message(msg)

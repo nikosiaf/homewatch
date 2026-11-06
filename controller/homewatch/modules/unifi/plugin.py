@@ -12,7 +12,7 @@ from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
 CHECKS = [
-    CheckDef("api", "Controller reachable", "api", help="ERROR when homewatch can't log in to UniFi or read it."),
+    CheckDef("api", "Controller reachable", "api", help="ERROR when homeWatch can't log in to UniFi or read it."),
     CheckDef("devices", "Devices online", "api", help="ERROR when a device you chose is disconnected or unreachable."),
     CheckDef("cpu", "CPU", "api", unit="%", warn=90, editable=("warn", "error"),
              help="Busiest watched device's CPU use, as UniFi reports it."),
@@ -55,9 +55,9 @@ class UniFiModule(ApiModule):
     ]
     secret_label = "Password"
     choices_title = "Devices to watch"
-    choices_help = "homewatch alerts when one of these disconnects. All adopted devices are ticked when you connect."
+    choices_help = "homeWatch alerts when one of these disconnects. All adopted devices are ticked when you connect."
     more_title = "Additional configuration"
-    more_help = "After connecting: the devices homewatch watches."
+    more_help = "After connecting: the devices homeWatch watches."
     list_search = False
 
     def validate(self, form, old):

@@ -87,7 +87,7 @@ async def install_ookla(ookla_dir: str, http: httpx.AsyncClient | None = None) -
     """Download the official Ookla CLI from Ookla's site into the data volume. Returns '' or an error.
 
     It is fetched by this install at the admin's request after they accept Ookla's license, not shipped
-    with homewatch (its license does not allow redistribution)."""
+    with homeWatch (its license does not allow redistribution)."""
     import io
     import platform
     import tarfile

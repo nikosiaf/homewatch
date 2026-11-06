@@ -1,22 +1,22 @@
 <h1>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/brand/red-homewatch-logo-dark.svg">
-    <img alt="homewatch" src="docs/brand/red-homewatch-logo.svg" width="330">
+    <img alt="homeWatch" src="docs/brand/red-homewatch-logo.svg" width="330">
   </picture>
 </h1>
 
 A small, self-hosted monitor for your home network, configured from a plain web page.
-homewatch watches **your internet line**, **your provider's DSL modem**, **your Proxmox VE host**,
+homeWatch watches **your internet line**, **your provider's DSL modem**, **your Proxmox VE host**,
 **your OPNsense firewall**, **Home Assistant**, **your Synology NAS**, **your MikroTik switches**, **UniFi**, **Proxmox Backup Server**, **your UPS** and **your Docker hosts**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
 down", "guest stopped", "backup failed") and sends alerts to Telegram, ntfy, email or a webhook.
-Optionally it adds **Grafana dashboards**, an Overview and one per module, behind your homewatch login,
+Optionally it adds **Grafana dashboards**, an Overview and one per module, behind your homeWatch login,
 with a year of history from every device, port and guest, and from the Home Assistant entities you choose.
 
 - Runs as a Docker Compose stack on any Linux host (amd64 or arm64)
 - LAN / Tailscale only: it never needs a port open to the internet
 - MIT licensed
 
-![homewatch's Status page: the overall status, today's key numbers and one tile per module with its 24-hour line](homewatch.png)
+![homeWatch's Status page: the overall status, today's key numbers and one tile per module with its 24-hour line](homewatch.png)
 
 <p>
   <img src="docs/screenshots/grafana-overview.png" width="49%" alt="Grafana Overview: problems now, a status tile per module, checks needing attention, internet and modem line">
@@ -40,7 +40,7 @@ with a year of history from every device, port and guest, and from the Home Assi
 - [UPS](#ups-module-optional): mains power, battery charge, runtime, load and UPS health from a NUT server
 - [Docker hosts](#docker-hosts-module-optional): containers running, restarts, health checks and removed containers, through a read-only socket proxy
 - [Alerts and notifications](#alerts-and-notifications): Telegram, ntfy, email, webhook and a healthchecks.io heartbeat
-- [Grafana dashboards](#grafana-dashboards-optional): an Overview and one dashboard per module, with your homewatch login
+- [Grafana dashboards](#grafana-dashboards-optional): an Overview and one dashboard per module, with your homeWatch login
 - [Update](#update) · [Back up](#back-up) · [Security notes](#security-notes) · [Development](#development)
 
 ## Install
@@ -95,7 +95,7 @@ mkdir certs && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -no
 docker compose up -d
 ```
 
-## What homewatch does
+## What homeWatch does
 
 ### Internet line module
 
@@ -139,19 +139,19 @@ is changed. Supported model:
 | PPP session on the modem | | down (off by default; for router-mode setups) |
 
 Things to know before you add a modem:
-- **Password:** the Speedport has only its admin login, so homewatch stores that password
+- **Password:** the Speedport has only its admin login, so homeWatch stores that password
   (encrypted, never shown again).
 - **Sessions:** each reading logs in, which ends any open browser session on the modem.
-- **Rejected logins:** after a rejected login homewatch waits 6 hours, because the modem slows
+- **Rejected logins:** after a rejected login homeWatch waits 6 hours, because the modem slows
   down further attempts.
-- **Certificate:** the modem's certificate is self-signed, so homewatch trusts the one it sees at
+- **Certificate:** the modem's certificate is self-signed, so homeWatch trusts the one it sees at
   the first reading and logs in only to that one. If it changes, the check goes to ERROR and
-  homewatch stops logging in until you accept the new one on the module page. The first reading
+  homeWatch stops logging in until you accept the new one on the module page. The first reading
   itself can't tell an impostor from the modem, so add the modem on a network you trust.
 
 ### Behind a reverse proxy
 
-If browsers reach homewatch through a reverse proxy (HAProxy, nginx…), put the proxy's address in
+If browsers reach homeWatch through a reverse proxy (HAProxy, nginx…), put the proxy's address in
 `HW_TRUSTED_PROXIES` in `.env`, for example `HW_TRUSTED_PROXIES=192.168.1.1`, and run
 `docker compose up -d`. The proxy must send `X-Forwarded-For`. Without this setting every visitor
 counts as the proxy's address, so one person's failed logins lock everyone out for 5 minutes.
@@ -160,7 +160,7 @@ Don't list anything that isn't a proxy: whoever is listed can claim to be any ad
 ### Proxmox VE module (optional)
 
 Watches a Proxmox VE host or cluster through a **read-only API token** (role PVEAuditor; the module
-page shows the three commands to create it). homewatch tests the token before saving anything.
+page shows the three commands to create it). homeWatch tests the token before saving anything.
 
 | Check | WARNING | ERROR |
 |---|---|---|
@@ -217,7 +217,7 @@ Domains with nothing worth watching or graphing (automations, scripts, scenes, b
 updates, cameras, calendars, voice and notify services…) are left out. Entities that appeared since
 you last saved the list carry a **new** badge.
 
-- **Watch**: homewatch reads it at every check (2 minutes by default) and reports it when it has been
+- **Watch**: homeWatch reads it at every check (2 minutes by default) and reports it when it has been
   unavailable for 30 minutes. Some kinds also get their own check:
 
   | Check (only listed once such an entity is watched) | WARNING | ERROR |
@@ -246,12 +246,12 @@ you last saved the list carry a **new** badge.
   | `sensor.panel_link` | `is not online error` | anything but "online" |
 
 Values are stored only for ticked entities (either column). When you untick both boxes of an entity,
-homewatch asks whether to keep or delete what it has stored so far.
+homeWatch asks whether to keep or delete what it has stored so far.
 
-**Add-ons** (Home Assistant OS / Supervised): a non-admin user can't read the Supervisor, so homewatch
+**Add-ons** (Home Assistant OS / Supervised): a non-admin user can't read the Supervisor, so homeWatch
 uses the add-ons' **Running** sensors. They are disabled by default: in Settings → Devices & services →
 Home Assistant Supervisor, open each add-on that must always run, enable its "Running" sensor, then
-tick Watch for it in homewatch.
+tick Watch for it in homeWatch.
 
 Upgrading from 0.35 or older: the old lists (entities to watch, unavailable ones to ignore, entities
 to record, rules by pattern) are turned into ticks once, at the first reading. What was watched stays
@@ -277,12 +277,12 @@ DSM's Web API doesn't report fans or the power supply; the NAS's SNMP agent does
 enable SNMP in Control Panel → Terminal & SNMP, tick SNMPv3 and create a user (authentication SHA
 and privacy AES are the safe choices; MD5, SHA256, DES and no privacy work too). On the module's
 page, tick SNMPv3 and enter the same user, protocols and passwords, with "SNMP privacy" ticked or
-not as in DSM. homewatch reads UDP port 161 of the NAS at each DSM read. Untick SNMPv3 to skip it.
+not as in DSM. homeWatch reads UDP port 161 of the NAS at each DSM read. Untick SNMPv3 to skip it.
 
 ### MikroTik module (optional)
 
 Reads one or more RouterOS 7 devices over the REST API with a user in the `read` group (the same
-user on every device). The device's `www` service must allow the homewatch host.
+user on every device). The device's `www` service must allow the homeWatch host.
 
 | Check | WARNING | ERROR |
 |---|---|---|
@@ -337,10 +337,10 @@ Reading needs no login; the NUT server must listen on the network.
 Reads one or more Docker hosts through a **read-only proxy** in front of the Docker socket
 ([linuxserver/socket-proxy](https://docs.linuxserver.io/images/docker-socket-proxy/) with only
 `CONTAINERS=1` and `INFO=1`; `POST=0`, so nothing can be started, stopped or changed).
-Reading containers includes their environment variables, which often hold passwords: **only homewatch
-may reach the proxy**. On homewatch's own host the proxy joins homewatch's network and publishes no
+Reading containers includes their environment variables, which often hold passwords: **only homeWatch
+may reach the proxy**. On homeWatch's own host the proxy joins homeWatch's network and publishes no
 port; on other hosts it runs with `network_mode: host` and the host firewall (ufw / nftables) allows
-port 2375 from homewatch only. The setup steps on the module page have the compose file and rules.
+port 2375 from homeWatch only. The setup steps on the module page have the compose file and rules.
 
 Containers with a restart policy (`always`, `unless-stopped`, `on-failure`) are watched; untick any
 under "Containers to watch" (grouped per host and compose project).
@@ -381,7 +381,7 @@ Alerting works like this:
 - **Snooze and maintenance windows:** they hold notifications without losing the history.
 - **Quiet hours** per channel: warnings wait until they end, errors are always sent.
 - **Weekly report:** optional; pick the day, the time and the channels.
-- **healthchecks.io heartbeat:** optional. homewatch pings it after every run, and healthchecks.io
+- **healthchecks.io heartbeat:** optional. homeWatch pings it after every run, and healthchecks.io
   alerts you when the pings stop (host, power or internet down).
 - **History** is a timeline of every problem and its return to OK.
 
@@ -410,22 +410,22 @@ status and history.
 
 ## Grafana dashboards (optional)
 
-Grafana shows everything homewatch stores (every device, port, guest, disk, and the Home Assistant
-entities you show in Grafana) at `https://<homewatch>/grafana/`. It has no login of its own: homewatch signs
-you in. homewatch admins are Grafana admins, viewers can only look.
+Grafana shows everything homeWatch stores (every device, port, guest, disk, and the Home Assistant
+entities you show in Grafana) at `https://<homewatch>/grafana/`. It has no login of its own: homeWatch signs
+you in. homeWatch admins are Grafana admins, viewers can only look.
 
 - **On or off:** `install.sh` asks; later, **System → Grafana and history**. It needs about 2 GB of
   disk and 150 MB of memory. Turning it off keeps its dashboards. By hand: `COMPOSE_PROFILES=grafana`
   in `.env` (empty to turn it off), then `docker compose up -d`.
-- **Built-in dashboards** (folder *homewatch*): an Overview and one per enabled module. homewatch
+- **Built-in dashboards** (folder *homeWatch*): an Overview and one per enabled module. homeWatch
   rebuilds them with every update, so they can't be saved; switching a module off removes its dashboard.
 - **Your own dashboards:** open a built-in one, **Save as**, and keep the copy in **My dashboards**.
-  Updates never touch that folder, and homewatch saves it every night next to the configuration
+  Updates never touch that folder, and homeWatch saves it every night next to the configuration
   exports (System → Grafana and history, last 14).
-- **From homewatch:** an open Status tile has a small Grafana icon next to its line, and the menu has
+- **From homeWatch:** an open Status tile has a small Grafana icon next to its line, and the menu has
   **Grafana ↗**; both open in a new tab and show only while Grafana runs.
 - **Resolution** follows each module's [read interval](#how-often-each-module-is-read).
-- **Data source:** *homewatch*, the VictoriaMetrics that homewatch already runs (PromQL / MetricsQL).
+- **Data source:** *homewatch*, the VictoriaMetrics that homeWatch already runs (PromQL / MetricsQL).
   Metric names start with `hw_`; Grafana's Explore lists them.
 - **History length:** a year by default. **System → History** can keep less (6, 3 or 1 month): data
   older than that is deleted, and VictoriaMetrics drops whole months, so space can take up to a month
@@ -439,7 +439,7 @@ happens and the release notes; after **OK, update now** a progress page follows 
 the Status page when the new release answers. After 5 minutes without an answer it says the update
 failed.
 
-The updater is a systemd unit on the host (`homewatch-update.path`) that runs `update.sh`. homewatch
+The updater is a systemd unit on the host (`homewatch-update.path`) that runs `update.sh`. homeWatch
 gets no Docker access for it: the button only leaves a request file in `update/ask/`. The script
 compares that file's first line with a few fixed words (`grafana on`, `grafana off`, `retention 1y`,
 `180d`, `90d`, `30d`, from the System page); anything else means "update". It asks GitHub for the latest
@@ -447,7 +447,7 @@ release itself, sets `HW_VERSION` in `.env`, then pulls and restarts. If the dow
 it puts `.env` back and starts the previous release again. It reports to `update/status`, which the
 System page shows. It doesn't update `docker-compose.yml`, `Caddyfile` or `update.sh`: when a release
 changes them, its release notes say so. Then download them from the release next to `install.sh`, run
-`docker compose up -d`, and with the updater `sudo ./update.sh` once (it tells homewatch what it can do). To add the updater to an existing install, put `update.sh` from the release next to
+`docker compose up -d`, and with the updater `sudo ./update.sh` once (it tells homeWatch what it can do). To add the updater to an existing install, put `update.sh` from the release next to
 `install.sh` and run `./install.sh` again (it keeps `.env` and the certificate). To remove it:
 `sudo systemctl disable --now homewatch-update.path`.
 
@@ -461,14 +461,14 @@ Database changes apply on start.
 
 ## Back up
 
-Everything homewatch knows lives in two Docker volumes:
+Everything homeWatch knows lives in two Docker volumes:
 - `homewatch_hw-data`: settings, users, history, encrypted tokens (and the nightly exports)
 - `homewatch_vm-data`: metrics
 
 With Grafana, also `homewatch_grafana-data` (your own dashboards; the built-in ones are recreated).
 
 **Settings export:** System → Export and import downloads all settings as one YAML file (modules,
-thresholds, timing, channels, maintenance windows; no passwords, tokens or users). homewatch also
+thresholds, timing, channels, maintenance windows; no passwords, tokens or users). homeWatch also
 writes one every night into the data volume (`exports/`, last 14 kept). Importing a file replaces
 the settings; the previous ones stay under Configuration versions, so an import can be undone.
 
@@ -504,24 +504,24 @@ The default speed test uses Cloudflare and needs nothing extra. To use Ookla ins
 2. Accept Ookla's EULA and privacy policy.
 3. Press **Save and install Ookla CLI**.
 
-homewatch then downloads the official CLI from speedtest.net for your processor (x86_64, arm64 or
-armhf) into its data volume. It isn't bundled with homewatch, because Ookla's license doesn't
+homeWatch then downloads the official CLI from speedtest.net for your processor (x86_64, arm64 or
+armhf) into its data volume. It isn't bundled with homeWatch, because Ookla's license doesn't
 allow redistribution. **System → Health** shows the installed version.
 
 ## Security notes
 
-- **Exposure:** don't forward homewatch to the internet. Use it on your LAN or over Tailscale.
+- **Exposure:** don't forward homeWatch to the internet. Use it on your LAN or over Tailscale.
 - **Network:** only Caddy publishes ports (80 redirects to 443). VictoriaMetrics, Telegraf, Grafana and
   the controller stay on internal Docker networks.
-- **Grafana:** reached only through Caddy, which asks homewatch who you are first. Grafana trusts the
-  user name homewatch hands it only from the small private network it shares with Caddy, homewatch and
+- **Grafana:** reached only through Caddy, which asks homeWatch who you are first. Grafana trusts the
+  user name homeWatch hands it only from the small private network it shares with Caddy, homeWatch and
   VictoriaMetrics; Caddy removes those headers from what browsers send.
 - **Secrets:** tokens and URLs are encrypted at rest (AES-GCM, key from `.env`) and never shown
   again after saving.
 - **Logins:** passwords are hashed with Argon2. Sessions use HttpOnly, Secure, SameSite=Strict
   cookies, and the database holds only hashes of session tokens. Every form is CSRF-protected, and
   logins lock for 5 minutes after 5 failures from one address or 20 on one account.
-- **Device certificates:** with "Check the HTTPS certificate" unticked, homewatch pins the certificate
+- **Device certificates:** with "Check the HTTPS certificate" unticked, homeWatch pins the certificate
   it sees first and logs in only to that one. That first connection can't tell an impostor from the
   device, so compare the fingerprint on the module's page with the device. System lists how each
   device connection is protected.

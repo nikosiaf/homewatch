@@ -156,7 +156,7 @@ def test_modules_link_and_page(client):
     r = client.get("/modules")
     assert 'href="/modules/internet"' in r.text and "ISP modem" in r.text and "UPS (NUT)" in r.text
     # modules not set up are grey and say Off; none of them claims to be OK
-    assert 'class="tile off" href="/modules/ups"' in r.text and 'class="tile off" href="/modules/pbs"' in r.text
+    assert 'class="module off" href="/modules/ups"' in r.text and 'class="module off" href="/modules/pbs"' in r.text
     assert "checks OK" not in r.text
 
 
@@ -1120,7 +1120,7 @@ def test_update_check_and_install_from_the_home_box(client, monkeypatch, tmp_pat
 
     monkeypatch.setattr(client.rt, "check_update", found)
     monkeypatch.setattr(client.rt, "update_available", lambda: "9.9.9")
-    assert "homewatch 9.9.9 is available" in client.post("/system/updates/check", data={"csrf": tok}).text
+    assert "homeWatch 9.9.9 is available" in client.post("/system/updates/check", data={"csrf": tok}).text
     page = client.get("/system").text
     assert "Update to 9.9.9" not in page and "HW_VERSION=9.9.9" in page  # no updater on this host: the command
     upd = tmp_path / "update"
@@ -1130,7 +1130,7 @@ def test_update_check_and_install_from_the_home_box(client, monkeypatch, tmp_pat
     assert '<a class="button danger" href="/system/update">Update to 9.9.9</a>' in health
     client.rt.db.set("updates.notes", "## New\n- Status orb\n- Tiles with <b>lines</b>\nThanks")
     confirm = client.get("/system/update").text  # the warning, the release notes, OK and Cancel
-    assert "homewatch restarts during the update" in confirm and "<li>Status orb</li>" in confirm
+    assert "homeWatch restarts during the update" in confirm and "<li>Status orb</li>" in confirm
     assert "<li>Tiles with &lt;b&gt;lines&lt;/b&gt;</li>" in confirm and "<h3>New</h3>" in confirm  # notes are text, never HTML
     assert 'href="/system">Cancel</a>' in confirm and "OK, update now</button>" in confirm
     r = client.post("/system/updates/install", data={"csrf": tok}, follow_redirects=False)
@@ -1197,7 +1197,16 @@ def test_system_page_one_line_export_and_paged_audit_log(client):
     export = page.split("<b>Export</b>")[1].split("</form>")[0]
     assert export.index("Download the configuration now") < export.index('href="/system/export"') \
         < export.index("Download an earlier one") < export.index('name="name"') < export.index("Download</button>")
-    assert '<div class="card scroll">\n  <h2 class="card-title">Audit log</h2><table data-page="12" class="audit">' in page
+    assert '<h2>Audit log</h2>\n<div class="card scroll"><table data-page="12" class="audit">' in page  # title above the box
+    for title in ("Health", "Home"):
+        assert f'<div class="titled"><h2>{title}</h2>' in page
+    assert '<h2>Users</h2>\n<div class="card scroll" id="users">' in page
+    import re as _re
+    body = page.split("<main")[1].split("</main>")[0]
+    assert len(_re.findall(r"<div\b", body)) == body.count("</div>")  # every box closed: no section slips into another
+    top = body.split('<div class="grid2">')[1].split("<h2>Grafana and history</h2>")[0]
+    assert top.count('class="titled"') == 2  # Health and Home side by side, nothing else in that row
+    assert '<h2>Configuration versions</h2>\n<div class="card scroll" id="versions">' in page
     assert '<td class="nw">' in page or "Nothing yet" in page  # the date on one line, the detail wraps
     imp = page.split('action="/system/import"')[1].split("</form>")[0]
     assert '<div class="row tight"><input id="imf" type="file"' in imp and "Preview import…</button></div>" in imp
@@ -1233,7 +1242,7 @@ def test_mikrotik_connect_first_then_ports_in_their_own_box(client, monkeypatch)
     more = page.split('id="more"')[1].split("</form>")[0]
     assert "Ports that should be up" in more and "data-choice-search" not in more  # 19 ports, no search line
     assert '<fieldset class="reading"><legend>Ports that should be up</legend>' in more  # each list in its own box
-    assert "After connecting: the ports homewatch watches. The lists come from the last reading (" in more  # one line
+    assert "After connecting: the ports homeWatch watches. The lists come from the last reading (" in more  # one line
     assert page.index('id="overview"') < page.index('id="more"')
     overview = page.split('id="overview"')[1].split("</form>")[0]
     assert 'action="/modules/mikrotik/refresh"' in overview and "Read now" in overview
@@ -1308,7 +1317,8 @@ def test_status_has_no_charts_box_and_modules_show_icons(client):
     assert 'class="card charts"' not in page and "uPlot" not in page
     assert client.get("/api/series").status_code == 404
     mods = client.get("/modules").text
-    assert mods.count('<span class="mt-ico">') == 11 and '<b class="mt-name name" title="UPS (NUT)">' in mods
+    assert mods.count('<span class="mt-ico">') == 11 and '<b class="mt-name" title="UPS (NUT)">' in mods
+    assert '<div class="module-grid">' in mods and 'Off · open to set it up' in mods  # the Status page's tiles
 
 
 def _ha_connected(client, monkeypatch, catalog=None):
@@ -1382,6 +1392,8 @@ def test_ha_page_connect_then_limits_then_entities(client, monkeypatch):
                                                 "full_every": "60"})
     s = client.rt.db.get("module.homeassistant")
     assert s["full_every"] == 60 and s["verify"] is False and s["cpu_sensor"] == "sensor.door_battery" and s["watch"] == []
+    r = client.post("/modules/homeassistant/refresh", data={"csrf": tok})
+    assert "Read Home Assistant now: HA" in r.text  # what the new reading found
     plugin.snap = None
 
 

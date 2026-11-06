@@ -27,14 +27,14 @@ class ApiError(Exception):
     pass
 
 
-SELF_SIGNED = ("Untick for a self-signed certificate: homewatch then trusts the certificate it sees now and logs in only "
-               "to that one. If it ever changes, homewatch stops logging in until you accept the new one.")
+SELF_SIGNED = ("Untick for a self-signed certificate: homeWatch then trusts the certificate it sees now and logs in only "
+               "to that one. If it ever changes, homeWatch stops logging in until you accept the new one.")
 
 
 def why(e: Exception) -> str:
     """A connection failure in words; a rejected certificate is one the admin can act on."""
     if CHANGED in str(e):
-        return "its certificate changed since homewatch first trusted it; accept the new one on the module's page if you expected that"
+        return "its certificate changed since homeWatch first trusted it; accept the new one on the module's page if you expected that"
     if "CERTIFICATE_VERIFY_FAILED" in str(e):
         return "its HTTPS certificate isn't trusted; install a trusted one, or untick \"Check the HTTPS certificate\""
     return type(e).__name__

@@ -1,6 +1,6 @@
 {
-  "name": "homewatch",
-  "short_name": "homewatch",
+  "name": "homeWatch",
+  "short_name": "homeWatch",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0b1220",

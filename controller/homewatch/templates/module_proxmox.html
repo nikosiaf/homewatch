@@ -14,7 +14,7 @@ disk health and backups. Nothing on Proxmox is changed.</p>
       <input id="ps" type="password" name="secret" placeholder="{{ 'leave empty to keep' if has_secret else 'xxxxxxxx-xxxx-…' }}" autocomplete="new-password"></div>
     <div><label for="pe">Read every (minutes)</label><input id="pe" class="num" type="number" min="1" max="1440" name="every_min" value="{{ s.every_min | num }}"></div>
   </div>
-  <label class="check"><input type="checkbox" name="verify" {{ 'checked' if s.verify }}> Check the HTTPS certificate (untick only for a self-signed one: homewatch then can't tell the real host from an impostor on your network)</label>
+  <label class="check"><input type="checkbox" name="verify" {{ 'checked' if s.verify }}> Check the HTTPS certificate (untick only for a self-signed one: homeWatch then can't tell the real host from an impostor on your network)</label>
 {% endmacro %}
 
 {% if not configured %}
@@ -32,7 +32,7 @@ disk health and backups. Nothing on Proxmox is changed.</p>
         (role PVEAuditor). You can also do this in the GUI under Datacenter → Permissions.</p></div>
   </div>
   {{ fields(s) }}
-  <p><button>Connect</button> <span class="quiet small">homewatch tests the token before saving anything.</span></p>
+  <p><button>Connect</button> <span class="quiet small">homeWatch tests the token before saving anything.</span></p>
 </form>
 {% else %}
 <form method="post" action="/modules/proxmox" class="card {{ 'off' if not s.enabled }}" id="settings">
@@ -85,7 +85,7 @@ disk health and backups. Nothing on Proxmox is changed.</p>
   <h2 style="margin-top:0">Additional configuration</h2>
   {{ note("more") }}
   <fieldset class="reading"><legend>Guests to watch</legend>
-    <p class="quiet small">Choose the guests homewatch should keep an eye on, then press Save. It alerts when a chosen
+    <p class="quiet small">Choose the guests homeWatch should keep an eye on, then press Save. It alerts when a chosen
       guest stops running, and checks that it is backed up when one of your Proxmox backup jobs includes it.
       Guests you don't choose are only listed here.</p>
     {% if not s.watched and guests %}<p class="flash ok" style="border-color:var(--warn);color:inherit">No guests chosen yet: tick the ones to watch and press Save.</p>{% endif %}

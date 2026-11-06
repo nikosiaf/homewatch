@@ -211,13 +211,13 @@ header .menu { order: 2; }
 
 /* Status page: module tiles with an icon, the headline number and its 24 h line; problems first; an open one takes the full width */
 .module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; align-items: start; }
-.module-grid details.module { margin: 0; min-width: 0; position: relative; overflow: hidden; border: 1px solid var(--line);
+.module-grid details.module, .module-grid a.module, .module-grid div.module { margin: 0; min-width: 0; position: relative; overflow: hidden; border: 1px solid var(--line);
   border-radius: 14px; box-shadow: var(--shadow); --state: var(--ok); --state-glow: var(--ok-glow); transition: transform .18s, box-shadow .18s; }
-.module-grid details.module::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--state); }
-.module-grid details.module.s1 { --state: var(--warn); --state-glow: var(--warn-glow); box-shadow: var(--shadow), 0 0 0 1px var(--warn), 0 0 24px var(--warn-glow); }
-.module-grid details.module.s2 { --state: var(--err); --state-glow: var(--err-glow); box-shadow: var(--shadow), 0 0 0 1px var(--err), 0 0 24px var(--err-glow); }
-.module-grid details.module.unread { --state: var(--quiet); --state-glow: transparent; }
-.module-grid details.module:not([open]):hover { transform: translateY(-2px); }
+.module-grid .module::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--state); }
+.module-grid .module.s1 { --state: var(--warn); --state-glow: var(--warn-glow); box-shadow: var(--shadow), 0 0 0 1px var(--warn), 0 0 24px var(--warn-glow); }
+.module-grid .module.s2 { --state: var(--err); --state-glow: var(--err-glow); box-shadow: var(--shadow), 0 0 0 1px var(--err), 0 0 24px var(--err-glow); }
+.module-grid .module.unread, .module-grid .module.off { --state: var(--quiet); --state-glow: transparent; }
+.module-grid .module:not([open]):hover { transform: translateY(-2px); }
 .module-grid details.module[open] { grid-column: 1 / -1; background: color-mix(in srgb, var(--state) 8%, var(--card)); }
 .module-grid:has(details.module[open]) details.module:not([open]) { opacity: .6; transition: opacity .15s; }
 .module-grid:has(details.module[open]) details.module:not([open]):hover { opacity: 1; }
@@ -236,9 +236,9 @@ header .menu { order: 2; }
 .spark .line { fill: none; stroke: var(--state, var(--accent)); stroke-width: 1.7; stroke-linejoin: round; }
 .spark .area { fill: var(--state, var(--accent)); opacity: .14; }
 .spark circle { fill: var(--state, var(--accent)); }
-.module-grid details.module.s0:not(.unread) .spark { --state: var(--accent); }
+.module-grid .module.s0:not(.unread) .spark { --state: var(--accent); }
 .mt-sub { font-size: 13px; color: var(--quiet); margin-top: 8px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.module-grid details.module.s1 .mt-sub { color: var(--warn); } .module-grid details.module.s2 .mt-sub { color: var(--err); }
+.module-grid .module.s1 .mt-sub { color: var(--warn); } .module-grid .module.s2 .mt-sub { color: var(--err); }
 .module-grid details.module[open] .mt-sub { display: block; }
 .module-grid details.module > .tiles { padding: 0 16px 16px; }
 @media (prefers-reduced-motion: reduce) { .orb { animation: none; } .module-grid details.module { transition: none; } }
@@ -410,3 +410,12 @@ details.et-dev > summary { display: flex; flex-wrap: wrap; align-items: center; 
 .et-all { font-size: 13px; font-weight: 400; margin-left: auto; }
 .et-all + .et-all { margin-left: 0; }
 .et-dev-name { font-weight: 600; }
+.grid2 > .titled { display: flex; flex-direction: column; min-width: 0; }
+.grid2 > .titled > .card { flex: 1; }
+/* Modules page: the Status tiles as links; a module that is off is grey */
+.module-grid a.module, .module-grid div.module { display: block; padding: 14px 16px 12px; color: inherit; text-decoration: none; background: var(--card); }
+.module-grid .module.off .mt-ico { background: color-mix(in srgb, var(--quiet) 14%, transparent); color: var(--quiet); }
+.module-grid div.module.soon { opacity: .6; }
+.module-grid div.module.soon:hover { transform: none; }
+/* the logo's W: binoculars (the barrels are the W's arms, sky-blue glass in red lenses) */
+.wordmark .w-bino { height: 1.05em; width: auto; vertical-align: -0.2em; margin: 0 .02em 0 .05em; overflow: visible; }

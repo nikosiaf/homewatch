@@ -5,16 +5,17 @@
 {% block content %}
 <h1>System</h1>
 <div class="grid2">
+  <div class="titled"><h2>Health</h2>
   <div class="card" id="health">
-    <h2 style="margin-top:0">Health</h2>
     {{ note("health") }}
     <table>
-      <tr><td>homewatch version</td><td><div class="row tight" style="margin:0">{{ version }}{% if latest %} · latest release {{ latest }}{% endif %}
+      <tr><td>homeWatch version</td><td><div class="row tight" style="margin:0">{{ version }}{% if latest %} · latest release {{ latest }}{% endif %}
         {% if update and updater.ready %}<a class="button danger" href="/system/update">Update to {{ update }}</a>{% endif %}</div></td></tr>
       {% if updater.summary %}<tr><td>Last update</td><td{% if updater.state == 'failed' %} style="color:var(--err)"{% endif %}>{{ updater.summary }}</td></tr>{% endif %}
       <tr><td>VictoriaMetrics</td><td>{% if vm_ok %}<span class="badge s0">OK</span>{% else %}<span class="badge s2">unreachable</span>{% endif %}</td></tr>
       {% if last_error %}<tr><td>Last error</td><td style="color:var(--err)">{{ last_error }}</td></tr>{% endif %}
-      <tr><td>Telegraf (ping and DNS probes)</td><td>{% if probe_age is none %}<span class="badge s2">no data</span>
+      <tr><td>Telegraf (ping and DNS probes)</td><td>{% if probe_age is none and not probes_started %}<span class="quiet">checked within 2 minutes of a start</span>
+        {% elif probe_age is none %}<span class="badge s2">no data</span>
         {% elif probe_age > 180 %}<span class="badge s2">no data for {{ probe_age | dur }}</span>
         {% else %}<span class="badge s0">OK</span> <span class="quiet small">last data {{ probe_age | int }} s ago</span>{% endif %}</td></tr>
       <tr><td>Ookla Speedtest CLI</td><td>{% if ookla %}<span class="badge s0">installed</span> <span class="quiet small">{{ ookla }}</span>
@@ -24,15 +25,16 @@
     <table>{% for name, how, good in connections %}<tr><td>{{ name }}</td>
       <td>{% if good %}{{ how }}{% else %}<span style="color:var(--err)">{{ how }}</span>{% endif %}</td></tr>{% endfor %}</table>{% endif %}
   </div>
+  </div>
+  <div class="titled"><h2>Home</h2>
   <form method="post" action="/system/home" class="card" id="home">
-    <h2 style="margin-top:0">Home</h2>
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="home">
     {{ note("home") }}
     {% set home = home_name %}{% include "_home_form.html" %}
-    <label for="hu">homewatch address</label>
+    <label for="hu">homeWatch address</label>
     <input id="hu" type="text" name="url" value="{{ home_url }}" placeholder="https://192.168.1.50">
     <p class="quiet small">Added as a link at the end of every alert, so you can tap it to open homewatch.
-      It is filled in from the address you use to open this page; change it if you reach homewatch by another
+      It is filled in from the address you use to open this page; change it if you reach homeWatch by another
       name (for example over Tailscale).</p>
     <h3>Updates</h3>
     <input type="hidden" name="_updates" value="1">
@@ -46,14 +48,15 @@
       <code>docker compose pull && docker compose up -d</code>. Or run <code>install.sh</code> again once: it adds the
       updater, and an Update button installs new releases from then on.</p>{% endif %}
   </form>
+  </div>
 </div>
 <h2>Grafana and history</h2>
 <div id="grafana">{{ note("grafana") }}</div>
 <div class="grid2">
   <div class="card col">
     <b>Grafana</b>
-    <p class="quiet small">Optional dashboards for everything homewatch stores, with your homewatch login. The built-in
-      ones are rebuilt with every update; <b>Save as</b> keeps your own copy in <b>My dashboards</b>, which homewatch
+    <p class="quiet small">Optional dashboards for everything homeWatch stores, with your homeWatch login. The built-in
+      ones are rebuilt with every update; <b>Save as</b> keeps your own copy in <b>My dashboards</b>, which homeWatch
       also saves every night next to the configuration exports.</p>
     <table>
       <tr><td>Status</td><td>{% if grafana_on %}<span class="badge s0">running</span> <a href="/grafana/" target="_blank">Open Grafana</a>
@@ -101,8 +104,8 @@
     </div>
   </form>
 </div>
+<h2>Users</h2>
 <div class="card scroll" id="users">
-  <h2 class="card-title">Users</h2>
   {{ note("users") }}
   <table><tr><th>User</th><th>Role</th><th>Created</th><th></th></tr>
   {% for u in users %}<tr><td>{{ u.username }}</td><td>{{ u.role }}</td><td>{{ u.created | ts }}</td>
@@ -124,7 +127,7 @@
     {{ note("backup") }}
     <b>Export</b>
     <p class="quiet small">All settings as one YAML file: modules, thresholds, timing, channels and maintenance windows.
-      No passwords, tokens or users. homewatch also saves one every night and keeps the last 14.</p>
+      No passwords, tokens or users. homeWatch also saves one every night and keeps the last 14.</p>
     <div class="card-foot">
       <div class="row tight"><span class="grow">Download the configuration now</span><a class="button" href="/system/export">Download</a></div>
       {% if exports %}<form method="get" action="/system/exports" class="row tight"><label for="exs" class="grow">Download an earlier one</label>
@@ -145,10 +148,10 @@
     </div>
   </form>
 </div>
+<h2>Configuration versions</h2>
 <div class="card scroll" id="versions">
-  <h2 class="card-title">Configuration versions</h2>
   {{ note("versions") }}
-  <p class="quiet small">homewatch keeps the last 200 versions of its settings: modules, thresholds, timing, home,
+  <p class="quiet small">homeWatch keeps the last 200 versions of its settings: modules, thresholds, timing, home,
     weekly report, channels and maintenance windows. Restoring one is saved as a new version, so it can be undone.
     Passwords, tokens and users are not part of a version and stay as they are, except credentials of a module or channel whose address changes or whose HTTPS or certificate check is turned off: those are deleted and it is switched off.</p>
   <table data-page="10">
@@ -179,11 +182,11 @@
       The master key in <code>.env</code> is kept.</p>
     <label for="cr">Type RESET to confirm</label><input id="cr" type="text" name="confirm" autocomplete="off">
     <label for="pr">Your current password</label><input id="pr" type="password" name="current" autocomplete="current-password" required>
-    <p><button class="danger" data-confirm="Reset homewatch completely? Everyone is logged out and all data is deleted.">Reset everything</button></p>
+    <p><button class="danger" data-confirm="Reset homeWatch completely? Everyone is logged out and all data is deleted.">Reset everything</button></p>
   </form>
 </div>
-<div class="card scroll">
-  <h2 class="card-title">Audit log</h2><table data-page="12" class="audit">
+<h2>Audit log</h2>
+<div class="card scroll"><table data-page="12" class="audit">
   <tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr>
   {% for a in log %}<tr><td class="nw">{{ a.ts | ts('%d %b %H:%M') }}</td><td>{{ a.username }}</td><td>{{ a.action }}</td><td class="small detail">{{ more(a.detail, n=200) }}</td></tr>
   {% else %}<tr><td colspan="4" class="quiet">Nothing yet.</td></tr>{% endfor %}

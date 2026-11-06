@@ -3,8 +3,8 @@
 {% block content %}
 <h1>Help</h1>
 
-<div class="card" id="about">
-  <h2 style="margin-top:0">About homewatch</h2>
+<h2 id="about">About homeWatch</h2>
+<div class="card">
   <p>A self-hosted monitor for your home: internet line, servers, network, backups and UPS, with notifications when
     something needs attention. It only reads from your devices and never changes them.</p>
   <table>
@@ -35,14 +35,15 @@ less install.sh          # please read it first; it's short (q to quit)
   <p>The script writes <code>.env</code> with a new master key, creates a self-signed certificate, offers the updater
     (needs sudo once) and asks whether to add Grafana, then starts the containers. It prints the certificate's SHA-256
     fingerprint: compare it when your browser warns about the certificate at <code>https://&lt;host&gt;</code>.</p>
-  <p>Open homewatch and create the admin account right away: until it exists, whoever opens the page first creates it.</p>
+  <p>Open homeWatch and create the admin account right away: until it exists, whoever opens the page first creates it.</p>
   <p style="margin-bottom:0">The setup wizard then asks for an admin account, your home's name and time zone, the internet checks and contracted
     speed, your equipment, a notification channel and an optional heartbeat. Under "Your equipment" you tick what you have;
     the wizard then opens each module's page in turn so you can connect it, or skip it. Anything else you add later, one module at a time, under Modules.</p>
 </div>
 
 <h2 id="modules">Modules</h2>
-<p class="quiet">Every module only reads, and all but Internet line start off. Open one for its setup steps and what it checks. The limits shown are the
+<div class="card">
+<p class="quiet" style="margin-top:0">Every module only reads, and all but Internet line start off. Open one for its setup steps and what it checks. The limits shown are the
   defaults{% if user.is_admin %}; change them on the module's page{% endif %}.</p>
 {% for m in modules %}
 <details class="choices" id="module-{{ m.id }}">
@@ -63,6 +64,7 @@ less install.sh          # please read it first; it's short (q to quit)
   {% if user.is_admin %}<p><a href="/modules/{{ m.id }}">Open {{ m.name }}</a></p>{% endif %}
 </details>
 {% endfor %}
+</div>
 
 <h2 id="alerts">How alerts work</h2>
 <div class="card">
@@ -85,7 +87,7 @@ less install.sh          # please read it first; it's short (q to quit)
     <li><b>Email:</b> any SMTP server. Port 465 uses TLS, other ports STARTTLS; a password is never sent unencrypted.</li>
     <li><b>Webhook:</b> every message is POSTed as JSON with <code>text</code>, <code>content</code>, <code>title</code>, <code>body</code>,
       <code>level</code> and <code>level_name</code>. It works as-is with Slack, Mattermost, Rocket.Chat and Discord.</li>
-    <li><b>healthchecks.io heartbeat:</b> homewatch pings it after every run, and healthchecks.io alerts you when the pings
+    <li><b>healthchecks.io heartbeat:</b> homeWatch pings it after every run, and healthchecks.io alerts you when the pings
       stop, for example when the host, power or internet is down.</li>
     <li><b>Quiet hours</b> per channel: warnings wait until they end; errors are always sent.</li>
     <li><b>Weekly report:</b> optional; pick the day, the time and the channels.</li>
@@ -108,8 +110,8 @@ less install.sh          # please read it first; it's short (q to quit)
 <h2 id="update">Update and back up</h2>
 <div class="card">
   <p>The Home box on the System page says when a newer release exists. If <code>install.sh</code> added the updater,
-    press Install there: homewatch restarts with the new release within a minute or two. The updater runs on the host;
-    homewatch only asks it, and it always installs the latest release from GitHub.</p>
+    press Install there: homeWatch restarts with the new release within a minute or two. The updater runs on the host;
+    homeWatch only asks it, and it always installs the latest release from GitHub.</p>
   <p>Without the updater, set <code>HW_VERSION</code> in <code>.env</code> to the new release, then run:</p>
   <pre class="code">docker compose pull &amp;&amp; docker compose up -d</pre>
   <p>Database changes apply on start.</p>
@@ -121,17 +123,17 @@ less install.sh          # please read it first; it's short (q to quit)
 
 <h2 id="grafana">Grafana dashboards</h2>
 <div class="card">
-  <p>Grafana is optional. It shows everything homewatch stores (every device, port, guest, disk and the Home Assistant
-    entities you show in Grafana) as dashboards at <code>https://&lt;homewatch&gt;/grafana/</code>. It has no login of its own:
-    you are signed in with your homewatch account. Admins are Grafana admins, viewers can only look.</p>
+  <p>Grafana is optional. It shows everything homeWatch stores (every device, port, guest, disk and the Home Assistant
+    entities you show in Grafana) as dashboards at <code>https://&lt;homeWatch&gt;/grafana/</code>. It has no login of its own:
+    you are signed in with your homeWatch account. Admins are Grafana admins, viewers can only look.</p>
   <ul>
     <li><b>Turn it on or off</b> on the System page (Grafana and history). The first start downloads Grafana (about
       2 GB) and it uses about 150 MB of memory. Turning it off keeps its dashboards. Without the updater: set
       <code>COMPOSE_PROFILES=grafana</code> in <code>.env</code> (empty to turn it off) and run <code>docker compose up -d</code>.</li>
-    <li><b>Built-in dashboards</b> (folder homewatch): an Overview and one per enabled module. They are rebuilt with
+    <li><b>Built-in dashboards</b> (folder homeWatch): an Overview and one per enabled module. They are rebuilt with
       every update, so they can't be saved. Switching a module off removes its dashboard.</li>
     <li><b>Your own dashboards</b>: open a built-in one, choose <b>Save as</b> and save it in <b>My dashboards</b>.
-      Updates never touch that folder. homewatch saves it every night next to the configuration exports (System →
+      Updates never touch that folder. homeWatch saves it every night next to the configuration exports (System →
       Grafana and history, last 14); to restore one, Dashboards → New → Import and paste its entry.</li>
     <li><b>Home Assistant</b>: only entities you tick under <i>Entities</i> on the module's page are stored (Watch or
       Show in Grafana), every time the module reads (2 minutes by default); the dashboards show the <i>Show in Grafana</i>
@@ -144,7 +146,7 @@ less install.sh          # please read it first; it's short (q to quit)
     <li><b>Older installs</b>: Grafana needs this release's <code>docker-compose.yml</code>, <code>Caddyfile</code> and
       <code>update.sh</code> next to <code>install.sh</code> (the updater only changes the version). Download them from
       the release, then run <code>docker compose up -d</code> and, with the updater, <code>sudo ./update.sh</code> once
-      (it tells homewatch that it can now turn Grafana on and off).</li>
+      (it tells homeWatch that it can now turn Grafana on and off).</li>
   </ul>
   <p style="margin-bottom:0"><b>History length</b>: measurements are kept for a year by default. You can choose a
     shorter time under System → History: data older than that is deleted (VictoriaMetrics drops whole months, so
@@ -163,7 +165,7 @@ less install.sh          # please read it first; it's short (q to quit)
 <h2 id="numbers">How to read the numbers</h2>
 <div class="card">
   <ul style="margin:0">
-    <li><b>Internet availability</b> counts only the time homewatch was really watching the line. Time before the install, or with homewatch or its probes down, is unknown and isn't counted as up. <b>Monitored</b> shows how much of the period that covers.</li>
+    <li><b>Internet availability</b> counts only the time homeWatch was really watching the line. Time before the install, or with homeWatch or its probes down, is unknown and isn't counted as up. <b>Monitored</b> shows how much of the period that covers.</li>
     <li><b>UNKNOWN</b> on the Status page means a module has nothing to judge yet, or its reading can't be trusted.</li>
     <li>A change must be seen in a new reading to count as confirmed. A module that reads rarely is read again sooner when a reading shows a change.</li>
   </ul>
@@ -172,16 +174,16 @@ less install.sh          # please read it first; it's short (q to quit)
 <h2 id="security">Security</h2>
 <div class="card">
   <ul style="margin:0">
-    <li>Don't forward homewatch to the internet. Use it on your LAN or over a VPN such as Tailscale.</li>
+    <li>Don't forward homeWatch to the internet. Use it on your LAN or over a VPN such as Tailscale.</li>
     <li>Give each module a dedicated read-only account, as its setup steps describe.</li>
-    <li>Keep "Check the HTTPS certificate" on when the device has a trusted certificate. For a self-signed one, untick it: homewatch trusts
+    <li>Keep "Check the HTTPS certificate" on when the device has a trusted certificate. For a self-signed one, untick it: homeWatch trusts
       the certificate it sees at the first connection and logs in only to that one. Check the fingerprint on the module's page against the device.
       System lists how every device connection is protected.</li>
     <li>Secrets, including ntfy topic and healthchecks.io ping addresses, are encrypted at rest, never shown again after saving and
       left out of exports. Passwords are hashed with Argon2. Logins lock for 5 minutes after 5 failures from one address, or 20 on one account.</li>
     <li>Adding or removing a user and deleting data ask for your password again. Sessions are stored only as hashes, so a copy of the database can't be used to log in.</li>
     <li>Behind a reverse proxy, name it in <code>HW_TRUSTED_PROXIES</code> in <code>.env</code>. Otherwise every visitor counts as the proxy's address for login lockouts.</li>
-    <li>When an import or restore changes where a credential goes, or turns off HTTPS or certificate checks, homewatch deletes that
+    <li>When an import or restore changes where a credential goes, or turns off HTTPS or certificate checks, homeWatch deletes that
       credential and switches the module or channel off until you enter it again.</li>
   </ul>
 </div>
@@ -190,7 +192,7 @@ less install.sh          # please read it first; it's short (q to quit)
 <div class="card scroll"><table>
   <tr><th>What you see</th><th>What to do</th></tr>
   <tr><td>"HTTPS certificate isn't trusted"</td><td>Install a trusted certificate on the device, or untick "Check the HTTPS certificate" if it is self-signed.</td></tr>
-  <tr><td>ISP modem: "certificate is not the trusted one"</td><td>homewatch stopped logging in to the modem. If you replaced the modem or updated its firmware, press "Trust the new certificate" on the module page. If not, check your network first: another device may be posing as the modem.</td></tr>
+  <tr><td>ISP modem: "certificate is not the trusted one"</td><td>homeWatch stopped logging in to the modem. If you replaced the modem or updated its firmware, press "Trust the new certificate" on the module page. If not, check your network first: another device may be posing as the modem.</td></tr>
   <tr><td>A module answers with a 503 or isn't recognized</td><td>Check the address is the device's web GUI and includes its port, such as <code>https://192.168.1.1:8443</code>. Port 443 may belong to a reverse proxy.</td></tr>
   <tr><td>MikroTik: "can't reach the REST API"</td><td>Check that <code>www-ssl</code> (or <code>www</code>) is enabled and that this host is in its <code>available-from</code> list.</td></tr>
   <tr><td>OPNsense: "lacks the privilege"</td><td>Add the named privilege to the homewatch user under System → Access → Users.</td></tr>

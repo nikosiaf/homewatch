@@ -3,10 +3,10 @@
 {% block content %}
 <div class="card narrow">
   <div class="hero"><img src="/static/homewatch-icon.svg" alt="" width="56" height="56">
-    <span class="wordmark big"><b>home</b><span>watch</span></span></div>
+    <span class="wordmark big"><b>home</b><span><svg class="w-bino" viewBox="0 0 48 32" role="img" aria-label="W"><path d="M2 3.5Q2 1.5 4 1.5L8 1.5Q9.6 1.5 10.4 3L16.5 14L8 16Z" fill="currentColor"/><path d="M46 3.5Q46 1.5 44 1.5L40 1.5Q38.4 1.5 37.6 3L31.5 14L40 16Z" fill="currentColor"/><path d="M18 15.5L24 7.5L30 15.5" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="13" cy="21.5" r="8.6" fill="currentColor"/><circle cx="35" cy="21.5" r="8.6" fill="currentColor"/><rect x="20" y="19" width="8" height="5" rx="2.5" fill="currentColor"/><circle cx="13" cy="21.5" r="5.4" fill="#38bdf8"/><circle cx="35" cy="21.5" r="5.4" fill="#38bdf8"/><circle cx="11.2" cy="19.6" r="1.7" fill="#fff" opacity=".9"/><circle cx="33.2" cy="19.6" r="1.7" fill="#fff" opacity=".9"/></svg>atch</span></span></div>
   <h1>Welcome to homewatch: first-run setup</h1>
   {% include "_steps.html" %}
-  <p class="quiet">Five short steps get homewatch running. Start by creating the admin account. You can add read-only viewer accounts later.</p>
+  <p class="quiet">Five short steps get homeWatch running. Start by creating the admin account. You can add read-only viewer accounts later.</p>
   <form method="post" action="/setup">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <label for="u">Username</label><input id="u" type="text" name="username" autocomplete="username" required autofocus>

@@ -518,7 +518,9 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
 
     @app.get("/modules")
     async def modules_page(request: Request):
+        ctx = await _status_full(request)  # the same tiles as the Status page, plus one for every module that is off
         return page(request, "modules.html", request.state.user, mod_state=_module_states(rt_of(request)),
+                    cards={c["id"]: c for c in ctx["cards"]}, module_info=ctx["module_info"],
                     icons={m.id: m.icon for m in MODULES.values()})
 
     @app.get("/modules/{mid}")
@@ -565,7 +567,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if form.get("remove"):
             return back(f"/modules/{mid}", msg="Removed")
         if first_connect and mid == "proxmox":
-            return back(f"/modules/{mid}", msg="Connected. Now tick the guests homewatch should watch and press Save.")
+            return back(f"/modules/{mid}", msg="Connected. Now tick the guests homeWatch should watch and press Save.")
         if first_connect:
             return back(f"/modules/{mid}", msg="Connected. The first checks run within 2 minutes.")
         removed = mid == "speedport" and not form.get("model") and not m.page_ctx(rt)["configured"]
@@ -588,8 +590,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             m.stale = True
         await m.readings(rt, m.load(rt), time.time())
         rt.wake.set()  # re-run the checks on the fresh reading
-        return back(f"/modules/{mid}", err=f"Can't read {m.name}: {m.error}") if m.error else \
-            back(f"/modules/{mid}", msg="Read again")
+        if m.error:
+            return back(f"/modules/{mid}", err=f"Can't read {m.name}: {m.error}")
+        summary = (getattr(m, "snap", None) or {}).get("_summary")
+        return back(f"/modules/{mid}", msg=f"Read {m.name} now: {summary}" if summary else f"{m.name} read now")
 
     @app.post("/modules/speedport/read")
     async def speedport_read(request: Request):
@@ -973,7 +977,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                 return back("/notifications", msg=f"{ch['name']}: ping sent; healthchecks.io should show it as up")
             home = rt.db.get("home.name") or "Home"
             msg = Message(OK, f"✅ {home}: test message",
-                          f"homewatch can reach this channel.\n{rt.db.get('home.url') or ''}")
+                          f"homeWatch can reach this channel.\n{rt.db.get('home.url') or ''}")
             await rt.notifier.deliver(ch, msg, config, form.get("secret", "").strip() or None)
         except Exception as e:  # noqa: BLE001
             return back("/notifications", err=f"{ch['name']}: {e}")
@@ -995,7 +999,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                     checked=rt.db.get("updates.checked", 0), updater=updater.state(rt.cfg.update_dir),
                     roles=ROLES, tzname=rt.db.get("home.tz") or "UTC", zones=sorted(available_timezones()),
                     home_name=rt.db.get("home.name") or "Home", home_url=rt.db.get("home.url") or "",
-                    probe_age=_probe_age(rt), ookla=_ookla_version(rt), versions=version_rows,
+                    probe_age=_probe_age(rt), probes_started=bool(rt.results), ookla=_ookla_version(rt), versions=version_rows,
                     exports=_exports(rt), connections=[(m.name, *t) for m in MODULES.values()
                                                        if m.is_set_up(rt) and (t := m.transport(rt))])
 
@@ -1034,7 +1038,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/system", err="Choose an export file first")
         raw = await up.read(versions.MAX_IMPORT + 1)
         if len(raw) > versions.MAX_IMPORT:
-            return back("/system", err="That file is too big for a homewatch export")
+            return back("/system", err="That file is too big for a homeWatch export")
         try:
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
@@ -1055,7 +1059,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/system", err="Form expired")
         text = str(form.get("text", ""))
         if len(text.encode()) > versions.MAX_IMPORT:
-            return back("/system", err="That file is too big for a homewatch export")
+            return back("/system", err="That file is too big for a homeWatch export")
         problem = await password_problem(request, user, form)
         if problem:
             return back("/system", err=f"Nothing imported: {problem}")
@@ -1234,7 +1238,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/system", err=err)
         audit(rt.db, user.username, "retention", f"asked the updater to keep {keep} of history (was {rt.cfg.retention})")
         return back("/system", msg=f"Asked the host to keep {updater.RETENTIONS[keep]} of history; "
-                    "homewatch restarts in a few seconds.")
+                    "homeWatch restarts in a few seconds.")
 
     @app.get("/system/grafana-exports")
     async def grafana_export_pick(request: Request):
@@ -1262,7 +1266,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         latest, newer = rt.db.get("updates.latest", ""), rt.update_available()
         if not latest:
             return back("/system", err="Couldn't read the latest release from GitHub; try again later")
-        return back("/system", msg=f"homewatch {newer} is available" if newer else f"{latest} is the latest release")
+        return back("/system", msg=f"homeWatch {newer} is available" if newer else f"{latest} is the latest release")
 
     @app.post("/system/updates/install")
     async def updates_install(request: Request):
@@ -1602,7 +1606,7 @@ def _save_section(request: Request, section: str, form: dict, user: User) -> str
         if "url" in form:
             url = form.get("url", "").strip().rstrip("/")
             if url and not url.startswith(("https://", "http://")):
-                return "homewatch address: start it with https://"
+                return "homeWatch address: start it with https://"
             rt.db.set("home.url", url)
         rt.db.set("home.name", name or "Home")
         rt.db.set("home.tz", zone)

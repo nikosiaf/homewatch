@@ -14,7 +14,7 @@
 {% endmacro %}
 <fieldset class="reading"><legend>Entities</legend>
 {% if entity_groups %}
-  <p class="quiet small"><b>Watch</b>: homewatch checks it at every reading and reports it when it has been unavailable
+  <p class="quiet small"><b>Watch</b>: homeWatch checks it at every reading and reports it when it has been unavailable
     for 30 minutes; alarm panels, safety and tamper sensors, batteries and add-on Running sensors also get their own
     check. {% if grafana_col %}<b>Show in Grafana</b>: on the Home Assistant dashboards. {% endif %}A ticked entity's
     values are kept for the history. <b>Rule</b>: your own condition on a watched entity.
@@ -63,7 +63,7 @@
   </div>
   <dialog data-et-dialog class="card">
     <h3 style="margin-top:0">Keep their history?</h3>
-    <p class="small">These entities are no longer watched{{ ' or shown in Grafana' if grafana_col }}, so homewatch stops
+    <p class="small">These entities are no longer watched{{ ' or shown in Grafana' if grafana_col }}, so homeWatch stops
       storing their values:</p>
     <ul class="small" data-et-dropped></ul>
     <p class="small">Keep what is stored so far (it stays until it is older than the history you keep), or delete it now?

@@ -225,7 +225,7 @@ FORMAT = 1
 MAX_IMPORT = 1_000_000  # bytes
 EXPORTS_KEPT = 14
 _EXPORT_NAME = re.compile(r"^homewatch-config-\d{4}-\d{2}-\d{2}\.yaml$")
-_HEADER = ("# homewatch configuration export. It holds no passwords, tokens, private notification addresses or users:\n"
+_HEADER = ("# homeWatch configuration export. It holds no passwords, tokens, private notification addresses or users:\n"
            "# after importing it elsewhere, enter those again on the module and notification pages.\n")
 
 
@@ -244,7 +244,7 @@ def from_yaml(text: str) -> tuple[dict | None, str]:
     except yaml.YAMLError as e:
         return None, f"not valid YAML ({str(e).splitlines()[0]})"
     if not isinstance(doc, dict) or doc.get("format") != FORMAT:
-        return None, "not a homewatch configuration export (format 1)"
+        return None, "not a homeWatch configuration export (format 1)"
     settings = doc.get("settings") or {}
     if not isinstance(settings, dict):
         return None, "settings: must be a mapping"

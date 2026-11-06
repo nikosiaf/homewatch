@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}homewatch{% endblock %} · {{ home }}</title>
+  <title>{% block title %}homeWatch{% endblock %} · {{ home }}</title>
   <link rel="icon" type="image/svg+xml" href="/static/homewatch-icon.svg">
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/homewatch-icon.svg">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="homewatch">
+  <meta name="apple-mobile-web-app-title" content="homeWatch">
   <meta name="theme-color" content="#f3f5f9" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
   <link rel="stylesheet" href="/static/app.css?v={{ version }}">
@@ -21,7 +21,7 @@
 <body>
 {% if user %}
 <header><div class="wrap">
-  <a class="brand" href="/"><img src="/static/homewatch-icon.svg" alt="" width="28" height="28"><span class="wordmark"><b>home</b><span>watch</span></span></a>
+  <a class="brand" href="/"><img src="/static/homewatch-icon.svg" alt="" width="28" height="28"><span class="wordmark"><b>home</b><span><svg class="w-bino" viewBox="0 0 48 32" role="img" aria-label="W"><path d="M2 3.5Q2 1.5 4 1.5L8 1.5Q9.6 1.5 10.4 3L16.5 14L8 16Z" fill="currentColor"/><path d="M46 3.5Q46 1.5 44 1.5L40 1.5Q38.4 1.5 37.6 3L31.5 14L40 16Z" fill="currentColor"/><path d="M18 15.5L24 7.5L30 15.5" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="13" cy="21.5" r="8.6" fill="currentColor"/><circle cx="35" cy="21.5" r="8.6" fill="currentColor"/><rect x="20" y="19" width="8" height="5" rx="2.5" fill="currentColor"/><circle cx="13" cy="21.5" r="5.4" fill="#38bdf8"/><circle cx="35" cy="21.5" r="5.4" fill="#38bdf8"/><circle cx="11.2" cy="19.6" r="1.7" fill="#fff" opacity=".9"/><circle cx="33.2" cy="19.6" r="1.7" fill="#fff" opacity=".9"/></svg>atch</span></span></a>
   <div class="tools">
     <button type="button" class="icon-btn" data-theme-toggle data-mode="auto" title="Theme" aria-label="Theme (change)">
       <svg class="i-auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor"/></svg>
@@ -55,14 +55,14 @@
 </div></header>
 {% endif %}
 <main class="wrap">
-  {% if update and user and user.is_admin and request.url.path not in ('/system/update', '/system/update/progress') %}<div class="flash ok">homewatch {{ update }} is available: <a href="/system">update it on the System page</a>.</div>{% endif %}
+  {% if update and user and user.is_admin and request.url.path not in ('/system/update', '/system/update/progress') %}<div class="flash ok">homeWatch {{ update }} is available: <a href="/system">update it on the System page</a>.</div>{% endif %}
   {% if not box_id %}
   {% if flash %}<div class="flash ok" data-autohide role="status">{{ flash }}</div>{% endif %}
   {% if error %}<div class="flash err" role="alert">{{ error }}<button type="button" class="close" data-dismiss aria-label="Close">×</button></div>{% endif %}
   {% endif %}
   {% if wizard %}{% include "_wizard_bar.html" %}{% endif %}
   {% block content %}{% endblock %}
-  <p class="quiet small" style="margin-top:32px">homewatch {{ version }}</p>
+  <p class="quiet small" style="margin-top:32px">homeWatch {{ version }}</p>
 </main>
 </body>
 </html>

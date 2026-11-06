@@ -1,4 +1,4 @@
-"""healthchecks.io heartbeat: homewatch pings a URL after every successful check run.
+"""healthchecks.io heartbeat: homeWatch pings a URL after every successful check run.
 
 Not a message channel: healthchecks.io notices when the pings stop (host, power or internet down)
 and alerts you through its own channels.
@@ -11,8 +11,8 @@ from urllib.parse import urlsplit
 import httpx
 
 TITLE = "healthchecks.io heartbeat"
-DESCRIPTION = ("Tells you when homewatch itself goes quiet. If this host, its power or your internet is down, "
-               "homewatch can't send anything; healthchecks.io notices that its pings stopped and alerts you "
+DESCRIPTION = ("Tells you when homeWatch itself goes quiet. If this host, its power or your internet is down, "
+               "homeWatch can't send anything; healthchecks.io notices that its pings stopped and alerts you "
                "by email, app or chat. Create a free check with a 5-minute period and paste its ping URL.")
 LINK = "https://healthchecks.io"
 FIELDS = [("url", "Ping URL", "https://hc-ping.com/your-check-uuid")]

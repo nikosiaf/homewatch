@@ -28,7 +28,7 @@ class InternetModule(Module):
     setup = [
         ("text", "Nothing to create. Enter your contracted speed, tick the probes you want and check the targets."),
         ("text", "The speed test is off by default and uses Cloudflare, which needs nothing extra. To use Ookla, pick it as "
-                 "the engine, accept its EULA and privacy policy, and press Save: homewatch then downloads Ookla's "
+                 "the engine, accept its EULA and privacy policy, and press Save: homeWatch then downloads Ookla's "
                  "program, which it isn't allowed to include."),
     ]
 

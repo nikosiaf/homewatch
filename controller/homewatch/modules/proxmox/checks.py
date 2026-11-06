@@ -14,7 +14,7 @@ from .client import Snapshot
 MODULE = "proxmox"
 
 CHECKS: list[CheckDef] = [
-    CheckDef("api", "API reachable", "api", help="ERROR when homewatch can't read the Proxmox API (down, or token rejected)."),
+    CheckDef("api", "API reachable", "api", help="ERROR when homeWatch can't read the Proxmox API (down, or token rejected)."),
     CheckDef("node", "Node online", "api", help="ERROR when a cluster node is offline."),
     CheckDef("cpu", "Node CPU", "api", unit="%", warn=85, error=95, editable=("warn", "error"),
              help="Busiest node's CPU use at the check run."),

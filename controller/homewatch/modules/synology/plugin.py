@@ -13,7 +13,7 @@ from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Field, Table, https
 from . import snmp
 
 CHECKS = [
-    CheckDef("api", "DSM reachable", "api", help="ERROR when homewatch can't log in to DSM or read it."),
+    CheckDef("api", "DSM reachable", "api", help="ERROR when homeWatch can't log in to DSM or read it."),
     CheckDef("system", "System", "api", unit="°C", warn=60, error=70, editable=("warn", "error"),
              help="System temperature; ERROR when DSM reports a crashed system."),
     CheckDef("cpu", "CPU", "api", unit="%", warn=85, error=95, editable=("warn", "error")),
@@ -51,7 +51,7 @@ class SynologyModule(ApiModule):
         ("text", "Control Panel → User & Group → Create: name it homewatch, add it to the administrators group, "
                  "and on the next pages set No access to every shared folder and Deny for every application "
                  "except DSM. If 2-step verification is enforced, exempt this account."),
-        ("text", "homewatch only reads; it logs in at each read (every 10 minutes unless you change it) and logs out right after."),
+        ("text", "homeWatch only reads; it logs in at each read (every 10 minutes unless you change it) and logs out right after."),
         ("text", "Optional, fans and power supply: Control Panel → Terminal & SNMP → SNMP → enable the SNMP "
                  "service, tick SNMPv3 and create a user (authentication SHA, privacy AES are the safe choices). "
                  "Then tick SNMPv3 below and enter the same user, protocols and passwords."),

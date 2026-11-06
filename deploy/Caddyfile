@@ -32,10 +32,10 @@
 	handle /grafana/homewatch/* {
 		@open path_regexp open ^/grafana/homewatch/open/([a-z0-9_-]{1,40})$
 		redir @open /?open={re.open.1} 302
-		respond "Not a homewatch page" 404
+		respond "Not a homeWatch page" 404
 	}
 
-	# Grafana (optional, the compose profile "grafana"): homewatch decides who may in, and as what
+	# Grafana (optional, the compose profile "grafana"): homeWatch decides who may in, and as what
 	handle /grafana* {
 		route {
 			# only homewatch's answer may name the Grafana user
