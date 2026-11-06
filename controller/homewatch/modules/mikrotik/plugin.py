@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+import statistics
 
 import httpx
 
@@ -11,6 +13,10 @@ from ..pinning import host_port, verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table
 
 ERROR_WINDOW = 3600  # port errors are counted over the last hour
+# cpu-load is a ~1 s value: an SNMP walk or a login can pin a small RouterBOARD at 100 % for one second.
+# Read it CPU_SAMPLES times CPU_GAP s apart and keep the median so a single-second spike is ignored.
+CPU_SAMPLES = 3
+CPU_GAP = 2.0
 CHECKS = [
     CheckDef("api", "Devices reachable", "api", help="ERROR when none of the devices can be read."),
     CheckDef("each", "Every device read", "api", help="ERROR when one of several devices can't be read."),
@@ -128,10 +134,14 @@ class MikroTikModule(ApiModule):
         health = await get("system/health")
         board = await get("system/routerboard")
         ifs = await get("interface")
+        cpus = [float(res.get("cpu-load", 0))]
+        for _ in range(CPU_SAMPLES - 1):
+            await asyncio.sleep(CPU_GAP)
+            cpus.append(float((await get("system/resource")).get("cpu-load", 0)))
         return {
             "host": host, "name": ident.get("name") or host,
             "model": res.get("board-name"), "version": res.get("version"),
-            "cpu": float(res.get("cpu-load", 0)),
+            "cpu": statistics.median(cpus),
             "mem": 100 * (1 - float(res.get("free-memory", 0)) / float(res.get("total-memory", 1))),
             "uptime": uptime_s(res.get("uptime", "")),
             "temp": next((float(h["value"]) for h in health if "temperature" in h.get("name", "")), None),

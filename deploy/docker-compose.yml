@@ -21,7 +21,7 @@ services:
     tmpfs: [/tmp, /config]
 
   controller:
-    image: ghcr.io/nikosiaf/homewatch:${HW_VERSION:-0.34.4}
+    image: ghcr.io/nikosiaf/homewatch:${HW_VERSION:-0.34.5}
     restart: unless-stopped
     env_file: .env
     environment:

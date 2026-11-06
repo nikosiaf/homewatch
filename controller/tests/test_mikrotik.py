@@ -125,3 +125,32 @@ def test_ports_are_listed_per_device():
     cs = m.choices(snap)
     assert {c.group for c in cs} == {"sw1", "sw2"}
     assert all(not c.label.startswith("sw") for c in cs)  # the device is the group, the label is the port
+
+
+def test_cpu_is_the_median_of_three_readings(monkeypatch):
+    import asyncio
+    import itertools
+
+    import httpx
+
+    from homewatch.modules.mikrotik import plugin
+
+    cpu = itertools.cycle(["100", "4", "6"])  # one-second spike on the first read (SNMP walk / login)
+    calls = []
+
+    def handler(req):
+        path = req.url.path.split("/rest/")[1]
+        calls.append(path)
+        body = {"system/resource": lambda: {"cpu-load": next(cpu), "free-memory": "50", "total-memory": "100",
+                                            "uptime": "1d", "board-name": "RB2011", "version": "7.25"},
+                "system/identity": lambda: {"name": "mt2"}, "system/health": lambda: [],
+                "system/routerboard": lambda: {}, "interface": lambda: []}[path]()
+        return httpx.Response(200, json=body)
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler), **kw))
+    monkeypatch.setattr(plugin, "CPU_GAP", 0)
+    s = {"devices": "192.0.2.1", "username": "u", "https": False, "verify": False}
+    snap = asyncio.run(plugin.MikroTikModule().fetch(s, "p", 0))
+    assert snap["devices"][0]["cpu"] == 6
+    assert calls.count("system/resource") == plugin.CPU_SAMPLES
