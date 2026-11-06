@@ -31,12 +31,13 @@ down", "guest stopped", "backup failed") and sends alerts to Telegram or ntfy.
 - [UPS](#ups-module-optional): mains power, battery charge, runtime, load and UPS health from a NUT server
 - [Docker hosts](#docker-hosts-module-optional): containers running, restarts, health checks and removed containers, through a read-only socket proxy
 - [Alerts and notifications](#alerts-and-notifications): Telegram, ntfy, email, webhook and a healthchecks.io heartbeat
+- [Grafana dashboards](#grafana-dashboards-optional): an Overview and one dashboard per module, with your homewatch login
 - [Update](#update) · [Back up](#back-up) · [Security notes](#security-notes) · [Development](#development)
 
 ## Install
 
 You need a Linux host with Docker Engine and the Compose plugin
-(2 CPU, 2 GB RAM and 10 GB disk are plenty). No Docker yet? Install it from Docker's own repository,
+(2 CPU, 2 GB RAM and 10 GB disk are plenty; add 2 GB of disk for Grafana). No Docker yet? Install it from Docker's own repository,
 following https://docs.docker.com/engine/install/ for your distribution (Debian:
 https://docs.docker.com/engine/install/debian/), then add your user to the `docker` group
 (`sudo usermod -aG docker $USER`) and log in again.
@@ -53,11 +54,13 @@ less install.sh
 
 Please read `install.sh` before running it (`less install.sh`, `q` to quit); it's short.
 
-`install.sh` does four things:
+`install.sh` does five things:
 - writes `.env` with a new master key, the host's time zone, and its gateway and DNS server as defaults
 - creates a self-signed certificate in `certs/`
 - offers the updater (asks first, needs sudo once): a systemd unit that installs the latest release when
   you press Update on the System page (see [Update](#update))
+- asks whether to add [Grafana](#grafana-dashboards-optional) (default no; `--grafana` / `--no-grafana`
+  answer without asking, and the System page can turn it on or off later)
 - runs `docker compose up -d`
 
 At the end it prints the certificate's SHA-256 fingerprint. Open `https://<host>` and compare that
@@ -166,7 +169,8 @@ each log is read once.
 ### OPNsense module (optional)
 
 Reads an OPNsense firewall through the API key of a user that has only the status pages it needs
-(the module page lists them). Missing privileges show as "not readable", not as alarms.
+(the module page lists them). Missing privileges show as "not readable", not as alarms. For the
+Grafana traffic graphs, also give it **Reporting: Traffic**.
 
 | Check | WARNING | ERROR |
 |---|---|---|
@@ -227,6 +231,13 @@ entity (a typo, or the entity was renamed) is a WARNING, so it doesn't go quiet 
 
 Entities that are unavailable when you connect are ignored (you can change the list), so only
 entities that *become* unavailable are reported.
+
+**Entities to record** (for [Grafana](#grafana-dashboards-optional)), in "Additional configuration":
+one entity id or pattern per line, e.g. `sensor.*_temperature`, `climate.*`, `sensor.heating_oil`.
+Their numbers are kept for a year, on/off-like states as 1/0; thermostats also keep the current and
+target temperature and whether they heat, lights their brightness. Alarm, safety, tamper and battery
+entities are always kept. Recording an entity doesn't watch it: a recorded-only entity that becomes
+unavailable isn't reported.
 
 ### Synology NAS module (optional)
 
@@ -378,6 +389,29 @@ There are two account roles: **admin**, who can change everything, and **viewer*
 status and history.
 
 
+## Grafana dashboards (optional)
+
+Grafana shows everything homewatch stores (every device, port, guest, disk, and the Home Assistant
+entities you record) at `https://<homewatch>/grafana/`. It has no login of its own: homewatch signs
+you in. homewatch admins are Grafana admins, viewers can only look.
+
+- **On or off:** `install.sh` asks; later, **System → Grafana and history**. It needs about 2 GB of
+  disk and 150 MB of memory. Turning it off keeps its dashboards. By hand: `COMPOSE_PROFILES=grafana`
+  in `.env` (empty to turn it off), then `docker compose up -d`.
+- **Built-in dashboards** (folder *homewatch*): an Overview and one per enabled module. homewatch
+  rebuilds them with every update, so they can't be saved; switching a module off removes its dashboard.
+- **Your own dashboards:** open a built-in one, **Save as**, and keep the copy in **My dashboards**.
+  Updates never touch that folder, and homewatch saves it every night next to the configuration
+  exports (System → Grafana and history, last 14).
+- **From homewatch:** an open Status tile has a small Grafana icon next to its line, and the menu has
+  **Grafana ↗**; both open in a new tab and show only while Grafana runs.
+- **Resolution** follows each module's [read interval](#how-often-each-module-is-read).
+- **Data source:** *homewatch*, the VictoriaMetrics that homewatch already runs (PromQL / MetricsQL).
+  Metric names start with `hw_`; Grafana's Explore lists them.
+- **History length:** a year by default. **System → History** can keep less (6, 3 or 1 month): data
+  older than that is deleted, and VictoriaMetrics drops whole months, so space can take up to a month
+  to come back. Issues, speed tests and settings are not affected.
+
 ## Update
 
 The System page says when a newer release exists (it checks GitHub once a day, or when you press
@@ -387,12 +421,14 @@ the Status page when the new release answers. After 5 minutes without an answer 
 failed.
 
 The updater is a systemd unit on the host (`homewatch-update.path`) that runs `update.sh`. homewatch
-gets no Docker access for it: the button only leaves a request file in `update/ask/`. The script never
-reads what is in the file. It asks GitHub for the latest release itself, sets `HW_VERSION` in `.env`,
-then pulls and restarts. If the download fails, or the new release isn't healthy within 3 minutes,
+gets no Docker access for it: the button only leaves a request file in `update/ask/`. The script
+compares that file's first line with a few fixed words (`grafana on`, `grafana off`, `retention 1y`,
+`180d`, `90d`, `30d`, from the System page); anything else means "update". It asks GitHub for the latest
+release itself, sets `HW_VERSION` in `.env`, then pulls and restarts. If the download fails, or the new release isn't healthy within 3 minutes,
 it puts `.env` back and starts the previous release again. It reports to `update/status`, which the
-System page shows. It doesn't update `docker-compose.yml`: when a release changes that file, its release
-notes say so. To add the updater to an existing install, put `update.sh` from the release next to
+System page shows. It doesn't update `docker-compose.yml`, `Caddyfile` or `update.sh`: when a release
+changes them, its release notes say so. Then download them from the release next to `install.sh`, run
+`docker compose up -d`, and with the updater `sudo ./update.sh` once (it tells homewatch what it can do). To add the updater to an existing install, put `update.sh` from the release next to
 `install.sh` and run `./install.sh` again (it keeps `.env` and the certificate). To remove it:
 `sudo systemctl disable --now homewatch-update.path`.
 
@@ -407,8 +443,10 @@ Database changes apply on start.
 ## Back up
 
 Everything homewatch knows lives in two Docker volumes:
-- `homewatch_hw-data`: settings, users, history, encrypted tokens
+- `homewatch_hw-data`: settings, users, history, encrypted tokens (and the nightly exports)
 - `homewatch_vm-data`: metrics
+
+With Grafana, also `homewatch_grafana-data` (your own dashboards; the built-in ones are recreated).
 
 **Settings export:** System → Export and import downloads all settings as one YAML file (modules,
 thresholds, timing, channels, maintenance windows; no passwords, tokens or users). homewatch also
@@ -454,8 +492,11 @@ allow redistribution. **System → Health** shows the installed version.
 ## Security notes
 
 - **Exposure:** don't forward homewatch to the internet. Use it on your LAN or over Tailscale.
-- **Network:** only Caddy publishes ports (80 redirects to 443). VictoriaMetrics, Telegraf and the
-  controller stay on the internal Docker network.
+- **Network:** only Caddy publishes ports (80 redirects to 443). VictoriaMetrics, Telegraf, Grafana and
+  the controller stay on internal Docker networks.
+- **Grafana:** reached only through Caddy, which asks homewatch who you are first. Grafana trusts the
+  user name homewatch hands it only from the small private network it shares with Caddy, homewatch and
+  VictoriaMetrics; Caddy removes those headers from what browsers send.
 - **Secrets:** tokens and URLs are encrypted at rest (AES-GCM, key from `.env`) and never shown
   again after saving.
 - **Logins:** passwords are hashed with Argon2. Sessions use HttpOnly, Secure, SameSite=Strict
@@ -475,7 +516,7 @@ browser ──HTTPS──▶ caddy ──▶ controller (FastAPI: UI, checks eve
                                  │  ▲                        │
                      SQLite ◀────┘  │ reads              Telegram / ntfy / healthchecks.io
                                     │
-telegraf (ping, DNS) ──writes──▶ victoriametrics
+telegraf (ping, DNS) ──writes──▶ victoriametrics ◀──reads── grafana (optional, /grafana/ via caddy)
 ```
 
 ## Development
