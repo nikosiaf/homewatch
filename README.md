@@ -16,7 +16,7 @@ with a year of history from every device, port and guest, and from the Home Assi
 - LAN / Tailscale only: it never needs a port open to the internet
 - MIT licensed
 
-![homeWatch's Status page: the overall status, today's key numbers and one tile per module with its 24-hour line](homewatch.png)
+![homeWatch's Status page: the overall status, today's key numbers and one tile per module with its 24-hour line](docs/screenshots/status.png)
 
 <p>
   <img src="docs/screenshots/grafana-overview.png" width="49%" alt="Grafana Overview: problems now, a status tile per module, checks needing attention, internet and modem line">
