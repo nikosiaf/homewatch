@@ -7,6 +7,7 @@ import re
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from ...metrics import lines, num
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
@@ -99,12 +100,38 @@ class UniFiModule(ApiModule):
                              "version": d.get("version"), "upgradable": bool(d.get("upgradable")),
                              "upgrade_to": d.get("upgrade_to_firmware"), "uptime": d.get("uptime") or 0,
                              "clients": d.get("num_sta") or 0, "adopted": d.get("adopted", True),
-                             "cpu": _num((d.get("system-stats") or {}).get("cpu"))} for d in devices],
+                             "cpu": _num((d.get("system-stats") or {}).get("cpu")),
+                             "mem": _num((d.get("system-stats") or {}).get("mem")),
+                             "rx_bytes": _num(d.get("rx_bytes")), "tx_bytes": _num(d.get("tx_bytes")),
+                             "satisfaction": _num(d.get("satisfaction")),
+                             "radios": [{"radio": r.get("radio", ""), "channel": _num(r.get("channel")),
+                                         "clients": _num(r.get("num_sta")), "use": _num(r.get("cu_total"))}
+                                        for r in d.get("radio_table_stats") or []]} for d in devices],
                 "health": [{"subsystem": h.get("subsystem"), "status": h.get("status"), "users": h.get("num_user")}
                            for h in health]}
         wlan = next((h for h in snap["health"] if h["subsystem"] == "wlan"), {})
         snap["_summary"] = f"{len(snap['devices'])} devices, {wlan.get('users') or 0} Wi-Fi clients"
         return snap
+
+    def series(self, site: str) -> list[str]:
+        snap, ts = self.snap, self.snap_ts
+        if not snap:
+            return []
+        out = lines("hw_unifi_device", [
+            ({"site": site, "device": d["name"] or "", "mac": d["mac"], "model": d.get("model") or "", "type": d.get("type") or ""},
+             {"online": float(d.get("state") == 1), "clients": num(d.get("clients")), "cpu_percent": d.get("cpu"),
+              "mem_percent": d.get("mem"), "uptime_seconds": num(d.get("uptime")), "rx_bytes": d.get("rx_bytes"),
+              "tx_bytes": d.get("tx_bytes"), "satisfaction_percent": d.get("satisfaction"),
+              "upgradable": float(d.get("upgradable", False))}) for d in snap["devices"]], ts)
+        out += lines("hw_unifi_radio", [
+            ({"site": site, "device": d["name"] or "", "radio": r["radio"]},
+             {"clients": r["clients"], "channel": r["channel"], "channel_use_percent": r["use"]})
+            for d in snap["devices"] for r in d.get("radios", [])], ts)
+        # "unknown": a part this site doesn't have (no UniFi gateway: wan, www, lan, vpn) - left out
+        out += lines("hw_unifi_health", [({"site": site, "subsystem": h["subsystem"] or ""},
+                     {"ok": float(h.get("status") == "ok"), "users": num(h.get("users"))}) for h in snap["health"]
+                     if h.get("status") in ("ok", "warning", "error")], ts)
+        return out
 
     @staticmethod
     async def _get(http, url, headers):

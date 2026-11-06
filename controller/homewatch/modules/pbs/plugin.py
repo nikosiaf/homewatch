@@ -7,6 +7,7 @@ import re
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from ...metrics import lines, num
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
@@ -137,6 +138,25 @@ class PBSModule(ApiModule):
         order = {"vm": 0, "ct": 1, "host": 2}
         rows = sorted(snap["groups"], key=lambda g: (g["store"], order.get(g["type"], 3), int(g["id"]) if g["id"].isdigit() else 0, g["id"]))
         return [Choice(self._key(g), self._label(g), f"datastore {g['store']}" if many else "") for g in rows]
+
+    def series(self, site: str) -> list[str]:
+        snap, ts = self.snap, self.snap_ts
+        if not snap:
+            return []
+        out = lines("hw_pbs_store", [({"site": site, "store": x.get("store") or ""},
+                    {"used_bytes": num(x.get("used")), "total_bytes": num(x.get("total")), "avail_bytes": num(x.get("avail")),
+                     "full_timestamp": num(x.get("estimated-full-date")) or None}) for x in snap["stores"]], ts)
+        out += lines("hw_pbs_group", [({"site": site, "store": g["store"], "type": g["type"] or "", "id": g["id"],
+                                        "name": g.get("comment") or ""},
+                     {"last_backup_timestamp": num(g.get("last")), "snapshots": num(g.get("count"))}) for g in snap["groups"]], ts)
+        day = [j for j in snap["jobs"] if (num(j.get("end")) or 0) >= ts - 86400]
+        out += lines("hw_pbs_jobs", [({"site": site, "type": t},
+                     {"ok_24h": float(sum(1 for j in day if j["type"] == t and j["status"] == "OK")),
+                      "failed_24h": float(sum(1 for j in day if j["type"] == t and j["status"] != "OK"))})
+                     for t in sorted(JOB_TYPES)], ts)
+        if snap.get("updates") is not None:
+            out += lines("hw_pbs_system", [({"site": site}, {"updates": float(snap["updates"])})], ts)
+        return out
 
     def check(self, s, th, snap, now):
         out = []

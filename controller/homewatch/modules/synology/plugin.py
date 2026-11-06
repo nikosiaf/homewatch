@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from ...metrics import lines, num
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Field, Table, https_url
 from . import snmp
@@ -152,6 +153,9 @@ class SynologyModule(ApiModule):
             "volumes": [{"id": v.get("id"), "path": v.get("vol_path"), "status": v.get("status"),
                          "used": (v.get("size") or {}).get("used"), "total": (v.get("size") or {}).get("total")}
                         for v in storage.get("volumes", [])],
+            "net": [{"device": n.get("device"), "rx": n.get("rx"), "tx": n.get("tx")} for n in util.get("network") or []],
+            "diskio": {k: ((util.get("disk") or {}).get("total") or {}).get(k) for k in ("read_byte", "write_byte",
+                                                                                           "utilization")},
             "update": None if upgrade is None else bool((upgrade.get("update") or {}).get("available")),
             "update_version": ((upgrade or {}).get("update") or {}).get("version", ""),
         }
@@ -170,6 +174,34 @@ class SynologyModule(ApiModule):
                     snap["hw_error"] = str(e)
         snap["_summary"] = f"{snap['info'].get('model', 'NAS')} {snap['info'].get('firmware_ver', '')}".strip()
         return snap
+
+    def series(self, site: str) -> list[str]:
+        snap, ts = self.snap, self.snap_ts
+        if not snap:
+            return []
+        i, cpu = snap["info"], snap.get("cpu") or {}
+        load = sum(num(cpu.get(k)) or 0 for k in ("user_load", "system_load", "other_load")) if isinstance(cpu, dict) else num(cpu)
+        name = i.get("model") or "NAS"
+        hw = {k: float(v == 1) for k, v in (snap.get("hw") or {}).items() if v is not None}  # Synology MIB: 1 = normal
+        io = snap.get("diskio") or {}
+        out = lines("hw_synology_system", [({"site": site, "nas": name},
+                    {"temp_celsius": num(i.get("sys_temp")), "cpu_percent": load, "mem_percent": num(snap.get("mem")),
+                     "crashed": float(snap["crashed"]), "update_available": None if snap.get("update") is None
+                     else float(snap["update"]), "disk_read_bytes_per_second": num(io.get("read_byte")),
+                     "disk_write_bytes_per_second": num(io.get("write_byte")),
+                     "disk_utilization_percent": num(io.get("utilization")), **{f"{k}_ok": v for k, v in hw.items()}})], ts)
+        out += lines("hw_synology_net", [({"site": site, "nas": name, "interface": n["device"] or ""},
+                     {"rx_bytes_per_second": num(n["rx"]), "tx_bytes_per_second": num(n["tx"])})
+                     for n in snap.get("net", []) if n["device"] != "total"], ts)
+        out += lines("hw_synology_disk", [({"site": site, "nas": name, "disk": d.get("name") or d.get("id") or "",
+                                            "model": (d.get("model") or "").strip()},
+                     {"temp_celsius": num(d.get("temp")), "bad_sectors": num(d.get("unc")),
+                      "healthy": float(d.get("status") == "normal" and d.get("smart_status") in ("normal", None))})
+                     for d in snap["disks"]], ts)
+        out += lines("hw_synology_volume", [({"site": site, "nas": name, "volume": v.get("path") or v.get("id") or ""},
+                     {"used_bytes": num(v.get("used")), "total_bytes": num(v.get("total")),
+                      "healthy": float(v.get("status") == "normal")}) for v in snap["volumes"]], ts)
+        return out
 
     def check(self, s, th, snap, now):
         out = []

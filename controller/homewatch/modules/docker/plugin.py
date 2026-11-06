@@ -9,6 +9,7 @@ import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
 from ..apibase import why, ApiError, ApiModule, Choice, Field, Table
+from ...metrics import lines
 
 RESTART_WINDOW = 3600  # restarts are counted over the last hour
 CHECKS = [
@@ -180,6 +181,15 @@ class DockerModule(ApiModule):
         return [(h, c) for h in snap["hosts"] for c in h["containers"] if c["policy"] in AUTO
                 and self._key(h, c) not in skipped and f"group:{h['name']}" not in skipped
                 and f"group:{h['name']} · {c['project'] or 'no project'}" not in skipped]  # set before 0.28
+
+    def series(self, site: str) -> list[str]:
+        snap = self.snap
+        if not snap:
+            return []
+        return lines("hw_docker_container", [
+            ({"site": site, "host": h["name"], "project": c["project"], "container": c["name"], "image": c["image"]},
+             {"running": float(c["state"] == "running"), "healthy": {"healthy": 1.0, "unhealthy": 0.0}.get(c["health"]),
+              "restarts": float(c["restarts"])}) for h in snap["hosts"] for c in h["containers"]], self.snap_ts)
 
     def check(self, s, th, snap, now):
         out = []

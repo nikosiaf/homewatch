@@ -8,6 +8,7 @@ import shlex
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
 from ..apibase import ApiError, ApiModule, Field, Table
+from ...metrics import lines, num as _num
 
 CHECKS = [
     CheckDef("api", "NUT server reachable", "api", help="ERROR when the NUT server can't be read or its data is stale."),
@@ -116,6 +117,26 @@ class UPSModule(ApiModule):
         v = {r[2]: r[3] for r in rows if len(r) >= 4 and r[0] == "VAR"}
         model = " ".join(x for x in (v.get("ups.mfr", ""), v.get("ups.model", v.get("device.model", ""))) if x).strip()
         return {"name": name, "vars": v, "_summary": f"{name}: {model or 'UPS'}"}
+
+    # NUT variable -> metric field
+    SERIES = {"battery.charge": "battery_charge_percent", "battery.runtime": "battery_runtime_seconds",
+              "battery.voltage": "battery_voltage_volts", "ups.load": "load_percent", "input.voltage": "input_voltage_volts",
+              "output.voltage": "output_voltage_volts", "ups.realpower": "power_watts",
+              "ups.realpower.nominal": "power_nominal_watts", "ups.temperature": "temp_celsius",
+              "input.frequency": "input_frequency_hertz"}
+
+    def series(self, site: str) -> list[str]:
+        snap = self.snap
+        if not snap:
+            return []
+        v = snap["vars"]
+        flags = v.get("ups.status", "").split()
+        fields = {f: _num(v.get(k)) for k, f in self.SERIES.items()}
+        if fields["power_watts"] is None and fields["power_nominal_watts"] and fields["load_percent"] is not None:
+            fields["power_watts"] = fields["power_nominal_watts"] * fields["load_percent"] / 100  # estimate
+        fields |= {"on_battery": float("OB" in flags), "low_battery": float("LB" in flags),
+                   "replace_battery": float("RB" in flags), "online": float("OL" in flags)}
+        return lines("hw_ups", [({"site": site, "ups": snap["name"]}, fields)], self.snap_ts)
 
     def check(self, s, th, snap, now):
         out = []

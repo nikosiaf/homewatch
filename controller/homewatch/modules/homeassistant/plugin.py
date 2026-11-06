@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import re
 from datetime import datetime
+from fnmatch import fnmatchcase
 
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from ...metrics import lines, num
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 from . import rules as entity_rules
@@ -55,6 +57,42 @@ DISK, MEMORY = "sensor.system_monitor_disk_usage", "sensor.system_monitor_memory
 CPU = "sensor.system_monitor_processor_use"
 HOST = (("disk", "disk_sensor", "Disk use sensor", DISK), ("memory", "memory_sensor", "Memory use sensor", MEMORY),
         ("cpu", "cpu_sensor", "CPU use sensor", CPU))
+
+
+RECORD_LINE = re.compile(r"^[a-z0-9_*?]+\.[a-z0-9_*?]+$")
+RECORD_MAX = 500  # entities recorded per read; more is a sign of a too-wide pattern
+# states that mean on (1) or off (0) when an entity is recorded
+ON = {"on", "open", "home", "true", "heating", "cooling", "heat", "cool", "heat_cool", "auto", "dry", "fan_only", "playing", "armed_home", "armed_away", "armed_night",
+      "armed_vacation", "armed_custom_bypass", "triggered", "unlocked", "detected", "wet", "problem"}
+OFF = {"off", "closed", "not_home", "false", "idle", "paused", "standby", "disarmed", "locked", "clear", "dry", "ok"}
+CLIMATE_ATTRS = {"current_temperature": "current_temperature", "temperature": "target_temperature",
+                 "current_humidity": "current_humidity"}
+
+
+def record_patterns(text: str) -> list[str]:
+    return [x.strip() for x in (text or "").splitlines() if x.strip() and not x.strip().startswith("#")]
+
+
+def recorded(patterns: list[str], entity_id: str) -> bool:
+    return any(fnmatchcase(entity_id, p) for p in patterns)
+
+
+def entity_values(e: dict) -> dict[str, float]:
+    """What an entity's state means as numbers: its value, or 1/0 for on/off-like states, plus a few attributes."""
+    st, a, out = str(e.get("state", "")), e.get("attributes") or {}, {}
+    v = num(st)
+    if v is None and st.lower() in ON | OFF:
+        v = float(st.lower() in ON)
+    if v is not None and st not in ("nan", "inf", "-inf"):
+        out["value"] = v
+    dom = e["entity_id"].split(".", 1)[0]
+    if dom == "climate":
+        out |= {f: num(a.get(k)) for k, f in CLIMATE_ATTRS.items() if num(a.get(k)) is not None}
+        if a.get("hvac_action"):
+            out["active"] = float(a["hvac_action"] in ("heating", "cooling", "drying"))
+    elif dom == "light" and num(a.get("brightness")) is not None:
+        out["brightness_percent"] = round(num(a["brightness"]) / 2.55, 1)
+    return out
 
 
 def _domain(e) -> str:
@@ -142,6 +180,11 @@ class HomeAssistantModule(ApiModule):
                    "* and ? match any text in an entity id. Lines starting with # are notes. Examples: "
                    "binary_sensor.panel_zone_*_tamper is on error · sensor.panel_link is not online error · "
                    "sensor.oil_level below 100 error."),
+        Field("record", "Entities to record", "", kind="lines", section="more",
+              help="For the Grafana dashboards: one entity id per line, * and ? match any text, # starts a note. "
+                   "Their numbers (and on/off as 1/0) are kept for a year. Alarm, safety, tamper and battery "
+                   "entities are always kept. Example: sensor.*_temperature · "
+                   "sensor.heating_oil · climate.* · binary_sensor.front_door"),
         Field("watch_all", "Watch every entity", kind="check", default=False, section="more",
               help="Off: only the essential entities (alarm, safety, tamper, battery, add-on, backup, host and rule "
                    "entities) are read and listed. On: all of them are read at every check, so any one that becomes "
@@ -186,6 +229,9 @@ class HomeAssistantModule(ApiModule):
             if v and not re.fullmatch(r"sensor\.[a-z0-9_]+", v):
                 return out, f"{label}: an entity id like sensor.disk_use_percent"
             out[k] = v
+        bad = [x for x in record_patterns(out.get("record", "")) if not RECORD_LINE.match(x)]
+        if bad:
+            return out, f"Entities to record: \"{bad[0]}\" is not an entity id or pattern like sensor.*_temperature"
         _, problem = entity_rules.parse(out.get("rules", ""))
         if problem:
             return out, problem
@@ -214,6 +260,7 @@ class HomeAssistantModule(ApiModule):
 
             config = await get("config")
             rules, _ = entity_rules.parse(s.get("rules", ""))
+            keep = record_patterns(s.get("record", ""))
             everything = bool(s.get("watch_all"))
             full = (everything or self._ids is None or self.snap_ts == float("-inf")
                     or now - self._found_ts >= s.get("full_every", FULL_EVERY) * 60 or len(self._ids) > MAX_SINGLE)
@@ -222,7 +269,7 @@ class HomeAssistantModule(ApiModule):
                 host = set(_sensors(s).values())
                 self._ids = [e["entity_id"] for e in states
                              if _special(e) or e["entity_id"] in BACKUP or e["entity_id"] in host
-                             or entity_rules.wanted(rules, e["entity_id"])]
+                             or entity_rules.wanted(rules, e["entity_id"]) or recorded(keep, e["entity_id"])]
                 self._updates = [_update(e) for e in states
                                  if e["entity_id"].startswith("update.") and e.get("state") == "on"]
                 self._total, self._found_ts = len(states), now
@@ -242,6 +289,15 @@ class HomeAssistantModule(ApiModule):
                 self._updates = [old if e.get("state") in NOT_READY else _update(e)
                                  for old, e in zip(self._updates, fresh, strict=True)
                                  if e and e.get("state") != "off"]
+        rec = [{"entity_id": e["entity_id"], "values": entity_values(e),
+                "name": (e.get("attributes") or {}).get("friendly_name") or "",
+                "unit": (e.get("attributes") or {}).get("unit_of_measurement") or "",
+                "dc": (e.get("attributes") or {}).get("device_class") or ""}
+               for e in states if recorded(keep, e["entity_id"]) or _special(e)][:RECORD_MAX]
+        if not everything:  # recorded only: kept for Grafana, not checked or reported as unavailable
+            host = set(_sensors(s).values())
+            states = [e for e in states if _special(e) or e["entity_id"] in BACKUP or e["entity_id"] in host
+                      or entity_rules.wanted(rules, e["entity_id"])]
         states = [e for e in states if not NOISE.match(e["entity_id"])]
         keep = ("entity_id", "state", "last_changed")
         snap = {"config": {k: config.get(k) for k in ("version", "state", "safe_mode", "recovery_mode", "location_name")},
@@ -251,6 +307,7 @@ class HomeAssistantModule(ApiModule):
                 "backup": {e["entity_id"].removeprefix("sensor.backup_"): e.get("state") for e in states
                            if e["entity_id"] in BACKUP},
                 "entities": self._total,
+                "recorded": rec,
                 "host": {k: next(([e.get("state"), e.get("attributes", {}).get("unit_of_measurement")]
                                   for e in states if e["entity_id"] == eid), None)
                          for k, eid in _sensors(s).items()},
@@ -266,11 +323,19 @@ class HomeAssistantModule(ApiModule):
                               if everything or (e["entity_id"] not in BACKUP
                                                 and e["entity_id"] not in set(_sensors(s).values())))}
         snap["_summary"] = (f"Home Assistant {config.get('version', '?')}, "
-                            + (f"{len(states)} entities" if everything else f"{len(states)} of {self._total} entities read"))
+                            + (f"{len(states)} entities" if everything else f"{len(states)} of {self._total} entities read")
+                            + (f", {len(rec)} recorded" if rec else ""))
         return snap
 
     def default_chosen(self, snap):
         return sorted(e["entity_id"] for e in snap["unavailable"])
+
+    def series(self, site: str) -> list[str]:
+        if not self.snap:
+            return []
+        return lines("hw_ha_entity", [({"site": site, "entity_id": e["entity_id"], "domain": e["entity_id"].split(".")[0],
+                                        "name": e["name"], "unit": e["unit"], "device_class": e["dc"]}, e["values"])
+                                      for e in self.snap.get("recorded", [])], self.snap_ts)
 
     def choices(self, snap):
         return [Choice(e["entity_id"], e.get("name") or e["entity_id"].split(".", 1)[1],
@@ -414,7 +479,10 @@ class HomeAssistantModule(ApiModule):
                        for u in snap["updates"]]),
                 Table("Unavailable now, not ignored", ["Entity", "Name", "Since"],
                       [[e["entity_id"], e.get("name"), str(e.get("last_changed", ""))[:16].replace("T", " ")]
-                       for e in self._reported(s, snap)])]
+                       for e in self._reported(s, snap)]),
+                Table("Recorded for Grafana", ["Entity", "Name", "Value", "Unit"],
+                      [[e["entity_id"], e["name"], ", ".join(f"{k} {v:g}" for k, v in e["values"].items()) or "not a number",
+                        e["unit"]] for e in snap.get("recorded", [])])]
 
 
 plugin = HomeAssistantModule()

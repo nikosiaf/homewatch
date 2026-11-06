@@ -9,6 +9,7 @@ import statistics
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from ...metrics import lines, num
 from ..pinning import host_port, verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table
 
@@ -149,9 +150,27 @@ class MikroTikModule(ApiModule):
             "boot": board.get("current-firmware"), "boot_upgrade": board.get("upgrade-firmware"),
             "ports": [{"name": i["name"], "comment": i.get("comment") or "",
                        "running": str(i.get("running")) == "true", "disabled": str(i.get("disabled")) == "true",
-                       "errors": int(i.get("rx-error", 0) or 0) + int(i.get("tx-error", 0) or 0)}
+                       "errors": int(i.get("rx-error", 0) or 0) + int(i.get("tx-error", 0) or 0),
+                       "rx_bytes": num(i.get("rx-byte")), "tx_bytes": num(i.get("tx-byte")),
+                       "rx_drops": num(i.get("rx-drop")), "tx_drops": num(i.get("tx-drop"))}
                       for i in ifs if i.get("type") in ("ether", "sfp", "combo", "sfp-sfpplus", "sfpplus")],
         }
+
+    def series(self, site: str) -> list[str]:
+        if not self.snap:
+            return []
+        devs, ts = self.snap["devices"], self.snap_ts
+        out = lines("hw_mikrotik_device", [
+            ({"site": site, "device": d["name"], "host": d["host"], "model": d.get("model") or ""},
+             {"cpu_percent": d.get("cpu"), "mem_percent": d.get("mem"), "temp_celsius": d.get("temp"),
+              "voltage_volts": d.get("voltage"), "uptime_seconds": d.get("uptime")}) for d in devs], ts)
+        out += lines("hw_mikrotik_port", [
+            ({"site": site, "device": d["name"], "port": p["name"], "comment": p["comment"]},
+             {"up": float(p["running"]), "disabled": float(p["disabled"]), "errors": float(p["errors"]),
+              "rx_bytes": p.get("rx_bytes"), "tx_bytes": p.get("tx_bytes"),
+              "rx_drops": p.get("rx_drops"), "tx_drops": p.get("tx_drops")})
+            for d in devs for p in d["ports"]], ts)
+        return out
 
     @staticmethod
     def _key(d, p):

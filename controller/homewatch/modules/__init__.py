@@ -96,6 +96,12 @@ class Module:
     icon = "server"  # the Status page tile's line icon (static/icons in _icons.html)
     headline: tuple[str, str] = ("", "")  # (check id, label): the number the Status tile shows big, with its 24 h line
 
+    def series(self, site: str) -> list[str]:
+        """The latest reading as detailed metrics (Influx line protocol, one line per device/port/guest...),
+        written to VictoriaMetrics for the Grafana dashboards. Names: hw_<module>_<what>, field = the value.
+        Called once per new reading (see reading_ts); [] when the module keeps nothing."""
+        return []
+
     def load(self, rt) -> dict:
         raise NotImplementedError
 

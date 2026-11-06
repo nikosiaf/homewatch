@@ -7,6 +7,7 @@ import re
 import httpx
 
 from .. import ERROR, OK, WARNING, CheckDef, level
+from ...metrics import lines, num
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
 
@@ -51,7 +52,8 @@ class OPNsenseModule(ApiModule):
         ("text", "In OPNsense: System → Access → Users → Add. Name it homewatch, tick \"Generate a scrambled "
                  "password\", and give it only these privileges (Effective privileges): "),
         ("code", "Lobby: Dashboard\nSystem: Gateways\nDiagnostics: System Activity\nStatus: Services\n"
-                 "System: Firmware\nSystem: Trust: Certificates\nServices: HAProxy (only if you use it)"),
+                 "System: Firmware\nSystem: Trust: Certificates\nServices: HAProxy (only if you use it)\n"
+                 "Reporting: Traffic (only for the Grafana traffic graphs)"),
         ("text", "Lobby: Dashboard is what lets homewatch read CPU, memory, disk, uptime and the version."),
         ("text", "Save, then press \"+\" under API keys to create a key. OPNsense downloads a file with the key "
                  "and secret: paste them below."),
@@ -124,11 +126,44 @@ class OPNsenseModule(ApiModule):
                           for c in (await get("trust/cert/search", optional=True) or {}).get("rows", [])] or None,
                 "firmware": await get("core/firmware/status", optional=True),
                 "info": await get("diagnostics/system/system_information", optional=True),
+                # for the Grafana traffic panels only; needs the privilege Reporting: Traffic
+                "traffic": (await get("diagnostics/traffic/interface", optional=True) or {}).get("interfaces"),
             }
         name = (snap["info"] or {}).get("name", "OPNsense")
         version = next((v for v in (snap["info"] or {}).get("versions", []) if v.startswith("OPNsense")), "")
         snap["_summary"] = f"{name} {version.replace('OPNsense ', '')}, up {snap['time'].get('uptime', '?')}".strip()
         return snap
+
+    def series(self, site: str) -> list[str]:
+        snap, ts = self.snap, self.snap_ts
+        if not snap:
+            return []
+        name = (snap.get("info") or {}).get("name") or "OPNsense"
+        idle = next((float(m.group(1)) for line in (snap.get("activity") or {}).get("headers", [])
+                     if (m := _IDLE.search(line))), None)
+        mem = (snap.get("resources") or {}).get("memory") or {}
+        ms = lambda v: num(str(v or "").split()[0]) if v else None  # noqa: E731 - "8.6 ms", "0.0 %"
+        out = lines("hw_opnsense_system", [({"site": site, "firewall": name},
+                    {"cpu_percent": None if idle is None else 100 - idle, "mem_used_bytes": num(mem.get("used")),
+                     "mem_total_bytes": num(mem.get("total")), "arc_bytes": num(mem.get("arc"))})], ts)
+        out += lines("hw_opnsense_disk", [({"site": site, "firewall": name, "mount": d.get("mountpoint") or ""},
+                     {"used_bytes": num(d.get("used_bytes")), "total_bytes": num(d.get("total_bytes"))})
+                     for d in (snap.get("disk") or {}).get("devices", []) if d.get("mountpoint") == "/"], ts)
+        out += lines("hw_opnsense_gateway", [({"site": site, "firewall": name, "gateway": g.get("name") or ""},
+                     {"online": float(g.get("status_translated") == "Online"), "delay_ms": ms(g.get("delay")),
+                      "stddev_ms": ms(g.get("stddev")), "loss_percent": ms(g.get("loss"))}) for g in snap["gateways"]], ts)
+        out += lines("hw_opnsense_interface", [({"site": site, "firewall": name, "interface": v.get("name") or k,
+                                                 "device": v.get("device") or ""},
+                     {"rx_bytes": num(v.get("bytes received")), "tx_bytes": num(v.get("bytes transmitted"))})
+                     for k, v in (snap.get("traffic") or {}).items()], ts)
+        out += lines("hw_opnsense_haproxy", [({"site": site, "firewall": name, "backend": x.get("pxname") or "",
+                                               "server": x.get("svname") or ""},
+                     {"up": float(str(x.get("status", "")).upper().startswith("UP")),
+                      "sessions": num(x.get("scur")), "bytes_in": num(x.get("bin")), "bytes_out": num(x.get("bout"))})
+                     for x in _servers(snap.get("haproxy"))], ts)
+        out += lines("hw_opnsense_service", [({"site": site, "firewall": name, "service": r.get("name") or r.get("id") or ""},
+                     {"running": float(bool(r.get("running")))}) for r in snap.get("services") or []], ts)
+        return out
 
     def default_chosen(self, snap):
         return [r["id"] for r in snap.get("services") or [] if r.get("running")]

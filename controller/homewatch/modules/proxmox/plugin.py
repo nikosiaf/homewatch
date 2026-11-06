@@ -6,6 +6,7 @@ import time
 from urllib.parse import urlsplit
 
 from ...auth import audit
+from ...metrics import lines, num
 from ..pinning import PinnedTLS, host_port, verify_for
 from .. import Module
 from . import checks
@@ -96,6 +97,41 @@ class ProxmoxModule(PinnedTLS, Module):
         except ApiError as e:
             self.snap, self.error = None, str(e)
             await self.note_changes(rt, s, str(e))
+
+    def series(self, site: str) -> list[str]:
+        snap, ts = self.snap, self.snap_ts
+        if snap is None:
+            return []
+        pct = lambda v: None if num(v) is None else 100 * num(v)  # noqa: E731 - Proxmox reports cpu as 0..1
+        out = lines("hw_proxmox_node", [
+            ({"site": site, "node": n.get("node", "")},
+             {"online": float(n.get("status") == "online"), "cpu_percent": pct(n.get("cpu")), "cpus": num(n.get("maxcpu")),
+              "mem_used_bytes": num(n.get("mem")), "mem_total_bytes": num(n.get("maxmem")),
+              "disk_used_bytes": num(n.get("disk")), "disk_total_bytes": num(n.get("maxdisk")),
+              "uptime_seconds": num(n.get("uptime"))}) for n in snap.nodes], ts)
+        out += lines("hw_proxmox_guest", [
+            ({"site": site, "node": g.get("node", ""), "vmid": str(g.get("vmid", "")), "name": g.get("name", ""),
+              "type": g.get("type", "")},
+             {"running": float(g.get("status") == "running"), "cpu_percent": pct(g.get("cpu")), "cpus": num(g.get("maxcpu")),
+              "mem_used_bytes": num(g.get("mem")), "mem_total_bytes": num(g.get("maxmem")),
+              "disk_used_bytes": num(g.get("disk")) or None, "disk_total_bytes": num(g.get("maxdisk")),
+              "net_in_bytes": num(g.get("netin")), "net_out_bytes": num(g.get("netout")),
+              "disk_read_bytes": num(g.get("diskread")), "disk_write_bytes": num(g.get("diskwrite")),
+              "uptime_seconds": num(g.get("uptime"))}) for g in snap.guests], ts)
+        out += lines("hw_proxmox_storage", [
+            ({"site": site, "node": st.get("node", ""), "storage": st.get("storage", ""), "type": st.get("plugintype", "")},
+             {"active": float(st.get("status") == "available"), "used_bytes": num(st.get("disk")),
+              "total_bytes": num(st.get("maxdisk"))}) for st in snap.storages], ts)
+        out += lines("hw_proxmox_disk", [
+            ({"site": site, "node": node, "disk": d.get("devpath", ""), "model": d.get("model", "")},
+             {"healthy": float(str(d.get("health", "")).upper() in checks.HEALTHY),
+              "life_left_percent": None if num(d.get("wearout")) is None else num(d.get("wearout")),
+              "size_bytes": num(d.get("size"))})
+            for node, disks in snap.disks.items() for d in disks], ts)
+        out += lines("hw_proxmox_backup", [
+            ({"site": site, "vmid": str(vmid)}, {"last_ok_timestamp": b.get("ok"), "last_failed_timestamp": b.get("failed")})
+            for vmid, b in snap.backups.items()], ts)
+        return out
 
     async def readings(self, rt, settings, now):
         if self.snap is None or self.stale or now - self.snap_ts >= self.every_s(settings):

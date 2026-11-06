@@ -55,6 +55,7 @@ class Runtime:
     speed_started: float = 0
     wake: asyncio.Event = field(default_factory=asyncio.Event)
     tasks: list[asyncio.Task] = field(default_factory=list)
+    series_written: dict = field(default_factory=dict)  # module id -> reading_ts of the reading already written
 
     @classmethod
     def create(cls, cfg: Config) -> Runtime:
@@ -125,6 +126,7 @@ class Runtime:
         events = []
         results: list[CheckResult] = []
         metrics_error = ""
+        series: list[str] = []  # detailed metrics of the modules that took a new reading in this run
         gap = max(3 * int(timing(self.db)["interval"]), 600)
         for m in MODULES.values():
             s = m.load(self)
@@ -159,6 +161,13 @@ class Runtime:
                     r.observed_at = taken
             events += self.engine.apply(m.id, mine, now)
             results += mine
+            taken = m.reading_ts(self)
+            if seen and taken and self.series_written.get(m.id) != taken:
+                try:
+                    series += m.series(self.cfg.site)
+                except Exception:  # noqa: BLE001 - detailed metrics must never break the checks
+                    log.exception("module %s: detailed metrics failed", m.id)
+                self.series_written[m.id] = taken
             if seen and m.reading_ts(self) and self.db.one(
                     "SELECT 1 FROM check_state WHERE site=? AND check_key LIKE ? AND pending IS NOT NULL",
                     (self.cfg.site, f"{m.id}.%")):
@@ -183,7 +192,8 @@ class Runtime:
                 line("hw_check_value", {"site": self.cfg.site, "module": r.key.split(".")[0], "check": r.key},
                      {"value": float(r.value)}, now) for r in results
                 if isinstance(r.value, (int, float)) and not isinstance(r.value, bool) and math.isfinite(r.value)
-            ] + [line("hw_run", {"site": self.cfg.site}, {"ok": 1, "duration_seconds": time.time() - now}, now)])
+            ] + [line("hw_run", {"site": self.cfg.site}, {"ok": 1, "duration_seconds": time.time() - now}, now)]
+                + series)
         except MetricsError as e:
             log.warning("%s", e)
         if not metrics_error:  # a store that can't be read is what the heartbeat must not hide

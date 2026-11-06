@@ -22,6 +22,27 @@ def line(measurement: str, tags: dict[str, str], fields: dict[str, float], ts: f
     return f"{_escape_tag(measurement)}{tag_s} {field_s} {ns}"
 
 
+def lines(measurement: str, rows: list[tuple[dict[str, str], dict[str, float | None]]], ts: float) -> list[str]:
+    """Several rows of one measurement; rows whose fields are all missing are left out."""
+    out = []
+    for tags, fields in rows:
+        fields = {k: v for k, v in fields.items() if isinstance(v, (int, float)) and not isinstance(v, bool)
+                  and v == v and abs(v) != float("inf")}
+        if fields:
+            out.append(line(measurement, tags, fields, ts))
+    return out
+
+
+def num(v) -> float | None:
+    """A device's value as a number, or None when it is missing or not a number."""
+    if isinstance(v, bool):
+        return float(v)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 class Metrics:
     def __init__(self, base_url: str, client: httpx.AsyncClient | None = None):
         self.base = base_url
