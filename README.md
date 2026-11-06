@@ -397,6 +397,13 @@ Grafana shows everything homewatch stores (every device, port, guest, disk, and 
 entities you record) at `https://<homewatch>/grafana/`. It has no login of its own: homewatch signs
 you in. homewatch admins are Grafana admins, viewers can only look.
 
+<p>
+  <img src="docs/screenshots/grafana-overview.png" width="49%" alt="Grafana Overview: problems now, a status tile per module, checks needing attention, internet and modem line">
+  <img src="docs/screenshots/grafana-internet.png" width="49%" alt="Grafana Internet dashboard: latency, jitter, packet loss and DNS lookup time">
+  <img src="docs/screenshots/grafana-synology.png" width="49%" alt="Grafana Synology dashboard: temperature, CPU, memory, volumes, disk health and temperatures">
+  <img src="docs/screenshots/grafana-ups.png" width="49%" alt="Grafana UPS dashboard: status, battery, runtime, load, power draw and voltages">
+</p>
+
 - **On or off:** `install.sh` asks; later, **System → Grafana and history**. It needs about 2 GB of
   disk and 150 MB of memory. Turning it off keeps its dashboards. By hand: `COMPOSE_PROFILES=grafana`
   in `.env` (empty to turn it off), then `docker compose up -d`.
