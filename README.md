@@ -19,7 +19,7 @@ with a year of history from every device, port and guest, and from the Home Assi
 ![homeWatch's Status page: the overall status, today's key numbers and one tile per module with its 24-hour line](docs/screenshots/status.png)
 
 <p>
-  <img src="docs/screenshots/grafana-overview.png" width="49%" alt="Grafana Overview: problems now, a status tile per module, checks needing attention, internet and modem line">
+  <img src="docs/screenshots/grafana-overview.png" width="49%" alt="Grafana Overview: problems now, a status tile per module, checks needing attention, WAN traffic and the internet line's numbers">
   <img src="docs/screenshots/grafana-internet.png" width="49%" alt="Grafana Internet dashboard: latency, jitter, packet loss and DNS lookup time">
   <img src="docs/screenshots/grafana-synology.png" width="49%" alt="Grafana Synology dashboard: temperature, CPU, memory, volumes, disk health and temperatures">
   <img src="docs/screenshots/grafana-ups.png" width="49%" alt="Grafana UPS dashboard: status, battery, runtime, load, power draw and voltages">
@@ -34,9 +34,9 @@ with a year of history from every device, port and guest, and from the Home Assi
 - [OPNsense](#opnsense-module-optional): gateways, CPU, services, HAProxy servers, certificates and firmware updates
 - [Home Assistant](#home-assistant-module-optional): core, updates, backups, host disk / memory / CPU, plus the entities you choose (unavailable, alarm, safety, tamper, battery, add-ons, your own rules)
 - [Synology NAS](#synology-nas-module-optional): system, CPU and memory, disks, pools and volumes and DSM updates over the DSM Web API
-- [MikroTik](#mikrotik-module-optional): ports up, port errors, CPU and memory, reboots and RouterBOOT over the REST API
+- [MikroTik](#mikrotik-module-optional): ports up, port errors, CPU and memory, reboots and RouterBOOT over the REST API, plus optional RouterOS update checks and daily configuration copies
 - [UniFi](#unifi-module-optional): devices online, CPU, Wi-Fi, restarts and firmware updates, as a view-only user
-- [Proxmox Backup Server](#proxmox-backup-server-module-optional): datastores, recent backups, verify/prune/garbage-collection jobs and updates
+- [Proxmox Backup Server](#proxmox-backup-server-module-optional): datastores and their deduplication factor, recent backups, verify/prune/garbage-collection jobs and updates
 - [UPS](#ups-module-optional): mains power, battery charge, runtime, load and UPS health from a NUT server
 - [Docker hosts](#docker-hosts-module-optional): containers running, restarts, health checks and removed containers, through a read-only socket proxy
 - [Alerts and notifications](#alerts-and-notifications): Telegram, ntfy, email, webhook and a healthchecks.io heartbeat
@@ -292,6 +292,26 @@ user on every device). The device's `www` service must allow the homeWatch host.
 | Port errors in the last hour | ≥ 10 | ≥ 1000 |
 | Uptime | rebooted in the last 60 min | |
 | RouterBOOT | older than the installed RouterOS | |
+| RouterOS updates (option) | a newer RouterOS exists for the device's update channel | |
+| Configuration copies (option) | no good copy for 2 days | |
+| Configuration changed (option, off by default) | for 24 h after a device's configuration changed | |
+
+CPU, memory and temperature list every device, worst first (`core 46 % | lan 44 %`).
+
+Two options on the module page, both off until you tick them:
+
+- **Check daily for RouterOS updates:** once a day homeWatch reads the newest RouterOS of each
+  device's update channel (stable, long-term…) from `upgrade.mikrotik.com`. It needs internet access
+  from the homeWatch host. Nothing is downloaded to, or changed on, the devices; update them yourself
+  (System → Packages → Check For Updates), then upgrade RouterBOOT (System → RouterBOARD → Upgrade)
+  and reboot.
+- **Keep a daily copy of the configuration:** once a day homeWatch saves each device's `/export`,
+  read with the same read-only user, and keeps a new copy only when something changed (60 per
+  device). The module page lists the copies, shows **What changed** between two of them and offers
+  each as a `.rsc` download. The `read` group can't see passwords, keys and secrets, so the copies
+  leave them out. To restore: reset the device without its default configuration, `/import` the file,
+  then enter the passwords, Wi-Fi keys and secrets again. The copies live in homeWatch's data volume,
+  so they are part of its [backups](#back-up).
 
 ### UniFi module (optional)
 
@@ -317,6 +337,10 @@ shows the commands to create it).
 | Backups (the groups you choose) | newest snapshot > 26 h old | > 50 h old, or no snapshots |
 | Verify, prune, garbage collection, sync | latest run had warnings | latest run failed (last 8 days) |
 | Updates | package updates available | |
+
+The Datastores table and the Grafana dashboard also show each datastore's **deduplication factor**,
+as the PBS web interface does: the size of all backups over the space their chunks take on disk,
+from the last garbage collection.
 
 ### UPS module (optional)
 
@@ -462,7 +486,7 @@ Database changes apply on start.
 ## Back up
 
 Everything homeWatch knows lives in two Docker volumes:
-- `homewatch_hw-data`: settings, users, history, encrypted tokens (and the nightly exports)
+- `homewatch_hw-data`: settings, users, history, encrypted tokens, MikroTik configuration copies (and the nightly exports)
 - `homewatch_vm-data`: metrics
 
 With Grafana, also `homewatch_grafana-data` (your own dashboards; the built-in ones are recreated).
@@ -511,6 +535,10 @@ allow redistribution. **System → Health** shows the installed version.
 ## Security notes
 
 - **Exposure:** don't forward homeWatch to the internet. Use it on your LAN or over Tailscale.
+- **Outbound:** besides the devices you add, homeWatch reaches only the internet servers you set it to
+  use: the public servers the Internet module pings and asks for DNS lookups, the speed-test service,
+  your notification channels, GitHub for the daily release check (which you can turn off) and, if you
+  tick it, `upgrade.mikrotik.com` once a day for the newest RouterOS version.
 - **Network:** only Caddy publishes ports (80 redirects to 443). VictoriaMetrics, Telegraf, Grafana and
   the controller stay on internal Docker networks.
 - **Grafana:** reached only through Caddy, which asks homeWatch who you are first. Grafana trusts the
