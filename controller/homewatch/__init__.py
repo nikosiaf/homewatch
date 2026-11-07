@@ -1,3 +1,3 @@
 """homewatch: a self-hosted home monitor."""
 
-__version__ = "0.38.0-dev"
+__version__ = "0.38.1-dev"
