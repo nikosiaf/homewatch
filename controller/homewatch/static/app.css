@@ -423,7 +423,7 @@ details.et-dev > summary { display: flex; flex-wrap: wrap; align-items: center; 
 .module-grid div.module.soon { opacity: .6; }
 .module-grid div.module.soon:hover { transform: none; }
 /* the logo's W: binoculars (the barrels are the W's arms, sky-blue glass in red lenses) */
-.wordmark .w-bino { height: 1.05em; width: auto; vertical-align: -0.2em; margin: 0 .02em 0 .05em; overflow: visible; }
+.wordmark .w-bino { height: 1.32em; width: auto; vertical-align: -0.34em; margin: 0 .01em 0 .03em; overflow: visible; }
 /* configuration copies: what changed between two exports */
 pre.diff { overflow-x: auto; font-size: 12.5px; line-height: 1.45; background: var(--muted-bg); border: 1px solid var(--line);
   border-radius: 6px; padding: 10px 12px; max-height: 70vh; }

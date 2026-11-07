@@ -190,10 +190,14 @@ class Runtime:
         self.results, self.last_run = results, now
         self.write_grafana()
         self.grafana_on = await grafana.running(self.notifier.http, self.cfg.grafana_url)
+        # Grafana shows the CONFIRMED level, as the Status page does: a single bad reading that the next one
+        # takes back (a device rebooting) is not a problem there either
+        confirmed = {r["check_key"]: r["status"] for r in self.db.all(
+            "SELECT check_key, status FROM check_state WHERE site=?", (self.cfg.site,))}
         try:
             await self.metrics.write([
                 line("hw_check_status", {"site": self.cfg.site, "module": r.key.split(".")[0], "check": r.key},
-                     {"value": r.effective}, now) for r in results
+                     {"value": confirmed.get(r.key, 0)}, now) for r in results
             ] + [  # the measured values, for the Status page's 24 h lines
                 line("hw_check_value", {"site": self.cfg.site, "module": r.key.split(".")[0], "check": r.key},
                      {"value": float(r.value)}, now) for r in results

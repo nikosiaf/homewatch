@@ -335,3 +335,12 @@ def test_problem_counts_show_ok_at_zero():
     assert tile["fieldConfig"]["defaults"]["mappings"][-1]["options"]["0"]["text"] == "✔ OK"
     cpu = grafana.stat("CPU", "x", "percent", steps=grafana._pct_steps())
     assert cpu["fieldConfig"]["defaults"]["mappings"] == []  # 0 % CPU is a number, not a verdict
+
+
+def test_docker_shows_only_containers_that_still_exist():
+    d = grafana.docker()
+    for title in ("Running", "Restarts"):
+        (p,) = [p for p in d["panels"] if p.get("title") == title]
+        assert "@ end()" in p["targets"][0]["expr"]
+    (p,) = [p for p in grafana.overview(set())["panels"] if p.get("title") == "Modules"]
+    assert "max_over_time" not in p["targets"][0]["expr"]

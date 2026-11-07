@@ -1,7 +1,7 @@
 <h1>
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/brand/red-homewatch-logo-dark.svg">
-    <img alt="homeWatch" src="docs/brand/red-homewatch-logo.svg" width="342">
+    <img alt="homeWatch" src="docs/brand/red-homewatch-logo.svg" width="347">
   </picture>
 </h1>
 

@@ -173,7 +173,7 @@ def overview(enabled: set[str], ha: list[dict] | None = None) -> dict:
     p = [row("Status"),
          stat("Problems now", f"count(hw_check_status_value{{{S}}} > 0) or vector(0)", w=4, h=5,
               steps=[(None, "green"), (1, "red")]),
-         stat("Modules", f"max by (module) (max_over_time(hw_check_status_value{{{S}}}[10m]))", legend="{{module}}",
+         stat("Modules", f"max by (module) (last_over_time(hw_check_status_value{{{S}}}[10m]))", legend="{{module}}",
               w=20, h=5, mappings=STATUS_MAP, steps=[(None, "green"), (1, "yellow"), (2, "red")],
               text_mode="value_and_name"),
          table("Needs attention", [f"hw_check_status_value{{{S}}} > 0"], {"module": "Module", "check": "Check", "Value": "Level"},
@@ -520,6 +520,11 @@ def ups() -> dict:
     ], "Power, battery and load.", time="now-7d")
 
 
+# containers that still exist at the end of the shown range: removed ones (and throwaway `docker run --rm`
+# containers) drop out of the panels, while the ones still there keep their whole history
+NOW_CONTAINERS = f"(last_over_time(hw_docker_container_running{{{S}}}[5m]) @ end())"
+
+
 def docker() -> dict:
     return dashboard("hw-docker", "Docker", [
         stat("Containers running", f"sum(hw_docker_container_running{{{S}}})", w=8),
@@ -527,8 +532,10 @@ def docker() -> dict:
              steps=[(None, "green"), (1, "yellow")]),
         stat("Unhealthy", f"count(hw_docker_container_healthy{{{S}}} == 0) or vector(0)", w=8,
              steps=[(None, "green"), (1, "red")]),
-        timeline("Running", [(f'hw_docker_container_running{{{S}}}', "{{host}} {{container}}")], h=14),
-        ts("Restarts", [(f'increase(hw_docker_container_restarts{{{S}}}[1h]) > 0', "{{container}}")], w=24, minimum=0),
+        timeline("Running", [(f'hw_docker_container_running{{{S}}} and on(host, container) {NOW_CONTAINERS}',
+                              "{{host}} {{container}}")], h=14),
+        ts("Restarts", [(f'(increase(hw_docker_container_restarts{{{S}}}[1h]) > 0) and on(host, container) {NOW_CONTAINERS}',
+                         "{{container}}")], w=24, minimum=0),
     ], "Containers per host.")
 
 

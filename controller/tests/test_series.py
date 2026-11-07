@@ -179,3 +179,41 @@ def test_ha_entity_values():
     assert entity_values({"entity_id": "light.tv", "state": "on", "attributes": {"brightness": 255}}) == {
         "value": 1.0, "brightness_percent": 100.0}
 
+
+
+def test_runtime_writes_confirmed_status(cfg, monkeypatch):
+    """One bad reading that the next one takes back is not a problem in Grafana either (as on the Status page)."""
+    from homewatch.modules.registry import MODULES
+    from homewatch.modules.ups.plugin import UPSModule
+
+    from homewatch.runtime import Runtime
+
+    rt = Runtime.create(cfg)
+    written = []
+
+    async def write(ls):
+        written.extend(ls)
+
+    monkeypatch.setattr(rt.metrics, "write", write)
+    ups = next(m for m in MODULES.values() if isinstance(m, UPSModule))
+    status = {"v": "OB"}
+
+    async def readings(rt_, s, now):
+        ups.snap, ups.snap_ts = {"name": "apc", "vars": {"ups.status": status["v"], "battery.charge": "99"}}, now
+        return (s, ups.snap, "", now)
+
+    monkeypatch.setattr(ups, "readings", readings)
+    monkeypatch.setattr(ups, "load", lambda rt_: {"enabled": True, "_configured": True, "chosen": [], "skipped": []})
+
+    def levels():
+        out = [x for x in written if x.startswith("hw_check_status,") and "check=ups.power" in x]
+        written.clear()
+        return out
+
+    rt.db.run("INSERT INTO check_state(site,check_key,status,since) VALUES(?,?,0,0)", (cfg.site, "ups.power"))
+    asyncio.run(rt.run_checks(1000))  # on battery once: not confirmed yet
+    (x,) = levels()
+    assert "value=0" in x
+    asyncio.run(rt.run_checks(1100))  # twice: confirmed
+    (x,) = levels()
+    assert "value=0" not in x
