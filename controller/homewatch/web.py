@@ -661,6 +661,43 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     async def checks_moved():  # limits are on each module's page now; old bookmarks land on the list
         return RedirectResponse("/modules", status_code=303)
 
+    def _config_row(rt, cid: int):
+        return rt.db.one("SELECT * FROM device_configs WHERE id=? AND site=? AND module='mikrotik'", (cid, rt.cfg.site))
+
+    @app.get("/modules/mikrotik/configs/{cid}")
+    async def mikrotik_config(request: Request, cid: int):
+        """One saved configuration: what changed since the copy before it, and the whole text."""
+        import difflib
+        from .modules.mikrotik.plugin import config_body
+        rt = rt_of(request)
+        row = _config_row(rt, cid)
+        if row is None:
+            return RedirectResponse("/modules/mikrotik#configs", status_code=303)
+        prev = rt.db.one("SELECT ts, text FROM device_configs WHERE site=? AND module='mikrotik' AND device=? AND ts<? "
+                         "ORDER BY ts DESC LIMIT 1", (rt.cfg.site, row["device"], row["ts"]))
+        diff = []
+        if prev:
+            for line in difflib.unified_diff(config_body(prev["text"]).split("\n"), config_body(row["text"]).split("\n"),
+                                             lineterm="", n=3):
+                if line.startswith(("---", "+++")):
+                    continue
+                diff.append(("at" if line.startswith("@@") else "add" if line.startswith("+")
+                             else "del" if line.startswith("-") else "ctx", line))
+        return page(request, "mikrotik_config.html", request.state.user, id=cid, dev_name=row["name"] or row["device"],
+                    device=row["device"], ts=row["ts"], text=row["text"], lines=row["text"].count("\n") + 1,
+                    prev_ts=prev["ts"] if prev else None, diff=diff)
+
+    @app.get("/modules/mikrotik/configs/{cid}/download")
+    async def mikrotik_config_download(request: Request, cid: int):
+        rt = rt_of(request)
+        row = _config_row(rt, cid)
+        if row is None:
+            return RedirectResponse("/modules/mikrotik#configs", status_code=303)
+        name = re.sub(r"[^A-Za-z0-9._-]+", "-", row["name"] or row["device"]).strip("-") or "mikrotik"
+        when = datetime.fromtimestamp(row["ts"], ZoneInfo(rt.db.get("home.tz") or "UTC")).strftime("%Y-%m-%d-%H%M")
+        return Response(row["text"], media_type="text/plain; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}-{when}.rsc"'})
+
     @app.post("/modules/{mid}/thresholds")
     async def thresholds_save(request: Request, mid: str):
         rt = rt_of(request)

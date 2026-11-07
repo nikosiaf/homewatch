@@ -110,6 +110,8 @@ header nav { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
   border-top-color: var(--accent); border-radius: 50%; animation: hw-spin .8s linear infinite; }
 @keyframes hw-spin { to { transform: rotate(360deg); } }
 tr.running td { color: var(--quiet); }
+button.is-busy { display: inline-flex; gap: 6px; align-items: center; justify-content: center; cursor: progress; }
+button.is-busy .spin { width: 12px; height: 12px; border-color: currentColor; border-top-color: transparent; opacity: .85; }
 .htmx-indicator { display: none; }
 .htmx-request.htmx-indicator, .htmx-request .htmx-indicator { display: inline-flex; gap: 6px; align-items: center; }
 .flash { position: relative; padding-right: 36px; }
@@ -340,6 +342,9 @@ h2.card-title { margin: 0 0 12px; }
 fieldset.reading { margin: 12px 0 0; padding: 4px 12px 8px; }
 fieldset.reading table { margin: 0; }
 fieldset.reading tr:last-child td { border-bottom: 0; }
+/* tables with set column widths (Table.widths): the same columns line up across a reading's tables */
+table.fixed { table-layout: fixed; min-width: 480px; }  /* on a phone it scrolls sideways instead of breaking words */
+table.fixed td, table.fixed th { overflow-wrap: break-word; }
 /* buttons in a row with room around them */
 .row.buttons { gap: 12px; margin: 14px 0 4px; align-items: center; }
 /* System, Updates: the tick box with Check now, Last checked with Save; both buttons as wide */
@@ -419,3 +424,10 @@ details.et-dev > summary { display: flex; flex-wrap: wrap; align-items: center; 
 .module-grid div.module.soon:hover { transform: none; }
 /* the logo's W: binoculars (the barrels are the W's arms, sky-blue glass in red lenses) */
 .wordmark .w-bino { height: 1.05em; width: auto; vertical-align: -0.2em; margin: 0 .02em 0 .05em; overflow: visible; }
+/* configuration copies: what changed between two exports */
+pre.diff { overflow-x: auto; font-size: 12.5px; line-height: 1.45; background: var(--muted-bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 10px 12px; max-height: 70vh; }
+pre.diff span { display: block; white-space: pre; }
+.diff-add { color: var(--ok); } .diff-del { color: var(--err); } .diff-at { color: var(--quiet); }
+pre.diff .diff-add { background: color-mix(in srgb, var(--ok) 12%, transparent); }
+pre.diff .diff-del { background: color-mix(in srgb, var(--err) 12%, transparent); }

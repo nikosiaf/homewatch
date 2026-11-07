@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}{{ dev_name }} configuration{% endblock %}
+{% block content %}
+<p><a href="/modules/mikrotik#configs">← MikroTik</a></p>
+<div class="card">
+  <h2 style="margin-top:0">{{ dev_name }} <span class="quiet small">{{ device }} · saved {{ ts | ts('%d %b %Y %H:%M') }}</span></h2>
+  {% if prev_ts %}
+  <p class="quiet small">What changed since the copy of {{ prev_ts | ts('%d %b %Y %H:%M') }}: <span class="diff-add">+ added</span> <span class="diff-del">− removed</span>.
+    {% if not diff %}Only the date line differs.{% endif %}</p>
+  {% if diff %}<pre class="diff">{% for kind, line in diff %}<span class="diff-{{ kind }}">{{ line }}</span>
+{% endfor %}</pre>{% endif %}
+  {% else %}<p class="quiet small">The first copy kept for this device.</p>{% endif %}
+  <p class="row"><a class="button" href="/modules/mikrotik/configs/{{ id }}/download">Download .rsc</a></p>
+  <details><summary>Whole configuration ({{ lines }} lines)</summary><pre class="diff">{{ text }}</pre></details>
+</div>
+{% endblock %}

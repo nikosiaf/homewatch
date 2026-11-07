@@ -15,9 +15,11 @@ BASE = "https://pbs.test:8007/api2/json"
 S = {"url": "https://pbs.test:8007", "token_id": "homewatch@pbs!monitor", "verify": False, "enabled": True}
 
 
-def mock(tasks=None, store_error=None):
+def mock(tasks=None, store_error=None, gc=None):
     respx.get(BASE + "/version").mock(return_value=httpx.Response(200, json={"data": {"version": "4.1"}}))
     store = {"store": "main", "total": 1000, "used": 400, "avail": 600, "estimated-full-date": 0}
+    if gc is not None:
+        store["gc-status"] = gc
     if store_error:
         store["error"] = store_error
     respx.get(BASE + "/status/datastore-usage").mock(return_value=httpx.Response(200, json={"data": [store]}))
@@ -76,3 +78,16 @@ async def test_rejected_token():
     respx.get(BASE + "/version").mock(return_value=httpx.Response(401))
     with pytest.raises(ApiError, match="rejected"):
         await plugin.fetch(S, "bad", NOW)
+
+
+@respx.mock
+async def test_deduplication_factor():
+    from homewatch.modules.pbs.plugin import dedup_factor
+    assert dedup_factor(None) is None and dedup_factor({"index-data-bytes": 0, "disk-bytes": 5}) is None
+    mock(gc={"index-data-bytes": 5012701578803, "disk-bytes": 253202771733})
+    snap = await plugin.fetch(S, "s", NOW)
+    assert round(snap["stores"][0]["dedup"], 2) == 19.80
+    table = plugin.tables(snap, S)[0]
+    assert table.head[2] == "Deduplication factor" and table.rows[0][2] == "19.80"
+    plugin.snap, plugin.snap_ts = snap, NOW
+    assert any(line.startswith("hw_pbs_store,") and "dedup_factor=19.79" in line for line in plugin.series("home"))

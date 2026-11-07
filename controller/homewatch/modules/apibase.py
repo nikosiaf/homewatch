@@ -71,6 +71,9 @@ class Table:
     title: str
     head: list[str]
     rows: list[list[Any]] = field(default_factory=list)
+    widths: list[str] = field(default_factory=list)  # column widths (e.g. "20%"): tables of a reading with the
+    #                                                  same widths line up under each other
+    min_width: int = 0  # px below which a table with widths scrolls sideways (0 = the 480 px default)
 
 
 def https_url(value: str, default_port: int | None = None, allow_http: bool = False) -> str:
@@ -119,6 +122,7 @@ class ApiModule(PinnedTLS, Module):
     choices_empty = ""  # shown when the choice list has nothing in it
     list_search = True  # long tick lists get a search box and "only ticked"
     entity_table = False  # the second box is a module's own entity list (_ha_entities.html), not the tick lists
+    extra_partial = ""  # a module's own box on its page (a template name), shown while it is enabled
     last_reading_box = True  # the "Last reading" box with tables() and Read now
     read_now_in_settings = False  # Read now in the connection box instead
     read_now_beside = ""  # ...on the line of this field (own_line), else above Remove

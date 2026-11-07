@@ -186,7 +186,8 @@
     <button>Read now</button></form>
   {% for t in tables %}
   <fieldset class="reading">{% if t.title %}<legend>{{ t.title }}</legend>{% endif %}
-  <div class="scroll"><table data-page="12">
+  <div class="scroll"><table data-page="12"{% if t.widths %} class="fixed"{% if t.min_width %} style="min-width:{{ t.min_width }}px"{% endif %}{% endif %}>
+    {% if t.widths %}<colgroup>{% for w in t.widths %}<col style="width:{{ w }}">{% endfor %}</colgroup>{% endif %}
     <tr>{% for h in t.head %}<th>{{ h }}</th>{% endfor %}</tr>
     {% for r in t.rows %}<tr>{% for c in r %}<td>{{ c if c is not none else '—' }}</td>{% endfor %}</tr>
     {% else %}<tr><td colspan="{{ t.head | length }}" class="quiet">nothing</td></tr>{% endfor %}
@@ -194,6 +195,8 @@
   {% endfor %}
 </div>
 {% endif %}
+
+{% if module.extra_partial and s.enabled %}{% include module.extra_partial %}{% endif %}
 
 {% if module.more_title and s.enabled %}
 <form method="post" action="/modules/{{ module.id }}" class="card" id="more">

@@ -35,6 +35,12 @@ def hosts(value: str) -> list[str]:
     return [h if ":" in h else f"{h}:{PORT}" for h in re.split(r"[\s,]+", value or "") if h]
 
 
+def short_image(image: str) -> str:
+    """An image name for the table: a pinned digest shortened to its first 12 characters."""
+    name, sep, digest = (image or "").partition("@sha256:")
+    return f"{name}@sha256:{digest[:12]}" if sep and len(digest) > 12 else image
+
+
 class DockerModule(ApiModule):
     id = "docker"
     name = "Docker hosts"
@@ -253,7 +259,8 @@ class DockerModule(ApiModule):
         return [Table(f"Containers on {h['name']} (Docker {h['version']})",
                       ["Container", "Project", "State", "Health", "Restart policy", "Restarts", "Watched", "Image"],
                       [[c["name"], c["project"], c["state"], c["health"] or "-", c["policy"], c["restarts"],
-                        "yes" if self._key(h, c) in watched else "no", c["image"]] for c in h["containers"]])
+                        "yes" if self._key(h, c) in watched else "no", short_image(c["image"])] for c in h["containers"]],
+                      widths=["18%", "11%", "8%", "8%", "13%", "7%", "7%", "28%"], min_width=860)
                 for h in snap["hosts"]]
 
 

@@ -61,6 +61,22 @@ def test_overview_follows_enabled_modules():
     assert "hw_ups_power_watts" in big and "hw_proxmox_node_cpu_percent" in big
 
 
+def test_overview_firewall_row_is_opnsense_only_and_ups_is_last():
+    every = {"internet", "speedport", "opnsense", "ups", "mikrotik", "unifi", "proxmox", "pbs", "synology"}
+    panels = grafana.overview(every)["panels"]
+    rows = [p["title"] for p in panels if p["type"] == "row"]
+    assert rows[-1] == "UPS" and rows.index("Firewall") == rows.index("Internet") + 1
+    start = next(i for i, p in enumerate(panels) if p["title"] == "Firewall")
+    end = next(i for i, p in enumerate(panels) if i > start and p["type"] == "row")
+    fw = panels[start + 1:end]
+    assert [p["title"] for p in fw] == ["Firewall CPU", "Firewall memory", "Firewall uptime", "HAProxy servers down",
+                                        "Firewall disk", "Gateway delay", "Received per interface", "Sent per interface"]
+    exprs = [t["expr"] for p in fw for t in p["targets"]]
+    assert all(m.startswith("hw_opnsense_") for e in exprs for m in re.findall(r"\b(hw_\w+|ping_\w+|dns_query\w*)", e))
+    assert [p["gridPos"]["w"] for p in fw] == [4] * 6 + [12, 12]
+    assert "Firewall" not in [p["title"] for p in grafana.overview(every - {"opnsense"})["panels"]]
+
+
 def test_write_adds_and_removes(tmp_path):
     d = tmp_path / "g"
     assert grafana.write(str(d), {"ups"}) is False  # no volume: Grafana not installed, nothing written
@@ -220,29 +236,40 @@ def test_status_and_menu_link_to_grafana_when_it_runs(client):  # noqa: F811
     assert 'class="gf-link when-open" href="/grafana/d/hw-ups" target="_blank"' in page
 
 
+def _all(board):
+    """Every panel, the ones folded inside collapsed rows too."""
+    return [q for p in board["panels"] for q in [p, *p.get("panels", [])]]
+
+
 def test_ha_dashboards_follow_recorded_entities(tmp_path):
-    exprs = [t["expr"] for p in grafana.homeassistant(META)["panels"] for t in p.get("targets", [])]
+    exprs = [t["expr"] for p in _all(grafana.homeassistant(META)) for t in p.get("targets", [])]
     temps = next(e for e in exprs if "kitchen" in e and "current_temperature" not in e)
     assert temps.startswith('label_map(label_copy(max by (entity_id) (hw_ha_entity_value{site="$site",entity_id=~"sensor' + chr(92) * 2 + '.kitchen_temperature"})')
     assert '"sensor.kitchen_temperature", "Kitchen ' + chr(92) + '"main' + chr(92) + '" x"' in temps  # quotes escaped, no $ variable
-    titles = [p["title"] for p in grafana.homeassistant(META)["panels"]]
-    assert {"Temperatures", "Thermostats", "Heating", "Doors and contacts", "Illuminance (lx)", "Switch"} <= set(titles)
-    assert "Lights on" not in titles and "Power" not in titles  # nothing recorded for them
+    board = grafana.homeassistant(META)
+    titles = [p["title"] for p in _all(board)]
+    assert {"Temperatures", "Thermostats", "Heating", "Doors", "Illuminance (lx)", "Switch"} <= set(titles)
+    assert "On and off" not in titles and "Power" not in titles  # nothing recorded for them
+    top = [p["title"] for p in board["panels"]]
+    assert top[0] == "Temperatures now" and "Switch" not in top  # the leftovers are folded away
+    assert next(p for p in board["panels"] if p["title"].startswith("Other recorded"))["collapsed"]
     mixed = META + [{"id": "sensor.coffee_pressure", "name": "Coffee", "unit": "bar", "dc": "pressure", "domain": "sensor",
                      "fields": ["value"]}, {"id": "sensor.out_pressure", "name": "Out", "unit": "hPa", "dc": "pressure",
                                             "domain": "sensor", "fields": ["value"]}]
-    press = {p["title"]: p["fieldConfig"]["defaults"]["unit"] for p in grafana.homeassistant(mixed)["panels"]
-             if p["title"].startswith("Pressure")}
+    press = {p["title"]: p["fieldConfig"]["defaults"]["unit"] for p in _all(grafana.homeassistant(mixed))
+             if p["title"].startswith("Pressure") and p["type"] != "row"}
     assert press == {"Pressure (bar)": "pressurebar", "Pressure (hPa)": "pressurehpa"}  # one unit per panel
     many = [{"id": f"light.l{i:03}", "name": "N" * 60, "unit": "", "dc": "", "domain": "light", "fields": ["value"]}
             for i in range(300)] + [{"id": f"sensor.t{i:03}", "name": "T" * 60, "unit": "°C", "dc": "temperature",
                                      "domain": "sensor", "fields": ["value"]} for i in range(300)]
     for b in (grafana.homeassistant(many), grafana.overview({"homeassistant"}, many)):
-        for p in b["panels"]:
+        for p in _all(b):
             for tg in p.get("targets", []):
                 assert len(tg["expr"].encode()) < 16384, p["title"]  # VictoriaMetrics' -search.maxQueryLen
     empty = grafana.homeassistant([])["panels"]
     assert empty[0]["type"] == "text" and "Show in Grafana" in empty[0]["options"]["content"]
+    assert grafana._tidy("Sh Basement Door basement_door_temperature") == "Sh Basement Door temperature"
+    assert grafana._tidy("Κουζίνα") == "Κουζίνα"
     ex = grafana.ha_explorer(META)
     var = ex["templating"]["list"][-1]
     assert var["name"] == "entity" and "Front  door · binary_sensor.front_door : binary_sensor.front_door" in var["query"]
@@ -290,3 +317,21 @@ def test_entities_with_the_same_name_are_told_apart():
     assert "Temperature (nvme0n1)" in temps and "Temperature (nvme1n1)" in temps
     assert "(nvme1n1)" in json.dumps(grafana.ha_explorer(meta[:3])) and "(nvme0n1)" in json.dumps(
         grafana.overview({"homeassistant"}, meta[:3]))
+
+
+def test_collapsed_rows_hold_their_panels():
+    out = grafana._layout([grafana.stat("a", "x", w=24), grafana.row("Open"), grafana.ts("b", []),
+                           grafana.row("Folded", collapsed=True), grafana.ts("c", []), grafana.ts("d", []),
+                           grafana.ts("e", []), grafana.row("Folded too", collapsed=True), grafana.ts("f", [])])
+    assert [p["title"] for p in out] == ["a", "Open", "b", "Folded", "Folded too"]
+    assert [p["gridPos"]["y"] for p in out] == [0, 4, 5, 13, 14]  # a folded row takes one line
+    assert [(q["title"], q["gridPos"]["x"], q["gridPos"]["y"]) for q in out[3]["panels"]] == [
+        ("c", 0, 14), ("d", 12, 14), ("e", 0, 22)]
+    assert [q["title"] for q in out[4]["panels"]] == ["f"]
+
+
+def test_problem_counts_show_ok_at_zero():
+    tile = grafana.stat("Unhealthy", "x", steps=[(None, "green"), (1, "red")])
+    assert tile["fieldConfig"]["defaults"]["mappings"][-1]["options"]["0"]["text"] == "✔ OK"
+    cpu = grafana.stat("CPU", "x", "percent", steps=grafana._pct_steps())
+    assert cpu["fieldConfig"]["defaults"]["mappings"] == []  # 0 % CPU is a number, not a verdict

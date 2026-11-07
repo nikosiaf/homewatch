@@ -1,0 +1,21 @@
+{% if s.config_backup or config_copies %}
+<div class="card" id="configs">
+  <h2 style="margin-top:0">Configuration copies <span class="quiet small">{{ 'a copy a day, kept when it changed' if s.config_backup else 'daily copies are off; these are the ones saved before' }}</span></h2>
+  <p class="quiet small">The text of each device's <code>/export</code>, without passwords and keys (the read-only user can't
+    see them). To restore: reset the device without default configuration, then import the downloaded file
+    (<code>/import file-name=…</code>) and re-enter the passwords, keys and secrets.</p>
+  {% for g in config_copies %}
+  <fieldset class="reading"><legend>{{ g.name }} <span class="quiet small">{{ g.device }}</span></legend>
+    {% if g.error %}<p class="small" style="color:var(--warn)">Last copy failed: {{ g.error }}</p>{% endif %}
+    <div class="scroll"><table data-page="10">
+      <tr><th>Saved</th><th>Size</th><th></th></tr>
+      {% for r in g.rows %}<tr>
+        <td>{{ r.ts | ts('%d %b %Y %H:%M') }}{% if loop.first %} <span class="quiet small">newest</span>{% endif %}</td>
+        <td>{{ (r.size / 1024) | round(1) }} KB</td>
+        <td class="row tight" style="justify-content:flex-end">{% if not loop.last %}<a href="/modules/mikrotik/configs/{{ r.id }}">What changed</a> · {% else %}<a href="/modules/mikrotik/configs/{{ r.id }}">View</a> · {% endif %}<a href="/modules/mikrotik/configs/{{ r.id }}/download">Download .rsc</a></td>
+      </tr>{% endfor %}
+    </table></div>
+  </fieldset>
+  {% else %}<p class="quiet">No copy yet: the first one is saved at the next read{{ ' (Read now to save it now)' if s.config_backup }}.</p>{% endfor %}
+</div>
+{% endif %}

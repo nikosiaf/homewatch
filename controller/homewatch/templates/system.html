@@ -78,7 +78,7 @@
       {% elif grafana_ready %}<p class="quiet small">To turn it on or off here, the host's updater must be from this release:
         put this release's <code>update.sh</code> next to <code>install.sh</code> and run <code>sudo ./update.sh</code> once.
         Or by hand: <code>COMPOSE_PROFILES=grafana</code> in <code>.env</code>, then <code>docker compose up -d</code>.</p>{% endif %}
-      {% if my_exports %}<form method="get" action="/system/grafana-exports" class="row tight">
+      {% if my_exports %}<form data-download method="get" action="/system/grafana-exports" class="row tight">
         <label for="gex" class="grow">My dashboards, saved</label>
         <select id="gex" name="name" class="short">{% for e in my_exports %}<option value="{{ e.name }}">{{ e.ts | ts('%d %b %H:%M') }} · {{ e.kb }} KB</option>{% endfor %}</select>
         <button>Download</button></form>{% endif %}
@@ -130,7 +130,7 @@
       No passwords, tokens or users. homeWatch also saves one every night and keeps the last 14.</p>
     <div class="card-foot">
       <div class="row tight"><span class="grow">Download the configuration now</span><a class="button" href="/system/export">Download</a></div>
-      {% if exports %}<form method="get" action="/system/exports" class="row tight"><label for="exs" class="grow">Download an earlier one</label>
+      {% if exports %}<form data-download method="get" action="/system/exports" class="row tight"><label for="exs" class="grow">Download an earlier one</label>
         <select id="exs" name="name" class="short">
         {% for e in exports %}<option value="{{ e.name }}">{{ e.ts | ts('%d %b %H:%M') }} · {{ e.kb }} KB</option>{% endfor %}</select>
         <button>Download</button></form>

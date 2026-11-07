@@ -18,9 +18,10 @@ FOLDER = "homeWatch"  # the folder's title; its uid stays "homewatch"
 MY_FOLDER = "My dashboards"
 
 STATUS_MAP = [{"type": "value", "options": {
-    "0": {"text": "OK", "color": "green", "index": 0},
-    "1": {"text": "WARNING", "color": "yellow", "index": 1},
-    "2": {"text": "ERROR", "color": "red", "index": 2}}}]
+    "0": {"text": "✔ OK", "color": "green", "index": 0},
+    "1": {"text": "⚠ WARNING", "color": "yellow", "index": 1},
+    "2": {"text": "✖ ERROR", "color": "red", "index": 2}}}]
+OK_ZERO = {"type": "value", "options": {"0": {"text": "✔ OK", "color": "green", "index": 0}}}
 # Grafana puts its own /grafana in front of every link that starts with "/"; Caddy sends
 # /grafana/homewatch/open/<module> (opened in a new tab) to homewatch's Status page with that module's tile open
 HOMEWATCH = "/grafana/homewatch"
@@ -36,9 +37,10 @@ def _targets(exprs):
             for i, (e, legend) in enumerate(exprs)]
 
 
-def ts(title, exprs, unit="short", w=12, h=8, stack=False, minimum=None, maximum=None, desc="", fill=10):
-    """A time series panel; exprs = [(PromQL/MetricsQL, legend)]."""
-    custom = {"lineWidth": 1, "fillOpacity": fill, "showPoints": "never", "spanNulls": 3 * 3600000,
+def ts(title, exprs, unit="short", w=12, h=8, stack=False, minimum=None, maximum=None, desc="", fill=10, lw=1,
+       calcs=()):
+    """A time series panel; exprs = [(PromQL/MetricsQL, legend)]; calcs = legend values (mean, max…)."""
+    custom = {"lineWidth": lw, "fillOpacity": fill, "showPoints": "never", "spanNulls": 3 * 3600000,
               "stacking": {"mode": "normal" if stack else "none"}}
     defaults = {"unit": unit, "custom": custom}
     if minimum is not None:
@@ -47,14 +49,16 @@ def ts(title, exprs, unit="short", w=12, h=8, stack=False, minimum=None, maximum
         defaults["max"] = maximum
     return {"type": "timeseries", "title": title, "description": desc, "datasource": DS, "_w": w, "_h": h,
             "targets": _targets(exprs), "fieldConfig": {"defaults": defaults, "overrides": []},
-            "options": {"legend": {"displayMode": "list", "placement": "bottom"},
+            "options": {"legend": {"displayMode": "list", "placement": "bottom", "calcs": list(calcs)},
                         "tooltip": {"mode": "multi", "sort": "desc"}}}
 
 
 def stat(title, expr, unit="short", legend="", w=6, h=4, steps=None, mappings=None, desc="", decimals=None,
-         text_mode="auto", none=None):
-    """A stat panel; steps = [(value, colour)] thresholds from the lowest (value None = base)."""
-    defaults = {"unit": unit, "mappings": mappings or [],
+         text_mode="auto", none=None, color_mode="background"):
+    """A stat panel; steps = [(value, colour)] thresholds from the lowest (value None = base). A count of problems
+    (fine at 0, coloured from 1) shows ✔ OK at 0."""
+    problems = bool(steps) and len(steps) > 1 and steps[0][1] in ("green", "text") and steps[1][0] == 1
+    defaults = {"unit": unit, "mappings": (mappings or []) + ([OK_ZERO] if problems else []),
                 "thresholds": {"mode": "absolute",
                                "steps": [{"value": v, "color": c} for v, c in (steps or [(None, "green")])]}}
     if decimals is not None:
@@ -65,7 +69,7 @@ def stat(title, expr, unit="short", legend="", w=6, h=4, steps=None, mappings=No
             "targets": [{"refId": "A", "datasource": DS, "expr": expr, "legendFormat": legend, "instant": True}],
             "fieldConfig": {"defaults": defaults, "overrides": []},
             "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": False},
-                        "colorMode": "background", "graphMode": "none", "textMode": text_mode,
+                        "colorMode": color_mode, "graphMode": "none", "textMode": text_mode,
                         "justifyMode": "center", "orientation": "auto"}}
 
 
@@ -110,16 +114,22 @@ def timeline(title, exprs, w=24, h=8, mappings=None):
                         "legend": {"showLegend": False}}}
 
 
-def row(title):
-    return {"type": "row", "title": title, "collapsed": False, "panels": [], "_w": 24, "_h": 1}
+def row(title, collapsed=False):
+    return {"type": "row", "title": title, "collapsed": collapsed, "panels": [], "_w": 24, "_h": 1}
 
 
 def _layout(panels):
-    """Place panels left to right, wrapping at 24 columns; a row starts a new line."""
-    out, x, y, line_h = [], 0, 0, 0
+    """Place panels left to right, wrapping at 24 columns; a row starts a new line. The panels after a collapsed
+    row go inside it (placed as they will be when it opens) until the next row."""
+    out, x, y, line_h, folded = [], 0, 0, 0, None
     for i, p in enumerate(panels):
         w, h = p.pop("_w"), p.pop("_h")
-        if p["type"] == "row" or x + w > 24:
+        if p["type"] == "row":
+            if folded:  # the folded panels take no room on the page
+                y = folded["gridPos"]["y"] + 1
+            x, y, line_h = 0, y + line_h if not folded else y, 0
+            folded = p if p.get("collapsed") else None
+        elif x + w > 24:
             x, y, line_h = 0, y + line_h, 0
         p["gridPos"] = {"x": x, "y": y, "w": w, "h": h}
         p["id"] = i + 1
@@ -127,7 +137,11 @@ def _layout(panels):
         line_h = max(line_h, h)
         if p["type"] == "row":
             x, y, line_h = 0, y + h, 0
-        out.append(p)
+            out.append(p)
+        elif folded:
+            folded["panels"].append(p)
+        else:
+            out.append(p)
     return out
 
 
@@ -168,32 +182,67 @@ def overview(enabled: set[str], ha: list[dict] | None = None) -> dict:
                     "tile on homewatch's Status page. Empty: all is well."),
          ts("Checks not OK", [(f"count by (module) (hw_check_status_value{{{S}}} > 0)", "{{module}}")], w=16, h=7,
             stack=True, minimum=0, fill=60, desc="How many checks were WARNING or ERROR, per module.")]
+    # Internet: WAN traffic on top, then the line's numbers and graphs, then the modem
+    def tile(title, expr, unit="short", steps=None, **kw):
+        return stat(title, expr, unit, w=4, color_mode="value", steps=steps or [(None, "text")], **kw)
+
+    def graph(title, exprs, unit, w=12, **kw):
+        return ts(title, exprs, unit, w=w, lw=2, fill=12, calcs=("mean", "max"), **kw)
+
     if on("internet") or on("speedport") or on("opnsense"):
         p.append(row("Internet"))
-    if on("internet"):
-        p += [stat("Latency", f'avg(ping_average_response_ms{{{S},role="public"}})', "ms", w=4,
-                   steps=[(None, "green"), (60, "yellow"), (100, "red")]),
-              stat("Packet loss", f'max(ping_percent_packet_loss{{{S},role="public"}})', "percent", w=4,
-                   steps=[(None, "green"), (10, "yellow"), (20, "red")]),
-              stat("Speed down (last test)", f'last_over_time(hw_speedtest_download_mbps{{{S}}}[1d])', "Mbits", w=4),
-              stat("Speed up (last test)", f'last_over_time(hw_speedtest_upload_mbps{{{S}}}[1d])', "Mbits", w=4)]
     if on("opnsense"):
-        p += [stat("Firewall CPU", f"hw_opnsense_system_cpu_percent{{{S}}}", "percent", w=4, steps=_pct_steps(70, 85)),
-              stat("Gateways online", f"sum(hw_opnsense_gateway_online{{{S}}})", w=4)]
+        p.append(graph("WAN traffic", [
+            (f'rate(hw_opnsense_interface_rx_bytes{{{S},interface=~"(?i)wan.*"}}) * 8', "in {{interface}}"),
+            (f'-rate(hw_opnsense_interface_tx_bytes{{{S},interface=~"(?i)wan.*"}}) * 8', "out {{interface}}")], "bps", w=24, h=7))
+    if on("internet"):
+        p += [tile("WAN latency", f'avg(ping_average_response_ms{{{S},role="public"}})', "ms",
+                   [(None, "text"), (60, "yellow"), (100, "red")]),
+              tile("Packet loss", f'max(ping_percent_packet_loss{{{S},role="public"}})', "percent",
+                   [(None, "text"), (10, "yellow"), (20, "red")]),
+              tile("Speed down (last test)", f'last_over_time(hw_speedtest_download_mbps{{{S}}}[1d])', "Mbits"),
+              tile("Speed up (last test)", f'last_over_time(hw_speedtest_upload_mbps{{{S}}}[1d])', "Mbits"),
+              stat("WAN status", f'max(hw_check_status_value{{{S},module="internet"}})', w=4, mappings=STATUS_MAP,
+                   steps=[(None, "green"), (1, "yellow"), (2, "red")],
+                   desc="The worst of the Internet module's checks (reachable, loss, latency, jitter, DNS, speed)."),
+              tile("WAN jitter", f'avg(ping_standard_deviation_ms{{{S},role="public"}})', "ms",
+                   [(None, "text"), (15, "yellow"), (30, "red")]),
+              graph("WAN latency", [(f'ping_average_response_ms{{{S}}}', "{{role}} {{url}}")], "ms", minimum=0),
+              graph("Speed tests", [(f'hw_speedtest_download_mbps{{{S}}}', "down"), (f'hw_speedtest_upload_mbps{{{S}}}', "up")],
+                    "Mbits", minimum=0)]
     if on("speedport"):
-        p += [stat("Line sync down", f"last_over_time(hw_dsl_sync_down_kbps{{{S}}}[3h]) * 1000", "bps", w=6),
-              stat("Line sync up", f"last_over_time(hw_dsl_sync_up_kbps{{{S}}}[3h]) * 1000", "bps", w=6),
-              stat("Noise margin down", f"last_over_time(hw_dsl_snr_down_db{{{S}}}[3h])", "dB", w=6, steps=[(None, "red"), (6, "yellow"), (9, "green")]),
-              stat("In sync for", f"last_over_time(hw_dsl_line_up_s{{{S}}}[3h])", "s", w=6)]
-    if on("internet"):
-        p += [ts("Latency", [(f'ping_average_response_ms{{{S}}}', "{{role}} {{url}}")], "ms", w=8, minimum=0),
-              ts("Packet loss", [(f'ping_percent_packet_loss{{{S}}}', "{{url}}")], "percent", w=8, minimum=0),
-              ts("Speed tests", [(f'hw_speedtest_download_mbps{{{S}}}', "down"), (f'hw_speedtest_upload_mbps{{{S}}}', "up")],
-                 "Mbits", w=8, minimum=0)]
+        dsl = lambda m: f"last_over_time(hw_dsl_{m}{{{S}}}[3h])"  # the modem is read every few hours at most
+        p += [tile("VDSL sync down", dsl("sync_down_kbps") + " * 1000", "bps"),
+              tile("VDSL sync up", dsl("sync_up_kbps") + " * 1000", "bps"),
+              tile("Attainable down", dsl("attainable_down_kbps") + " * 1000", "bps"),
+              tile("SNR margin down", dsl("snr_down_db"), "dB", [(None, "red"), (6, "yellow"), (9, "text")]),
+              tile("Attenuation down", dsl("atten_down_db"), "dB"),
+              tile("In sync for", dsl("line_up_s"), "s"),
+              graph("VDSL downstream rate", [(f"hw_dsl_sync_down_kbps{{{S}}} * 1000", "sync"),
+                                             (f"hw_dsl_attainable_down_kbps{{{S}}} * 1000", "attainable")], "bps", minimum=0),
+              graph("VDSL noise margin", [(f"hw_dsl_snr_down_db{{{S}}}", "down"), (f"hw_dsl_snr_up_db{{{S}}}", "up")], "dB")]
+    # Firewall, from the OPNsense module only
     if on("opnsense"):
-        p += [ts("WAN traffic", [(f'rate(hw_opnsense_interface_rx_bytes{{{S},interface=~"(?i)wan.*"}}) * 8', "in {{interface}}"),
-                                 (f'-rate(hw_opnsense_interface_tx_bytes{{{S},interface=~"(?i)wan.*"}}) * 8', "out {{interface}}")],
-                 "bps", w=24, h=7)]
+        fw = lambda m: f"max(hw_opnsense_{m}{{{S}}})"  # noqa: E731 - one firewall per site
+        p += [row("Firewall"),
+              # colours as the module's CPU and Memory checks (default limits); memory without the ZFS cache, as the check
+              tile("Firewall CPU", fw("system_cpu_percent"), "percent", [(None, "green"), (85, "yellow"), (95, "red")]),
+              tile("Firewall memory", f"max(100 * (hw_opnsense_system_mem_used_bytes{{{S}}} - (hw_opnsense_system_arc_bytes{{{S}}} "
+                                      f"or hw_opnsense_system_mem_used_bytes{{{S}}} * 0)) / hw_opnsense_system_mem_total_bytes{{{S}}})",
+                   "percent", [(None, "green"), (90, "yellow"), (95, "red")], desc="Used memory without the ZFS cache (ARC)."),
+              tile("Firewall uptime", fw("system_uptime_seconds"), "s"),
+              tile("HAProxy servers down", f"sum(hw_opnsense_haproxy_down{{{S}}} * hw_opnsense_haproxy_watched{{{S}}}) or "
+                                           f"sum(hw_opnsense_haproxy_down{{{S}}})", steps=[(None, "green"), (1, "red")],
+                   desc="Watched HAProxy servers whose health check says DOWN, as the module's HAProxy check "
+                        "(servers you unticked and servers without a check don't count)."),
+              tile("Firewall disk", f"max(100 * hw_opnsense_disk_used_bytes{{{S}}} / hw_opnsense_disk_total_bytes{{{S}}})",
+                   "percent", [(None, "green"), (85, "yellow"), (95, "red")], desc="Root disk, as the module's Root disk check."),
+              tile("Gateway delay", f"max(hw_opnsense_gateway_delay_ms{{{S}}})", "ms", [(None, "text"), (60, "yellow"), (100, "red")],
+                   desc="OPNsense's gateway monitor: round-trip time to the monitor address (the slowest gateway)."),
+              graph("Received per interface", [(f"rate(hw_opnsense_interface_rx_bytes{{{S}}}) * 8", "{{interface}}")], "bps",
+                    minimum=0, desc="Needs the OPNsense privilege Reporting: Traffic."),
+              graph("Sent per interface", [(f"rate(hw_opnsense_interface_tx_bytes{{{S}}}) * 8", "{{interface}}")], "bps",
+                    minimum=0, desc="Needs the OPNsense privilege Reporting: Traffic.")]
     if on("mikrotik") or on("unifi"):
         p.append(row("Network"))
     if on("mikrotik"):
@@ -221,6 +270,13 @@ def overview(enabled: set[str], ha: list[dict] | None = None) -> dict:
                                      f"and (time() - hw_pbs_group_last_backup_timestamp{{{S}}}) < 7 * 86400)", "h", w=4, h=6,
                    steps=[(None, "green"), (26, "yellow"), (50, "red")],
                    desc="Hours since the last backup of the least recent guest backed up this week.")]
+    if on("proxmox"):  # guest and host CPU graphs, on their own line below the Proxmox tiles
+        p += [ts("Guest CPU (% of one guest's vCPUs)",
+                 [(f"hw_proxmox_guest_cpu_percent{{{S}}} and on (node, vmid) hw_proxmox_guest_running{{{S}}} == 1",
+                   "{{name}}")], "percent", w=12, h=8, minimum=0, lw=2, fill=0, calcs=("mean",),
+                 desc="CPU of each running VM and container, as a share of the vCPUs it was given."),
+              graph("Host CPU", [(f"hw_proxmox_node_cpu_percent{{{S}}}", "{{node}}")], "percent", h=8, minimum=0,
+                    desc="CPU of each Proxmox node.")]
     if on("synology"):
         p += [gauge("NAS volumes", f"100 * hw_synology_volume_used_bytes{{{S}}} / hw_synology_volume_total_bytes{{{S}}}",
                     legend="{{volume}}", w=6, h=5, warn=85, error=95),
@@ -230,15 +286,6 @@ def overview(enabled: set[str], ha: list[dict] | None = None) -> dict:
                    steps=[(None, "green"), (50, "yellow"), (58, "red")]),
               ts("NAS network", [(f'sum(hw_synology_net_rx_bytes_per_second{{{S}}}) * 8', "in"),
                                  (f'-sum(hw_synology_net_tx_bytes_per_second{{{S}}}) * 8', "out")], "bps", w=6, h=5)]
-    if on("ups"):
-        p += [row("Power"),
-              stat("UPS", f"hw_ups_on_battery{{{S}}}", w=4, mappings=[{"type": "value", "options": {
-                  "0": {"text": "on mains", "color": "green"}, "1": {"text": "ON BATTERY", "color": "red"}}}]),
-              stat("Battery", f"hw_ups_battery_charge_percent{{{S}}}", "percent", w=4,
-                   steps=[(None, "red"), (50, "yellow"), (80, "green")]),
-              stat("Runtime", f"hw_ups_battery_runtime_seconds{{{S}}}", "s", w=4,
-                   steps=[(None, "red"), (600, "yellow"), (1200, "green")]),
-              ts("Power draw", [(f"hw_ups_power_watts{{{S}}}", "{{ups}}")], "watt", w=12, h=4, minimum=0)]
     if on("homeassistant"):
         meta = sorted(unique_names(ha or []), key=lambda e: (e.get("name") or e["id"]).lower())
         doors, temps = _pick(meta, "binary_sensor", DOORS), _pick(meta, "sensor", "temperature")
@@ -249,6 +296,19 @@ def overview(enabled: set[str], ha: list[dict] | None = None) -> dict:
                    steps=_pct_steps())]
         if temps:
             p.append(ts("Temperatures", [(hq(temps[:PER_PANEL]), "{{name}}")], "celsius", w=16, h=7))
+    # UPS, from the UPS module only; last on the page
+    if on("ups"):
+        p += [row("UPS"),
+              stat("UPS", f"hw_ups_on_battery{{{S}}}", w=4, color_mode="value", mappings=[{"type": "value", "options": {
+                  "0": {"text": "✔ On mains", "color": "green"}, "1": {"text": "✖ ON BATTERY", "color": "red"}}}]),
+              tile("Battery", f"hw_ups_battery_charge_percent{{{S}}}", "percent", [(None, "red"), (50, "yellow"), (80, "text")]),
+              tile("Runtime", f"hw_ups_battery_runtime_seconds{{{S}}}", "s", [(None, "red"), (600, "yellow"), (900, "text")]),
+              tile("Power draw", f"hw_ups_power_watts{{{S}}}", "watt", desc="The UPS's load in watts (load % × its nominal power)."),
+              tile("Load", f"hw_ups_load_percent{{{S}}}", "percent", [(None, "text"), (60, "yellow"), (80, "red")]),
+              tile("Input voltage", f"hw_ups_input_voltage_volts{{{S}}}", "volt", [(None, "red"), (207, "text"), (253, "red")],
+                   decimals=0),
+              graph("UPS load", [(f"hw_ups_load_percent{{{S}}}", "{{ups}}")], "percent", h=8, minimum=0, maximum=100),
+              graph("Power draw", [(f"hw_ups_power_watts{{{S}}}", "{{ups}}")], "watt", h=8, minimum=0)]
     return dashboard("hw-overview", "homeWatch Overview", p, "Every module at a glance.", time="now-24h")
 
 
@@ -384,7 +444,7 @@ def unifi() -> dict:
         stat("Devices online", f'sum(hw_unifi_device_online{{{S}}})', w=6),
         stat("Updates", f'sum(hw_unifi_device_upgradable{{{S}}})', w=6, steps=[(None, "green"), (1, "yellow")]),
         stat("Health", f'min(hw_unifi_health_ok{{{S}}})', w=6, mappings=[{"type": "value", "options": {
-            "0": {"text": "problem", "color": "red"}, "1": {"text": "OK", "color": "green"}}}]),
+            "0": {"text": "✖ problem", "color": "red"}, "1": {"text": "✔ OK", "color": "green"}}}]),
         ts("Clients per device", [(f'hw_unifi_device_clients{{{S}}}', "{{device}}")], stack=True, minimum=0, fill=40),
         ts("Clients per radio", [(f'hw_unifi_radio_clients{{{S}}}', "{{device}} {{radio}}")], minimum=0),
         ts("Channel use", [(f'hw_unifi_radio_channel_use_percent{{{S}}}', "{{device}} {{radio}}")], "percent", minimum=0),
@@ -405,13 +465,13 @@ def synology() -> dict:
         stat("Memory", f"hw_synology_system_mem_percent{{{S}}}", "percent", w=6, steps=_pct_steps(85, 95)),
         stat("Hardware", f"min(hw_synology_system_system_ok{{{S}}}) * min(hw_synology_system_power_ok{{{S}}} or vector(1))",
              w=6, mappings=[{"type": "value", "options": {"0": {"text": "fault", "color": "red"},
-                                                           "1": {"text": "OK", "color": "green"}}}],
+                                                           "1": {"text": "✔ OK", "color": "green"}}}],
              desc="System and power supply status (needs SNMP in the module settings)."),
         gauge("Volumes", f"100 * hw_synology_volume_used_bytes{{{S}}} / hw_synology_volume_total_bytes{{{S}}}",
               legend="{{volume}}", w=12, h=6, warn=85, error=95),
         stat("Disk health", f"hw_synology_disk_healthy{{{S}}}", legend="{{disk}}", w=6, h=6, text_mode="value_and_name",
-             mappings=[{"type": "value", "options": {"0": {"text": "FAULT", "color": "red"},
-                                                      "1": {"text": "OK", "color": "green"}}}]),
+             mappings=[{"type": "value", "options": {"0": {"text": "✖ FAULT", "color": "red"},
+                                                      "1": {"text": "✔ OK", "color": "green"}}}]),
         stat("Bad sectors", f"hw_synology_disk_bad_sectors{{{S}}}", legend="{{disk}}", w=6, h=6, text_mode="value_and_name",
              steps=[(None, "green"), (1, "yellow"), (50, "red")]),
         ts("Disk temperatures", [(f'hw_synology_disk_temp_celsius{{{S}}}', "{{disk}}"),
@@ -429,9 +489,12 @@ def synology() -> dict:
 def pbs() -> dict:
     return dashboard("hw-pbs", "Proxmox Backup Server", [
         gauge("Datastores", f"100 * hw_pbs_store_used_bytes{{{S}}} / hw_pbs_store_total_bytes{{{S}}}", legend="{{store}}",
-              w=12, warn=80, error=90),
-        stat("Jobs failed (24 h)", f"sum(hw_pbs_jobs_failed_24h{{{S}}})", w=6, steps=[(None, "green"), (1, "red")]),
-        stat("Updates", f"hw_pbs_system_updates{{{S}}}", w=6, steps=[(None, "green"), (1, "yellow")]),
+              w=9, warn=80, error=90),
+        stat("Deduplication factor", f"hw_pbs_store_dedup_factor{{{S}}}", legend="{{store}}", w=5, decimals=2,
+             steps=[(None, "text")], color_mode="value",
+             desc="All backups' size over what they take on disk, from the last garbage collection (as the PBS GUI)."),
+        stat("Jobs failed (24 h)", f"sum(hw_pbs_jobs_failed_24h{{{S}}})", w=5, steps=[(None, "green"), (1, "red")]),
+        stat("Updates", f"hw_pbs_system_updates{{{S}}}", w=5, steps=[(None, "green"), (1, "yellow")]),
         table("Backup groups", [f'(time() - hw_pbs_group_last_backup_timestamp{{{S}}}) / 3600', f'hw_pbs_group_snapshots{{{S}}}'],
               {"store": "Datastore", "type": "Type", "id": "ID", "name": "Name", "Value #A": "Hours since the last backup",
                "Value #B": "Snapshots"}, h=10),
@@ -584,84 +647,165 @@ def _auto(meta, used: set) -> list:
     return out
 
 
+def _tidy(name: str) -> str:
+    """A friendlier label: Home Assistant names often end in the raw entity id ("Sh Basement Door
+    basement_door_temperature"); underscores become spaces and words said twice are dropped
+    ("Sh Basement Door temperature")."""
+    if "_" not in name and len(set(name.casefold().split())) == len(name.split()):
+        return name
+    seen, out = set(), []
+    for word in name.replace("_", " ").split():
+        if word.casefold() not in seen:
+            seen.add(word.casefold())
+            out.append(word)
+    return " ".join(out) or name
+
+
+def _graph(title, ents, unit, calcs=("lastNotNull", "min", "max"), metric="value", inner="{sel}", suffix="", **kw):
+    """The Home Assistant dashboard's graph style: 2 px lines, no fill, now/min/max in the legend."""
+    return ts(title, [(hq(ents, metric, inner) + suffix, "{{name}}")], unit, lw=2, fill=0, calcs=calcs, **kw)
+
+
+def _graphs(title, ents, fallback, **kw):
+    """One graph per unit, at most PER_PANEL lines each (see _by_unit)."""
+    groups, out = _units(ents), []
+    for unit, part_all in groups:
+        name = title + (f" ({unit})" if len(groups) > 1 and unit else "")
+        parts = _chunks(part_all)
+        for i, part in enumerate(parts):
+            out.append(_graph(_title(name, i, len(parts)), part, UNITS.get(unit, fallback if len(groups) == 1 else "short"),
+                              **kw))
+    return out
+
+
+def _pairs(panels):
+    """Graphs side by side, each pair as tall as its longer legend; a lone last one takes the full width."""
+    if len(panels) % 2:
+        panels[-1]["_w"] = 24
+    for i in range(0, len(panels), 2):
+        pair = panels[i:i + 2]
+        lines = max(len(p.get("targets", [])) if p["type"] != "timeseries" else _lines(p) for p in pair)
+        h = max(p["_h"] for p in pair)
+        if any(p["type"] == "timeseries" for p in pair):
+            h = max(h, 6 + lines)  # the legend: one line per series under the graph
+        for p in pair:
+            p["_h"] = h
+    return panels
+
+
+def _lines(panel) -> int:
+    """How many series a panel's queries name (one per entity id in the query)."""
+    found = [m.count("|") + 1 for t in panel["targets"] for m in re.findall(r'entity_id=~"([^"]*)"', t["expr"])]
+    return max(1, sum(found) or len(panel["targets"]))
+
+
 def homeassistant(meta: list[dict] | None = None) -> dict:
-    meta = sorted(unique_names(meta or []), key=lambda e: (e.get("name") or e["id"]).lower())
+    meta = [e | {"name": _tidy(e.get("name") or e["id"])} for e in meta or []]
+    meta = sorted(unique_names(meta), key=lambda e: (e.get("name") or e["id"]).lower())
     used: set = set()
 
     def take(ents):
         used.update(e["id"] for e in ents)
         return ents
 
-    p = []
     temps, hum = take(_pick(meta, "sensor", "temperature")), take(_pick(meta, "sensor", "humidity"))
     press = take(_pick(meta, "sensor", {"pressure", "atmospheric_pressure"}))
     now_t = _pick(meta, "climate", field="current_temperature")[:LONG]
     target, active = _pick(meta, "climate", field="target_temperature")[:LONG], _pick(meta, "climate", field="active")[:LONG]
     take(now_t + target + active)
-    if temps or hum or press or now_t or target or active:
-        p.append(row("Climate"))
-    p += _by_unit("Temperatures", temps, "celsius") + _by_unit("Humidity", hum, "percent")
-    if now_t or target:
-        p.append(ts("Thermostats", ([(hq(now_t, "current_temperature"), "{{name}} now")] if now_t else [])
-                    + ([(hq(target, "target_temperature"), "{{name}} target")] if target else []), "celsius"))
-    if active:
-        p += [timeline("Heating", [(hq(active, "active"), "{{name}}")], w=12, mappings=[{"type": "value", "options": {
-                  "0": {"text": "idle", "color": QUIET}, "1": {"text": "heating", "color": "orange"}}}]),
-              ts("Heating hours per day", [(hq(active, "active", "avg_over_time({sel}[1d]) * 24"), "{{name}}")], "h",
-                 w=12, minimum=0, desc="Hours the thermostat was actually heating (or cooling) in the 24 h before each point.")]
-    p += _by_unit("Pressure", press, "pressurehpa")
-
-    power, energy = take(_pick(meta, None, "power")[:LONG]), take(_pick(meta, None, "energy")[:LONG])
-    if power or energy:
-        p.append(row("Energy"))
-    p += _by_unit("Power", power, "watt", minimum=0)
-    p += _by_unit("Energy per day", energy, "kwatth", inner="increase({sel}[1d])", suffix=" > 0", minimum=0,
-                  desc="Counters that restart (some plugs do at midnight or at a restart) are handled by increase().")
-
+    # plugs often leave out the device class: their unit says it too
+    power = take([e for e in _pick(meta) if e.get("dc") == "power" or e.get("unit") in ("W", "kW")][:LONG])
+    energy = take([e for e in _pick(meta) if e.get("dc") == "energy" or e.get("unit") in ("Wh", "kWh")][:LONG])
     doors = take(_pick(meta, "binary_sensor", DOORS)[:LONG])
     bats = take(_pick(meta, "sensor", "battery")[:LONG])
     alarm, safety = take(_pick(meta, "alarm_control_panel")[:LONG]), take(_pick(meta, "binary_sensor", SAFETY_DC)[:LONG])
-    if doors or bats or alarm or safety:
-        p.append(row("Security"))
-    if doors:
-        p.append(stat("Doors open now", f"sum({hq(doors)}) or vector(0)", w=12, h=4, steps=[(None, "green"), (1, "orange")]))
-    if bats:
-        p.append(stat("Batteries below 20 %", f"({hq(bats)} >= 0) < 20", "percent", legend="{{name}}", w=12 if doors else 24,
-                      h=4, steps=[(None, "green"), (0, "orange")], text_mode="value_and_name", none="none",
-                      desc="Each battery under 20 %. Readings below 0 (a device that doesn't report its battery) are left out."))
-    if alarm:
-        p.append(timeline("Alarm panels", [(hq(alarm), "{{name}}")], h=5, mappings=[
-            {"type": "value", "options": {"0": {"text": "disarmed", "color": "green"}, "1": {"text": "armed", "color": "blue"}}}]))
-    if doors:
-        p.append(timeline("Doors and contacts", [(hq(doors), "{{name}}")], h=max(5, 2 + len(doors)), mappings=[
-            {"type": "value", "options": {"0": {"text": "closed", "color": QUIET}, "1": {"text": "open", "color": "orange"}}}]))
-    if safety:
-        p.append(timeline("Safety sensors", [(hq(safety), "{{name}}")], h=max(5, 2 + len(safety)), mappings=[
-            {"type": "value", "options": {"0": {"text": "clear", "color": "green"}, "1": {"text": "ALARM", "color": "red"}}}]))
-    if bats:
-        p.append(ts("Batteries", [(f"{hq(bats)} >= 0", "{{name}}")], "percent", w=24, minimum=0, maximum=100))
-
     lights = take(_pick(meta, "light"))
+    host = [(f'hw_check_value_value{{{S},check="homeassistant.{c}"}}', n) for c, n in
+            (("cpu", "CPU"), ("memory", "memory"), ("disk", "disk"))]
+    quiet = [(None, "text")]
+
+    # ---- now: one line of tiles
+    tiles = []
+    if temps:
+        tiles.append(stat("Temperatures now", hq(temps[:8]), "celsius", "{{name}}", w=10, decimals=1,
+                          text_mode="value_and_name", color_mode="value", steps=quiet))
+    if alarm:
+        tiles.append(stat("Alarm", hq(alarm), legend="{{name}}", w=5, text_mode="value_and_name", color_mode="value",
+                          mappings=[{"type": "value", "options": {"0": {"text": "Disarmed", "color": "text"},
+                                                                  "1": {"text": "Armed", "color": "blue"}}}]))
+    if doors:
+        tiles.append(stat("Doors open", f"sum({hq(doors)}) or vector(0)", w=3, decimals=0,
+                          color_mode="value", steps=[(None, "green"), (1, "orange")]))
+    if bats:
+        tiles.append(stat("Low battery", f"count(({hq(bats)} >= 0) < 20) or vector(0)", w=3,
+                          decimals=0, color_mode="value", steps=[(None, "green"), (1, "orange")],
+                          desc="Batteries under 20 %. The Batteries graph below names them."))
+    tiles.append(stat("HA CPU", host[0][0], "percent", w=max(3, 24 - sum(t["_w"] for t in tiles)) if len(tiles) > 1 else 4,
+                      decimals=0, color_mode="value", steps=[(None, "text"), (70, "orange"), (90, "red")]))
+    p = list(tiles)
+
+    climate = _graphs("Temperatures", temps, "celsius") + _graphs("Humidity", hum, "percent", maximum=100)
+    if now_t or target:
+        climate.append(ts("Thermostats", ([(hq(now_t, "current_temperature"), "{{name}} now")] if now_t else [])
+                          + ([(hq(target, "target_temperature"), "{{name}} target")] if target else []), "celsius",
+                          lw=2, fill=0, calcs=("lastNotNull", "min", "max")))
+    if active:
+        climate.append(_graph("Heating hours per day", active, "h", calcs=("lastNotNull", "max"), minimum=0, maximum=24,
+                              metric="active", inner="avg_over_time({sel}[1d]) * 24",
+                              desc="Hours the thermostat was actually heating (or cooling) in the 24 h before each point."))
+    if climate:
+        p += [row("Climate")] + _pairs(climate)
+    if active:
+        p.append(timeline("Heating", [(hq(active, "active"), "{{name}}")], h=2 + len(active), mappings=[{
+            "type": "value", "options": {"0": {"text": "idle", "color": QUIET}, "1": {"text": "heating", "color": "orange"}}}]))
+
+    energy_p = (_graphs("Power", power, "watt", calcs=("lastNotNull", "mean", "max"), minimum=0)
+                + _graphs("Energy per day", energy, "kwatth", calcs=("lastNotNull", "max"), inner="increase({sel}[1d])",
+                          suffix=" > 0", minimum=0,
+                          desc="Counters that restart (some plugs do at midnight or at a restart) are handled by increase()."))
+    if energy_p:
+        p += [row("Energy")] + _pairs(energy_p)
+
+    sec = []
+    if alarm:
+        sec.append(timeline("Alarm", [(hq(alarm), "{{name}}")], w=12, h=7, mappings=[{"type": "value", "options": {
+            "0": {"text": "disarmed", "color": QUIET}, "1": {"text": "armed", "color": "blue"}}}]))
+    if doors:
+        sec.append(timeline("Doors", [(hq(doors), "{{name}}")], w=12, h=7, mappings=[{"type": "value", "options": {
+            "0": {"text": "closed", "color": QUIET}, "1": {"text": "open", "color": "orange"}}}]))
+    if safety:
+        sec.append(timeline("Safety sensors", [(hq(safety), "{{name}}")], w=12, h=7, mappings=[{"type": "value", "options": {
+            "0": {"text": "clear", "color": QUIET}, "1": {"text": "ALARM", "color": "red"}}}]))
+    if bats:
+        sec.append(_graph("Batteries", bats, "percent", calcs=("lastNotNull", "min"), suffix=" >= 0",
+                          minimum=0, maximum=100, h=7))
+    if sec:
+        p += [row("Security")] + _pairs(sec)
+
+    p += [row("Home Assistant host"),
+          ts("CPU, memory and disk", host, "percent", w=24, h=7, minimum=0, maximum=100, lw=2, fill=0,
+             calcs=("lastNotNull", "mean", "max"), desc="From the host sensors in the module settings.")]
+
+    # ---- the long parts, folded until opened
     if lights:
-        p.append(row("Lights"))
+        p.append(row(f"Lights ({len(lights)})", collapsed=True))
         parts = _chunks(lights, LONG)
         for i, part in enumerate(parts):
-            p.append(ts(_title("Lights: hours on per day", i, len(parts)),
-                        [(hq(part, inner="avg_over_time({sel}[1d]) * 24") + " > 0", "{{name}}")],
-                        "h", w=24, h=7, minimum=0, desc="Hours each light was on in the 24 h before each point."))
-        for i, part in enumerate(parts):
-            p.append(timeline(_title("Lights on", i, len(parts)), [(hq(part), "{{name}}")], h=max(5, 2 + len(part)),
+            p.append(_graph(_title("Hours on per day", i, len(parts)), part, "h", calcs=("lastNotNull", "max"),
+                            inner="avg_over_time({sel}[1d]) * 24", suffix=" > 0", w=12, h=8, minimum=0,
+                            desc="Hours each light was on in the 24 h before each point."))
+            p.append(timeline(_title("On and off", i, len(parts)), [(hq(part), "{{name}}")], w=12, h=8,
                               mappings=[{"type": "value", "options": {"0": {"text": "off", "color": QUIET},
                                                                       "1": {"text": "on", "color": "yellow"}}}]))
-
+    if press:
+        p += [row("Pressure", collapsed=True)] + _graphs("Pressure", press, "pressurehpa", w=24)
     auto = _auto(meta, used)
     if auto:
-        p += [row("Other recorded entities")] + auto
-    p += [row("Home Assistant host"),
-          ts("Host CPU, memory and disk", [(f'hw_check_value_value{{{S},check="homeassistant.cpu"}}', "CPU"),
-                                           (f'hw_check_value_value{{{S},check="homeassistant.memory"}}', "memory"),
-                                           (f'hw_check_value_value{{{S},check="homeassistant.disk"}}', "disk")], "percent",
-             w=24, h=7, minimum=0, maximum=100, desc="From the host sensors in the module settings.")]
+        for a in auto:
+            if a["type"] == "timeseries":
+                a["fieldConfig"]["defaults"]["custom"] |= {"lineWidth": 2, "fillOpacity": 0}
+                a["options"]["legend"]["calcs"] = ["lastNotNull", "min", "max"]
+        p += [row(f"Other recorded entities ({sum(1 for e in meta if e['id'] not in used)})", collapsed=True)] + _pairs(auto)
     if meta:
         # every entity in one query: names as value mappings, not in the query (VictoriaMetrics caps a query at 16 KB)
         # watched-only entities are stored too: list the dashboard's ones, 150 ids per query (16 KB)
@@ -674,11 +818,11 @@ def homeassistant(meta: list[dict] | None = None) -> dict:
         latest["fieldConfig"]["overrides"].append({"matcher": {"id": "byName", "options": "Name"}, "properties": [
             {"id": "mappings", "value": [{"type": "value", "options": {
                 e["id"]: {"text": e.get("name") or e["id"], "index": i} for i, e in enumerate(meta)}}]}]})
-        p += [row("Everything recorded"), latest]
+        p += [row(f"Every recorded entity ({len(meta)})", collapsed=True), latest]
     else:
-        p.insert(0, {"type": "text", "title": "", "_w": 24, "_h": 3, "options": {"mode": "markdown", "content": (
+        p = [{"type": "text", "title": "", "_w": 24, "_h": 3, "options": {"mode": "markdown", "content": (
             "No entities shown yet. In homeWatch, open **Modules › Home Assistant**, and under **Entities** tick "
-            "**Show in Grafana** for the ones you want here.")}})
+            "**Show in Grafana** for the ones you want here.")}}] + p
     return dashboard("hw-homeassistant", "Home Assistant", p,
                      "Built from the entities ticked Show in Grafana (Home Assistant module → Entities). Rebuilt when that list, "
                      "an entity's name or its unit changes.")
@@ -690,7 +834,8 @@ def _opt(text: str) -> str:
 
 def ha_explorer(meta: list[dict] | None = None) -> dict:
     """Pick any recorded entities and see each on its own graph."""
-    meta = sorted([e for e in unique_names(meta or []) if "value" in e.get("fields", ("value",))],
+    meta = [e | {"name": _tidy(e.get("name") or e["id"])} for e in meta or []]  # as on the Home Assistant dashboard
+    meta = sorted([e for e in unique_names(meta) if "value" in e.get("fields", ("value",))],
                   key=lambda e: (e.get("name") or e["id"]).lower())
     opts = [(f"{_opt(e.get('name') or e['id'])}{' (' + _opt(e['unit']) + ')' if e.get('unit') else ''} · {e['id']}", e["id"])
             for e in meta]

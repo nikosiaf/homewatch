@@ -77,13 +77,26 @@ def test_opnsense_series():
             {"mountpoint": "/", "used_bytes": 1, "total_bytes": 4}, {"mountpoint": "/boot", "used_bytes": 1}]},
         "gateways": [{"name": "WAN", "status_translated": "Online", "delay": "8.6 ms", "loss": "0.0 %", "stddev": ""}],
         "traffic": {"wan": {"name": "WAN", "device": "pppoe0", "bytes received": "5", "bytes transmitted": "6"}},
-        "haproxy": [{"pxname": "ha", "svname": "ha", "status": "UP", "scur": "2"}, {"pxname": "ha", "svname": "BACKEND"}],
+        "haproxy": [{"pxname": "ha", "svname": "ha", "status": "UP", "scur": "2"}, {"pxname": "ha", "svname": "BACKEND"},
+                    {"pxname": "nas", "svname": "nas", "status": "DOWN"}],
+        "time": {"uptime": "7 days, 21:07:59"},
         "services": [{"name": "unbound", "running": 1}]}, 1000
     out = valid(m.series("home"))
     assert any(x.startswith("hw_opnsense_system,") and "cpu_percent=1.0" in x for x in out)
     assert sum(x.startswith("hw_opnsense_disk,") for x in out) == 1
     assert any(x.startswith("hw_opnsense_gateway,") and "delay_ms=8.6" in x and "stddev" not in x for x in out)
-    assert sum(x.startswith("hw_opnsense_haproxy,") for x in out) == 1
+    assert [("down=1.0" in x) for x in out if x.startswith("hw_opnsense_haproxy,")] == [False, True]
+    m.skipped = {"nas/nas"}  # unticked under "HAProxy servers to watch" (the check sets it)
+    assert [("watched=1.0" in x) for x in valid(m.series("home")) if x.startswith("hw_opnsense_haproxy,")] == [True, False]
+    assert any("uptime_seconds=" + str(7 * 86400 + 21 * 3600 + 7 * 60 + 59.0) in x for x in out)
+
+
+def test_opnsense_uptime_text():
+    from homewatch.modules.opnsense.plugin import uptime_s
+
+    assert uptime_s("1 day") == 86400 and uptime_s("1 day, 03:12") == 86400 + 3 * 3600 + 12 * 60
+    assert uptime_s("21:07:59") == 21 * 3600 + 7 * 60 + 59 and uptime_s("5 mins") == 300
+    assert uptime_s("") is None and uptime_s("soon") is None and uptime_s(None) is None
 
 
 def test_other_modules_series():

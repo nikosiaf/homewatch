@@ -75,6 +75,8 @@ class OPNsenseModule(ApiModule):
     filter_help = ("Untick a server that is down on purpose (e.g. a device that is often off); it stays in the "
                    "table below but no longer raises the HAProxy check.")
 
+    skipped: set[str] = set()
+
     def __init__(self):
         super().__init__()
         self.cpu_hist: list[tuple[float, float]] = []  # (reading time, CPU %) for the 10-minute average
@@ -145,7 +147,8 @@ class OPNsenseModule(ApiModule):
         ms = lambda v: num(str(v or "").split()[0]) if v else None  # noqa: E731 - "8.6 ms", "0.0 %"
         out = lines("hw_opnsense_system", [({"site": site, "firewall": name},
                     {"cpu_percent": None if idle is None else 100 - idle, "mem_used_bytes": num(mem.get("used")),
-                     "mem_total_bytes": num(mem.get("total")), "arc_bytes": num(mem.get("arc"))})], ts)
+                     "mem_total_bytes": num(mem.get("total")), "arc_bytes": num(mem.get("arc")),
+                     "uptime_seconds": uptime_s((snap.get("time") or {}).get("uptime"))})], ts)
         out += lines("hw_opnsense_disk", [({"site": site, "firewall": name, "mount": d.get("mountpoint") or ""},
                      {"used_bytes": num(d.get("used_bytes")), "total_bytes": num(d.get("total_bytes"))})
                      for d in (snap.get("disk") or {}).get("devices", []) if d.get("mountpoint") == "/"], ts)
@@ -159,6 +162,8 @@ class OPNsenseModule(ApiModule):
         out += lines("hw_opnsense_haproxy", [({"site": site, "firewall": name, "backend": x.get("pxname") or "",
                                                "server": x.get("svname") or ""},
                      {"up": float(str(x.get("status", "")).upper().startswith("UP")),
+                      "down": float(str(x.get("status", "")).upper().startswith("DOWN")),
+                      "watched": float(_server_key(x) not in self.skipped),
                       "sessions": num(x.get("scur")), "bytes_in": num(x.get("bin")), "bytes_out": num(x.get("bout"))})
                      for x in _servers(snap.get("haproxy"))], ts)
         out += lines("hw_opnsense_service", [({"site": site, "firewall": name, "service": r.get("name") or r.get("id") or ""},
@@ -178,6 +183,7 @@ class OPNsenseModule(ApiModule):
                 for x in _servers(snap.get("haproxy"))]
 
     def check(self, s, th, snap, now):
+        self.skipped = set(s.get("skipped", []))  # for series(), which runs after the check: unwatched HAProxy servers
         out = []
 
         def add(cid, status, detail, value=None):
@@ -298,6 +304,18 @@ class OPNsenseModule(ApiModule):
 
 
 plugin = OPNsenseModule()
+
+
+_UPTIME = re.compile(r"(?:(\d+)\s+days?,?\s*)?(?:(\d+):(\d+)(?::(\d+))?)?(?:\s*(\d+)\s+mins?)?(?:\s*(\d+)\s+secs?)?$")
+
+
+def uptime_s(text) -> float | None:
+    """OPNsense's uptime text ("7 days, 21:07:59", "1 day", "03:12", "5 mins") in seconds."""
+    m = _UPTIME.match(str(text or "").strip())
+    if not text or not m or not any(m.groups()):
+        return None
+    d, h, mi, sec, mins, secs = (int(g or 0) for g in m.groups())
+    return float(d * 86400 + h * 3600 + mi * 60 + sec + mins * 60 + secs)
 
 
 def _servers(hap) -> list[dict]:

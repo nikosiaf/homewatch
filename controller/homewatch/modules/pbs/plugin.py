@@ -26,6 +26,14 @@ JOB_TYPES = {"verificationjob": "verify", "verify": "verify", "prunejob": "prune
 _TOKEN = re.compile(r"^[^@\s]+@[^!\s]+![A-Za-z0-9._-]+$")
 
 
+def dedup_factor(gc) -> float | None:
+    """As the PBS GUI shows it: the size of all backups (index data) over what the chunks take on disk,
+    from the last garbage collection. None before the first one."""
+    gc = gc or {}
+    index, disk = num(gc.get("index-data-bytes")), num(gc.get("disk-bytes"))
+    return index / disk if index and disk else None
+
+
 class PBSModule(ApiModule):
     id = "pbs"
     name = "Proxmox Backup Server"
@@ -105,7 +113,7 @@ class PBSModule(ApiModule):
             updates = await get("nodes/localhost/apt/update", optional=True)
         snap = {"version": version.get("version", "?"),
                 "stores": [{k: x.get(k) for k in ("store", "total", "used", "avail", "error", "estimated-full-date")}
-                           for x in stores],
+                           | {"dedup": dedup_factor(x.get("gc-status"))} for x in stores],
                 "groups": groups,
                 "jobs": [{"type": t.get("worker_type"), "id": t.get("worker_id"), "end": t.get("endtime"),
                           "status": t.get("status")} for t in tasks
@@ -145,7 +153,8 @@ class PBSModule(ApiModule):
             return []
         out = lines("hw_pbs_store", [({"site": site, "store": x.get("store") or ""},
                     {"used_bytes": num(x.get("used")), "total_bytes": num(x.get("total")), "avail_bytes": num(x.get("avail")),
-                     "full_timestamp": num(x.get("estimated-full-date")) or None}) for x in snap["stores"]], ts)
+                     "full_timestamp": num(x.get("estimated-full-date")) or None,
+                     "dedup_factor": x.get("dedup")}) for x in snap["stores"]], ts)
         out += lines("hw_pbs_group", [({"site": site, "store": g["store"], "type": g["type"] or "", "id": g["id"],
                                         "name": g.get("comment") or ""},
                      {"last_backup_timestamp": num(g.get("last")), "snapshots": num(g.get("count"))}) for g in snap["groups"]], ts)
@@ -224,8 +233,9 @@ class PBSModule(ApiModule):
 
     def tables(self, snap, s):
         import time
-        return [Table("Datastores", ["Datastore", "Used", "Full on"],
+        return [Table("Datastores", ["Datastore", "Used", "Deduplication factor", "Full on"],
                       [[x["store"], f"{100 * x['used'] / x['total']:.0f} % of {x['total'] / 1e12:.1f} TB" if x.get("total") else x.get("error"),
+                        f"{x['dedup']:.2f}" if x.get("dedup") else None,
                         time.strftime("%d %b %Y", time.localtime(x["estimated-full-date"]))
                         if (x.get("estimated-full-date") or 0) > 0 else None] for x in snap["stores"]]),
                 Table("Backups", ["Guest", "Datastore", "Snapshots", "Newest"],

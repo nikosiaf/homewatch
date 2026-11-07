@@ -74,6 +74,13 @@ MIGRATIONS: list[str] = [
     """
     DELETE FROM sessions;
     """,
+    # 5: copies of device configurations (MikroTik /export), one row per change
+    """
+    CREATE TABLE device_configs (
+        id INTEGER PRIMARY KEY, site TEXT NOT NULL, module TEXT NOT NULL, device TEXT NOT NULL,
+        name TEXT NOT NULL DEFAULT '', ts REAL NOT NULL, text TEXT NOT NULL);
+    CREATE INDEX device_configs_device ON device_configs (site, module, device, ts);
+    """,
 ]
 
 

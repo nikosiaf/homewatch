@@ -191,16 +191,52 @@ document.addEventListener("change", function (e) {
   if (some) some.checked = true;
 });
 
-// Buttons that wait for the server (data-busy): say so until the page answers. The status page's
-// 30 s refresh is held meanwhile, or it would put the idle button back.
+// Every form button that waits for the server: the clicked button shows a spinner and what is happening
+// ("Saving\u2026", "Connecting\u2026") and the form's other buttons are disabled until the page answers, so a second
+// click can't send it twice. data-busy="Text" sets the words; downloads (data-download) come back after a few
+// seconds because no new page loads. Confirm/password/keep-history dialogs prevent the submit first, so the
+// spinner only starts once the user has said yes. The status page's 30 s refresh is held meanwhile.
 (function () {
   let busy = false;
+  const WORDS = [[/^save and send/i, "Saving and sending\u2026"], [/^save/i, "Saving\u2026"], [/^connect/i, "Connecting\u2026"],
+    [/^read/i, "Reading\u2026"], [/^test/i, "Sending test\u2026"], [/^check/i, "Checking\u2026"], [/^log ?in/i, "Logging in\u2026"],
+    [/^log ?out/i, "Logging out\u2026"], [/^(remove|delete)/i, "Removing\u2026"], [/^add/i, "Adding\u2026"],
+    [/^(next|finish|create)/i, "Saving\u2026"], [/^skip/i, "Skipping\u2026"], [/^turn on/i, "Turning on\u2026"],
+    [/^turn off/i, "Turning off\u2026"], [/^download/i, "Preparing\u2026"], [/^(preview|restore)/i, "Opening\u2026"],
+    [/^run/i, "Starting\u2026"], [/^(change|reset|ok, update)/i, "Working\u2026"], [/^trust/i, "Saving\u2026"],
+    [/^snooze/i, "Snoozing\u2026"], [/^end/i, "Ending\u2026"]];
+  function words(btn) {
+    if (btn.dataset.busy) return btn.dataset.busy;
+    const text = btn.textContent.trim();
+    if (!text) return "";  // icon button: spinner only
+    const hit = WORDS.find(function (w) { return w[0].test(text); });
+    return hit ? hit[1] : "Working\u2026";
+  }
   document.addEventListener("submit", function (e) {
-    const btn = e.target.querySelector("button[data-busy]");
-    if (!btn || e.defaultPrevented) return;
-    busy = true;
-    btn.textContent = btn.dataset.busy;
-    btn.disabled = true;
+    const form = e.target;
+    if (e.defaultPrevented || form.dataset.busyOn) return;
+    const btn = (e.submitter && e.submitter.matches("button")) ? e.submitter
+      : form.querySelector("button[data-save], button:not([type=button])");
+    if (!btn || btn.hasAttribute("hx-post") || btn.hasAttribute("hx-get")) return;
+    const download = form.hasAttribute("data-download");
+    if (!download) busy = true;
+    form.dataset.busyOn = "1";
+    const before = btn.innerHTML, w = words(btn);
+    btn.classList.add("is-busy");
+    btn.setAttribute("aria-busy", "true");
+    btn.innerHTML = '<span class="spin" aria-hidden="true"></span>' + (w ? " " : "");
+    if (w) btn.appendChild(document.createTextNode(w));
+    else if (btn.getAttribute("aria-label")) btn.setAttribute("aria-label", btn.getAttribute("aria-label") + " (working)");
+    const others = Array.from(form.querySelectorAll("button")).filter(function (b) { return !b.disabled; });
+    // after this event: the browser builds the request from the form now, and a disabled button would be left out
+    setTimeout(function () { others.forEach(function (b) { b.disabled = true; }); }, 0);
+    if (download) setTimeout(function () {
+      others.forEach(function (b) { b.disabled = false; });
+      btn.innerHTML = before;
+      btn.classList.remove("is-busy");
+      btn.removeAttribute("aria-busy");
+      delete form.dataset.busyOn;
+    }, 3000);
   });
   document.addEventListener("htmx:beforeRequest", function (e) { if (busy) e.preventDefault(); });
   // back button: the browser may restore the page as it was left
@@ -377,7 +413,7 @@ document.querySelectorAll("table[data-page]").forEach(function (table) {
     if (ok) {
       setStep(4); setPct(100);
       title.textContent = "Update OK";
-      result.innerHTML = '<div class="result ok" role="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M7.5 12.5l3 3 6-6.5"/></svg><div><b></b><p>Taking you to the Status page in <span class="num">3</span> s…</p></div></div>';
+      result.innerHTML = '<div class="result ok" role="status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5"/><path d="M7.5 12.5l3 3 6-6.5"/></svg><div><b></b><p>Taking you to the Status page in <span class="num">3</span> s\u2026</p></div></div>';
       result.querySelector("b").textContent = "homeWatch " + to + " is running.";
       let n = 3;
       const t = setInterval(function () {

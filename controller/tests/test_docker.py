@@ -162,3 +162,19 @@ def test_list_is_grouped_per_host_and_old_project_skips_carry_over(monkeypatch, 
     assert res["stopped"].detail == "2 watched containers running"
     db.set("module.docker", s | {"skipped": ["group:10-0-0-5"]})  # a whole host unticked
     assert evaluate(m, m.load(rt), m.snap)["stopped"].detail == "0 watched containers running"
+
+
+def test_container_tables_line_up_across_hosts(monkeypatch):
+    fake(monkeypatch, {"10.0.0.5:2375": [ctr("a", "web")], "10.0.0.6:2375": [ctr("b", "a-much-longer-container-name")]})
+    m = DockerModule()
+    s = {"enabled": True, "hosts": "10.0.0.5, 10.0.0.6"}
+    tables = m.tables(asyncio.run(m.fetch(s, "", NOW)), s)
+    assert len(tables) == 2 and tables[0].widths == tables[1].widths and len(tables[0].widths) == len(tables[0].head)
+    assert tables[0].min_width >= 640
+
+
+def test_pinned_digest_is_shortened_in_the_table():
+    from homewatch.modules.docker.plugin import short_image
+    assert short_image("docker.io/valkey/valkey:8@sha256:81db6d39e1bba3b3ff32bd3a1b19a6d69690f94a") == \
+        "docker.io/valkey/valkey:8@sha256:81db6d39e1bb"
+    assert short_image("caddy:2.11.7") == "caddy:2.11.7" and short_image("") == ""
