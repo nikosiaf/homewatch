@@ -5,15 +5,16 @@ services:
   caddy:
     image: caddy:2.11.7
     restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
+    ports:  # host ports: HW_HTTP_PORT and HW_HTTPS_PORT in .env
+      - "${HW_HTTP_PORT:-5080}:80"
+      - "${HW_HTTPS_PORT:-5443}:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./certs:/certs:ro
       - caddy-data:/data
     environment:
       HW_TRUSTED_PROXIES: ${HW_TRUSTED_PROXIES:-}
+      HW_HTTPS_PORT: ${HW_HTTPS_PORT:-5443}  # where the HTTP port sends browsers
     networks: [edge]
     depends_on:
       - controller

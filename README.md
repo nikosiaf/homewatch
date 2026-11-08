@@ -72,7 +72,13 @@ Please read `install.sh` before running it (`less install.sh`, `q` to quit); it'
   answer without asking, and the System page can turn it on or off later)
 - runs `docker compose up -d`
 
-At the end it prints the certificate's SHA-256 fingerprint. Open `https://<host>` and compare that
+homeWatch listens on port **5443** (HTTPS) and **5080** (HTTP, which only redirects to HTTPS), so it
+doesn't clash with a web server already on 80 or 443. Other ports: `./install.sh --https-port 8443
+--http-port 8080`, or change `HW_HTTPS_PORT` and `HW_HTTP_PORT` in `.env` and run `docker compose up -d`.
+`install.sh` stops if a port is already in use. With `HW_HTTPS_PORT=443` the address is just
+`https://<host>`.
+
+At the end it prints the address and the certificate's SHA-256 fingerprint. Open `https://<host>:5443` and compare that
 fingerprint when the browser warns about the certificate (once). Create the admin account right
 away: until it exists (after an install or a reset), whoever opens the page first creates it.
 Then follow the setup wizard:
@@ -92,7 +98,7 @@ cp env.example .env && chmod 600 .env    # .env.example in a git checkout
 openssl rand -base64 32          # put it in .env as HW_MASTER_KEY=…; also set TZ
 mkdir certs && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
   -keyout certs/key.pem -out certs/cert.pem -subj "/CN=homewatch" -addext "subjectAltName=IP:<host ip>"
-docker compose up -d
+docker compose up -d             # then open https://<host>:5443 (HW_HTTPS_PORT in .env)
 ```
 
 ## What homeWatch does
@@ -539,7 +545,8 @@ allow redistribution. **System → Health** shows the installed version.
   use: the public servers the Internet module pings and asks for DNS lookups, the speed-test service,
   your notification channels, GitHub for the daily release check (which you can turn off) and, if you
   tick it, `upgrade.mikrotik.com` once a day for the newest RouterOS version.
-- **Network:** only Caddy publishes ports (80 redirects to 443). VictoriaMetrics, Telegraf, Grafana and
+- **Network:** only Caddy publishes ports: HTTPS on 5443 and HTTP on 5080, which only redirects to HTTPS
+  (`HW_HTTPS_PORT` / `HW_HTTP_PORT` in `.env`). VictoriaMetrics, Telegraf, Grafana and
   the controller stay on internal Docker networks.
 - **Grafana:** reached only through Caddy, which asks homeWatch who you are first. Grafana trusts the
   user name homeWatch hands it only from the small private network it shares with Caddy, homeWatch and

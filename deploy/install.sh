@@ -7,20 +7,27 @@
 #      (needs sudo once; homeWatch itself gets no Docker access, it only leaves a file in update/ask/)
 #   4. asks whether to add Grafana (COMPOSE_PROFILES=grafana in .env; System → Grafana can change it later)
 #   5. pulls the images and starts the stack with docker compose
+# homeWatch listens on port 5443 (HTTPS) and 5080 (HTTP, redirects only) unless .env says otherwise.
 # Usage: ./install.sh               (release images from ghcr.io)
 #        ./install.sh --no-updater  (the same, without the updater)
 #        ./install.sh --grafana     (add Grafana without asking; --no-grafana: don't add it, don't ask)
 #        ./install.sh --dev         (build the controller from ../controller; no updater)
+#        ./install.sh --https-port 8443 --http-port 8080   (other ports; also changes an existing .env)
 set -euo pipefail
-dev=0 updater=1 grafana=ask
-for arg in "$@"; do
-  case "$arg" in
+dev=0 updater=1 grafana=ask https_port="" http_port=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     --dev) dev=1; updater=0 ;;
     --no-updater) updater=0 ;;
     --grafana) grafana=yes ;;
     --no-grafana) grafana=no ;;
-    *) echo "Unknown option: $arg" >&2; exit 1 ;;
+    --https-port|--http-port)
+      [[ "${2:-}" =~ ^[0-9]+$ && "$2" -ge 1 && "$2" -le 65535 ]] || { echo "$1 needs a port number (1-65535)" >&2; exit 1; }
+      if [[ $1 == --https-port ]]; then https_port=$2; else http_port=$2; fi
+      shift ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
+  shift
 done
 cd "$(dirname "$0")"
 
@@ -51,6 +58,29 @@ if [[ ! -f .env ]]; then
   echo "  time zone ${tz}, gateway ${gw:-?}, DNS ${dns:-?}"
 else
   echo ".env exists, keeping it"
+  # installs from before the port settings published 443 and 80: keep them unless told otherwise
+  grep -q '^HW_HTTPS_PORT=' .env || echo "HW_HTTPS_PORT=${https_port:-443}" >> .env
+  grep -q '^HW_HTTP_PORT=' .env || echo "HW_HTTP_PORT=${http_port:-80}" >> .env
+fi
+setenv() {  # setenv NAME VALUE: set or add one line in .env
+  if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else echo "$1=$2" >> .env; fi
+}
+[[ -n "$https_port" ]] && setenv HW_HTTPS_PORT "$https_port"
+[[ -n "$http_port" ]] && setenv HW_HTTP_PORT "$http_port"
+https_port=$(sed -n 's/^HW_HTTPS_PORT=//p' .env | head -1); https_port=${https_port:-5443}
+http_port=$(sed -n 's/^HW_HTTP_PORT=//p' .env | head -1); http_port=${http_port:-5080}
+[[ "$https_port" != "$http_port" ]] || { echo "HW_HTTPS_PORT and HW_HTTP_PORT must differ" >&2; exit 1; }
+echo "  ports: HTTPS ${https_port}, HTTP ${http_port} (HW_HTTPS_PORT / HW_HTTP_PORT in .env)"
+
+# a port another program already uses would stop Caddy from starting (homeWatch's own Caddy may hold them)
+if command -v ss >/dev/null && [[ -z "$("${compose[@]}" ps -q caddy 2>/dev/null)" ]]; then
+  for port in "$https_port" "$http_port"; do
+    if [[ -n "$(ss -ltnH "sport = :${port}" 2>/dev/null)" ]]; then
+      echo "Port ${port} is already in use on this host. Choose free ports, for example:" >&2
+      echo "  ./install.sh --https-port 8443 --http-port 8080" >&2
+      exit 1
+    fi
+  done
 fi
 
 host_ip=$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oE 'src ([0-9.]+)' | awk '{print $2}')
@@ -133,7 +163,9 @@ else
 fi
 
 echo
-echo "homeWatch is starting. Open https://${host_ip:-<this host>} and follow the setup wizard."
+address="https://${host_ip:-<this host>}"
+[[ "$https_port" == 443 ]] || address="${address}:${https_port}"
+echo "homeWatch is starting. Open ${address} and follow the setup wizard."
 echo "Your browser will warn about the certificate once. Its SHA-256 fingerprint is:"
 openssl x509 -in certs/cert.pem -noout -fingerprint -sha256 | cut -d= -f2
 echo

@@ -27,6 +27,10 @@ if [[ -f update/ask/request && ! -L update/ask/request ]]; then
 fi
 rm -f update/ask/request
 
+# installs from before the port settings published 443 and 80: a newer docker-compose.yml must keep them
+grep -q '^HW_HTTPS_PORT=' .env || echo "HW_HTTPS_PORT=443" >> .env
+grep -q '^HW_HTTP_PORT=' .env || echo "HW_HTTP_PORT=80" >> .env
+
 dc() {  # docker compose with this install's files: COMPOSE_FILE in .env if set (e.g. a development build), else the release's
   if grep -q '^COMPOSE_FILE=.' .env; then docker compose "$@"; else docker compose -f docker-compose.yml "$@"; fi
 }

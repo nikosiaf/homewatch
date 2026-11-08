@@ -9,8 +9,9 @@
 	}
 }
 
+# the HTTP port only sends browsers on to the HTTPS port (HW_HTTPS_PORT in .env, as the host publishes it)
 :80 {
-	redir https://{host}{uri} 308
+	redir https://{host}:{$HW_HTTPS_PORT:443}{uri} 308
 }
 
 :443 {

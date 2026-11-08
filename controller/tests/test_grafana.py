@@ -344,3 +344,17 @@ def test_docker_shows_only_containers_that_still_exist():
         assert "@ end()" in p["targets"][0]["expr"]
     (p,) = [p for p in grafana.overview(set())["panels"] if p.get("title") == "Modules"]
     assert "max_over_time" not in p["targets"][0]["expr"]
+
+
+def test_ports_come_from_env():
+    import pathlib
+
+    deploy = pathlib.Path(__file__).parents[2] / "deploy"
+    compose = (deploy / "docker-compose.yml").read_text()
+    assert '"${HW_HTTP_PORT:-5080}:80"' in compose and '"${HW_HTTPS_PORT:-5443}:443"' in compose
+    assert "HW_HTTPS_PORT: ${HW_HTTPS_PORT:-5443}" in compose  # Caddy redirects to the published port
+    assert "redir https://{host}:{$HW_HTTPS_PORT:443}{uri}" in (deploy / "Caddyfile").read_text()
+    env = (deploy / ".env.example").read_text()
+    assert "\nHW_HTTPS_PORT=5443\n" in env and "\nHW_HTTP_PORT=5080\n" in env
+    for script in ("install.sh", "update.sh"):  # older installs keep 443 and 80
+        assert "HW_HTTPS_PORT=" in (deploy / script).read_text()
