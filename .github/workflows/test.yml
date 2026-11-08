@@ -24,11 +24,13 @@ jobs:
         run: |
           ./install.sh --dev
           for i in $(seq 1 30); do
-            curl -skf https://localhost/healthz && break
+            curl -skf https://localhost:5443/healthz && break
             sleep 2
           done
-          curl -skf https://localhost/healthz
-          curl -sk -o /dev/null -w '%{http_code} %{redirect_url}\n' https://localhost/ | grep -q '^303'
+          curl -skf https://localhost:5443/healthz
+          curl -sk -o /dev/null -w '%{http_code} %{redirect_url}\n' https://localhost:5443/ | grep -q '^303'
+          # the HTTP port only sends browsers on to the HTTPS port
+          curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' http://localhost:5080/x | grep -qx '308 https://localhost:5443/x'
       - name: Logs
         if: always()
         working-directory: deploy
