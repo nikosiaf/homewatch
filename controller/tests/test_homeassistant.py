@@ -180,8 +180,11 @@ STATES = [
     {"entity_id": "binary_sensor.kitchen_smoke", "state": "off", "attributes": {"device_class": "smoke"}},
     {"entity_id": "automation.lights", "state": "on", "attributes": {}},
     {"entity_id": "update.core", "state": "on", "attributes": {"title": "Core", "installed_version": "1",
-                                                               "latest_version": "2"}},
+                                                               "latest_version": "2", "supported_features": 23}},
     {"entity_id": "sensor.system_monitor_disk_usage", "state": "17", "attributes": {"unit_of_measurement": "%"}},
+    # reports only (no INSTALL feature): Home Assistant keeps it off Settings → Updates, and so does homeWatch
+    {"entity_id": "update.node_pve", "state": "on", "attributes": {"installed_version": "9.2", "latest_version": "9.2-p0-d1",
+                                                                   "supported_features": 16}},
 ]
 
 
@@ -193,7 +196,7 @@ def test_nothing_ticked_reads_only_health(monkeypatch):
     assert "/api/states" in calls and first["watched"] == [] and first["stored"] == [] and first["recorded"] == []
     assert [c["id"] for c in first["catalog"]] == ["sensor.oil", "sensor.hall_temperature", "binary_sensor.kitchen_smoke",
                                                    "sensor.system_monitor_disk_usage"]  # automation / update hidden
-    assert first["catalog"][2]["kind"] == "safety" and first["updates"][0]["entity_id"] == "update.core"
+    assert first["catalog"][2]["kind"] == "safety" and [u["entity_id"] for u in first["updates"]] == ["update.core"]
     assert first["host"]["disk"] == ["17", "%"]
     m.snap, m.snap_ts = first, NOW
     calls.clear()

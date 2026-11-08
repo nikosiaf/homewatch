@@ -118,6 +118,16 @@ def _update(e) -> dict:
             **{k: attrs.get(k) for k in ("title", "installed_version", "latest_version", "skipped_version")}}
 
 
+def _pending(e) -> bool:
+    """An update Home Assistant lists under Settings → Updates: on, and one it can install (feature INSTALL).
+    Update entities that only report (Proxmox package counts, say) stay off that page, so off this check too."""
+    try:
+        installable = int(e.get("attributes", {}).get("supported_features") or 0) & 1
+    except (TypeError, ValueError):
+        installable = 0
+    return e.get("state") == "on" and bool(installable)
+
+
 ADDON_ATTRS = {"device_class", "friendly_name", "icon", "entity_picture"}  # all a Supervisor Running sensor has
 
 
@@ -509,8 +519,7 @@ class HomeAssistantModule(ApiModule):
                 except Exception as e:  # noqa: BLE001 - an old Home Assistant, a proxy without websockets...
                     reg, self._registry_error = {}, type(e).__name__
                 self._catalog = [catalog_row(e, reg) for e in states if _domain(e["entity_id"]) not in HIDDEN]
-                self._updates = [_update(e) for e in states
-                                 if e["entity_id"].startswith("update.") and e.get("state") == "on"]
+                self._updates = [_update(e) for e in states if e["entity_id"].startswith("update.") and _pending(e)]
                 self._total, self._found_ts, self._ids = len(states), now, wanted
                 keep = set(wanted)
                 states = [e for e in states if e["entity_id"] in keep]
@@ -527,7 +536,7 @@ class HomeAssistantModule(ApiModule):
                 fresh = await asyncio.gather(*(one(u["entity_id"]) for u in self._updates))
                 self._updates = [old if e.get("state") in NOT_READY else _update(e)
                                  for old, e in zip(self._updates, fresh, strict=True)
-                                 if e and e.get("state") != "off"]
+                                 if e and (e.get("state") in NOT_READY or _pending(e))]
 
         def about(e):
             a = e.get("attributes") or {}
