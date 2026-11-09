@@ -160,3 +160,83 @@ def test_silences_read_once_and_answer_like_one_by_one(db):
     db.conn.set_trace_callback(None)
     assert queries == []  # nothing more is read per check
 
+
+
+# ---- incidents -----------------------------------------------------------------------------
+def gw(status, detail="g"):
+    return CheckResult("opnsense.gateways", "Gateways", status, detail)
+
+
+def both(e, line, gate, t):
+    return e.apply("internet", [res(line)], t) + e.apply("opnsense", [gw(gate)], t)
+
+
+def test_incident_sends_one_back_to_ok(db):
+    from homewatch.notify import render
+
+    e = Engine(db, "home")
+    both(e, OK, OK, T0)
+    both(e, ERROR, ERROR, T0 + 120)
+    opened = both(e, ERROR, ERROR, T0 + 240)
+    assert [x.kind for x in opened] == ["open", "open"]  # problems are still sent as they come
+    assert db.one("SELECT COUNT(DISTINCT incident_id) n FROM issues")["n"] == 1
+    assert both(e, OK, ERROR, T0 + 360) == [] and both(e, OK, ERROR, T0 + 480) == []  # line back: held
+    both(e, OK, OK, T0 + 600)
+    ev = both(e, OK, OK, T0 + 720) + e.flush(T0 + 720)
+    assert [x.kind for x in ev] == ["close"] and len(ev[0].items) == 2 and ev[0].worst == ERROR
+    assert ev[0].started == T0 + 120 and ev[0].resolved == T0 + 600
+    inc = db.one("SELECT * FROM incidents")
+    assert inc["ended"] == T0 + 600 and inc["worst"] == ERROR
+    msg = render(ev, "Home", (0, 0), "", ZoneInfo("UTC"))
+    assert "back to OK" in msg.title and "Incident over" in msg.body and "Gateways" in msg.body
+    assert "Internet reachable" in msg.body
+
+
+def test_incident_still_open_sends_the_rest_after_a_while(db):
+    from homewatch.engine import OK_SETTLE
+
+    e = Engine(db, "home")
+    both(e, OK, OK, T0)
+    both(e, ERROR, WARNING, T0 + 120)
+    both(e, ERROR, WARNING, T0 + 240)
+    both(e, OK, WARNING, T0 + 360)
+    assert both(e, OK, WARNING, T0 + 480) + e.flush(T0 + 480) == []  # held while the gateway warning is open
+    t = T0 + 360 + OK_SETTLE
+    assert both(e, OK, WARNING, t) == []  # never in the middle of a run
+    ev = e.flush(t)
+    assert [x.kind for x in ev] == ["partial"] and ev[0].still == ["Gateways"]
+    assert [i[0] for i in ev[0].items] == ["Internet reachable"]
+    assert both(e, OK, WARNING, T0 + 1200) + e.flush(T0 + 1200) == []  # sent once
+    both(e, OK, OK, T0 + 1320)
+    ev = both(e, OK, OK, T0 + 1440)
+    assert [x.kind for x in ev] == ["close"] and [i[0] for i in ev[0].items] == ["Gateways"]
+
+
+def test_late_problem_starts_a_new_incident(db):
+    from homewatch.engine import INCIDENT_JOIN
+
+    e = Engine(db, "home")
+    e.apply("opnsense", [gw(OK)], T0)
+    e.apply("opnsense", [gw(WARNING)], T0 + 120)
+    e.apply("opnsense", [gw(WARNING)], T0 + 240)  # a long-running warning
+    t = T0 + 120 + INCIDENT_JOIN + 60
+    run(e, OK, t - 240)
+    run(e, ERROR, t)
+    run(e, ERROR, t + 120)
+    ids = [r["incident_id"] for r in db.all("SELECT incident_id FROM issues ORDER BY started")]
+    assert len(set(ids)) == 2  # the new outage is not glued to the old warning
+    run(e, OK, t + 240)
+    ev = run(e, OK, t + 360)
+    assert [x.kind for x in ev] == ["resolve"]  # its own incident, one check: plain back to OK at once
+
+
+def test_silenced_problem_in_incident_is_not_announced(db):
+    e = Engine(db, "home")
+    both(e, OK, OK, T0)
+    db.run("INSERT INTO snoozes(site,check_key,until,reason,created_by,created) VALUES('home','opnsense.gateways',?,'',"
+           "'admin',?)", (T0 + 10_000, T0))
+    both(e, ERROR, ERROR, T0 + 120)
+    assert [x.key for x in both(e, ERROR, ERROR, T0 + 240)] == ["internet.reachable"]
+    both(e, OK, OK, T0 + 360)
+    ev = both(e, OK, OK, T0 + 480)
+    assert [x.kind for x in ev] == ["resolve"] and ev[0].key == "internet.reachable"

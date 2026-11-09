@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from ...auth import audit
 from ...metrics import lines, num
 from ..pinning import PinnedTLS, host_port, verify_for
-from .. import Module
+from .. import DevEvent, Module, booted
 from . import checks
 from .client import ApiError, Client, Snapshot
 
@@ -97,6 +97,15 @@ class ProxmoxModule(PinnedTLS, Module):
         except ApiError as e:
             self.snap, self.error = None, str(e)
             await self.note_changes(rt, s, str(e))
+
+    def device_events(self, rt, prev):
+        out: list[DevEvent] = []
+        if not self.snap:
+            return out
+        for n in self.snap.nodes:
+            if n.get("status", "online") == "online" and n.get("uptime"):
+                booted(prev, f"node:{n['node']}", self.snap_ts - float(n["uptime"]), n["node"], f"Proxmox host {n['node']}", out)
+        return out
 
     def series(self, site: str) -> list[str]:
         snap, ts = self.snap, self.snap_ts

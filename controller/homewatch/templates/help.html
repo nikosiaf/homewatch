@@ -70,6 +70,16 @@ less install.sh          # please read it first; it's short (q to quit)
 <div class="card">
   <ul style="margin:0">
     <li><b>Confirmation:</b> a change must hold for 2 runs (about 4 minutes) before it's sent, so short blips stay quiet.</li>
+    <li><b>Incidents:</b> problems that start together (a new one within 30 minutes of the first, while it is still open)
+      are one incident. Each problem is still sent as it comes, but "back to OK" waits and arrives as one message when the
+      whole incident is over, with every check's times. If part of it stays open, what is already back to OK is sent after
+      5 minutes anyway. History lists the incidents with their timeline.</li>
+    <li><b>Likely cause:</b> modules also note what their devices did, with the device's own time where it tells it:
+      reboots (from uptime), DSL line resyncs and modem reboots, the UPS going on battery, MikroTik ports losing link,
+      OPNsense gateways going down. When an incident ends, homeWatch reads every device once more (about 30 seconds
+      later) and names the likely cause from these events, for example a power cut in the area (UPS on battery, the
+      modem stayed on, the DSL line re-synced), a modem restart, a line or ISP problem, or a restart of your own
+      equipment. The cause and the events behind it are in the "back to OK" message and on the History page.</li>
     <li><b>Reminders:</b> open problems are repeated every 12 hours. Change this, the confirmation and how often checks run under Timing on the Notifications page.</li>
     <li><b>Offline queue:</b> messages that can't be sent while the line is down go out when it's back, with the outage times.</li>
     <li><b>Snooze:</b> holds one check's notifications for a while, from Maintenance or next to the problem on Status. The history is still recorded.</li>

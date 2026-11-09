@@ -6,7 +6,7 @@ import re
 
 import httpx
 
-from .. import ERROR, OK, WARNING, CheckDef, level
+from .. import ERROR, OK, WARNING, CheckDef, DevEvent, booted, level
 from ...metrics import lines, num
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
@@ -135,6 +135,23 @@ class OPNsenseModule(ApiModule):
         version = next((v for v in (snap["info"] or {}).get("versions", []) if v.startswith("OPNsense")), "")
         snap["_summary"] = f"{name} {version.replace('OPNsense ', '')}, up {snap['time'].get('uptime', '?')}".strip()
         return snap
+
+    def device_events(self, rt, prev):
+        out = []
+        if not self.snap:
+            return out
+        name = (self.snap.get("info") or {}).get("name") or "OPNsense"
+        up = uptime_s((self.snap.get("time") or {}).get("uptime"))
+        booted(prev, "boot", self.snap_ts - up if up else None, name, f"Firewall {name}", out)
+        gws = prev.setdefault("gateways", {})
+        for g in self.snap["gateways"]:
+            gname, online = g.get("name") or "?", g.get("status_translated") == "Online"
+            old = gws.get(gname)
+            gws[gname] = online
+            if old is not None and old != online:
+                out.append(DevEvent(self.snap_ts, "gateway_up" if online else "gateway_down", f"{name} {gname}",
+                                    f"Gateway {gname} {'back online' if online else 'offline'}", exact=False))
+        return out
 
     def series(self, site: str) -> list[str]:
         snap, ts = self.snap, self.snap_ts

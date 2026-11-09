@@ -6,10 +6,11 @@ import asyncio
 import re
 import statistics
 import time
+from datetime import datetime, timezone
 
 import httpx
 
-from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from .. import ERROR, OK, WARNING, CheckDef, CheckResult, DevEvent, booted, level
 from ...metrics import lines, num
 from ..pinning import host_port, verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table
@@ -55,6 +56,27 @@ CHECKS = [
 ]
 _UNITS = {"w": 604800, "d": 86400, "h": 3600, "m": 60, "s": 1}
 _HOST = re.compile(r"^[a-zA-Z0-9.-]+$")
+
+
+def gmt_offset(text) -> float | None:
+    """RouterOS /system/clock gmt-offset ("+02:00") in seconds."""
+    m = re.fullmatch(r"([+-])(\d{1,2}):(\d{2})", str(text or "").strip())
+    if not m:
+        return None
+    return (1 if m[1] == "+" else -1) * (int(m[2]) * 3600 + int(m[3]) * 60)
+
+
+def router_ts(text, offset: float | None) -> float | None:
+    """A RouterOS local time ("2026-11-09 13:12:27", or 6.x "nov/09/2026 13:12:27") as a timestamp."""
+    if not text or offset is None:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%b/%d/%Y %H:%M:%S"):
+        try:
+            naive = datetime.strptime(str(text).strip().capitalize() if "/" in str(text) else str(text).strip(), fmt)
+        except ValueError:
+            continue
+        return naive.replace(tzinfo=timezone.utc).timestamp() - offset
+    return None
 
 
 def uptime_s(text: str) -> float:
@@ -224,6 +246,10 @@ class MikroTikModule(ApiModule):
         except ApiError:
             channel = ""
         ifs = await get("interface")
+        try:  # the router's clock: its port times are local time
+            offset = gmt_offset((await get("system/clock")).get("gmt-offset"))
+        except ApiError:
+            offset = None
         copy, copy_error = None, ""
         if export:  # the configuration as text; read-only, and the read group gets it without secrets
             self.backup_tried[host] = time.time()
@@ -253,7 +279,9 @@ class MikroTikModule(ApiModule):
                        "running": str(i.get("running")) == "true", "disabled": str(i.get("disabled")) == "true",
                        "errors": int(i.get("rx-error", 0) or 0) + int(i.get("tx-error", 0) or 0),
                        "rx_bytes": num(i.get("rx-byte")), "tx_bytes": num(i.get("tx-byte")),
-                       "rx_drops": num(i.get("rx-drop")), "tx_drops": num(i.get("tx-drop"))}
+                       "rx_drops": num(i.get("rx-drop")), "tx_drops": num(i.get("tx-drop")),
+                       "last_down": router_ts(i.get("last-link-down-time"), offset),
+                       "last_up": router_ts(i.get("last-link-up-time"), offset)}
                       for i in ifs if i.get("type") in ("ether", "sfp", "combo", "sfp-sfpplus", "sfpplus")],
         }
 
@@ -269,6 +297,26 @@ class MikroTikModule(ApiModule):
             if self.snap_ts != before:
                 self.store_copies(rt, self.snap, now)
             self.snap["backup"] = self.backup_state(rt)
+        return out
+
+    def device_events(self, rt, prev):
+        out = []
+        if not self.snap:
+            return out
+        for d in self.snap["devices"]:
+            booted(prev, f"{d['host']}:boot", self.snap_ts - d["uptime"] if d.get("uptime") else None,
+                   d["name"], d["name"], out)
+            for p in d["ports"]:
+                key, down, up = f"{d['host']}:{p['name']}:down", p.get("last_down"), p.get("last_up")
+                old = prev.get(key)
+                if down and old is not None and down > old + 1:
+                    port = f"{d['name']} {p['name']}" + (f" ({p['comment']})" if p["comment"] else "")
+                    back = f", back after {up - down:.0f} s" if up and up >= down else ", still down"
+                    out.append(DevEvent(down, "port_down", port, f"Port lost link{back}"))
+                if down:
+                    prev[key] = down
+                elif old is None:
+                    prev[key] = 0  # never went down since boot: the first down is news
         return out
 
     def store_copies(self, rt, snap, now):

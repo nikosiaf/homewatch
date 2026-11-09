@@ -33,7 +33,8 @@ MODULE_LIMIT = 90  # seconds one module may take to read; devices are read one a
 SPEED_RETRY = 15 * 60  # after a failed speed test, try again this soon instead of waiting a full interval
 CHECK_NOW_GAP = 30  # s: "Check now" reads every device fresh at most this often; sooner it is an ordinary run
 CHECK_NOW_CONFIRM = 3  # s: a change that "Check now" saw is read again this much later, to confirm it
-HISTORY_TABLES = ("issues", "speedtests", "check_state", "outbox", "snoozes", "coverage")
+EXPLAIN_AFTER = 30  # s: after an incident ends, the run that looks for its cause (on fresh readings) comes this soon
+HISTORY_TABLES = ("issues", "incidents", "events", "device_state", "speedtests", "check_state", "outbox", "snoozes", "coverage")
 CONFIG_TABLES = ("settings", "checks", "secrets", "maintenance", "channels", "sessions", "users", "audit",
                  "config_versions")
 RELEASES = "https://api.github.com/repos/nikosiaf/homewatch/releases/latest"
@@ -61,6 +62,7 @@ class Runtime:
     grafana_for: tuple | None = None  # (enabled modules, recorded HA entities) the dashboards were last written for
     grafana_on: bool = False  # Grafana answered at the last run: the pages then link to it
     check_now_at: float = 0  # when "Check now" last read every device fresh
+    events_seen: dict = field(default_factory=dict)  # module id -> reading_ts whose device events are recorded
 
     @classmethod
     def create(cls, cfg: Config) -> Runtime:
@@ -77,6 +79,7 @@ class Runtime:
         db.run("DELETE FROM settings WHERE key='status.tiles' OR key LIKE 'status.open.%'")  # settings of 0.16.1 to 0.16.4
         versions.record(db, "system", "startup")  # also catches changes made while homeWatch was stopped
         rt = cls(cfg, db, secrets, Metrics(cfg.vm_url), Notifier(db, secrets), Engine(db, cfg.site))
+        rt.engine.explain = True
         rt.write_grafana()  # before Grafana starts (it waits for a healthy controller): it reads them once at start
         return rt
 
@@ -127,6 +130,25 @@ class Runtime:
                 await asyncio.wait_for(self.wake.wait(), timeout=interval)
             except TimeoutError:
                 pass
+
+    def record_device_events(self, m, now: float) -> None:
+        """Store what the module's devices did since its previous reading (see Module.device_events)."""
+        site = self.cfg.site
+        row = self.db.one("SELECT state FROM device_state WHERE site=? AND module=?", (site, m.id))
+        prev = json.loads(row["state"]) if row else {}
+        try:
+            evs = m.device_events(self, prev)
+        except Exception:  # noqa: BLE001 - events are extra: they must never break the checks
+            log.exception("module %s: device events failed", m.id)
+            return
+        with self.db.tx() as db:
+            db.run("INSERT INTO device_state(site,module,state) VALUES(?,?,?) ON CONFLICT(site,module) "
+                   "DO UPDATE SET state=excluded.state", (site, m.id, json.dumps(prev)))
+            for e in evs:
+                db.run("INSERT INTO events(site,ts,module,device,kind,detail,exact,seen) VALUES(?,?,?,?,?,?,?,?)",
+                       (site, e.ts, m.id, e.device, e.kind, e.detail, int(e.exact), now))
+            if evs:
+                db.run("DELETE FROM events WHERE site=? AND ts<?", (site, now - 400 * 86400))
 
     def read_fresh(self, ids) -> list[str]:
         """Make these modules read their device at the next run, whatever their "Read every".
@@ -210,6 +232,9 @@ class Runtime:
             events += self.engine.apply(m.id, mine, now)
             results += mine
             taken = m.reading_ts(self)
+            if seen and taken and self.events_seen.get(m.id) != taken:
+                self.events_seen[m.id] = taken
+                self.record_device_events(m, now)
             if seen and taken and self.series_written.get(m.id) != taken:
                 try:
                     series += m.series(self.cfg.site)
@@ -228,6 +253,11 @@ class Runtime:
         if ev:
             events.append(ev)
         names = self.names()
+        events += self.engine.flush(now)
+        if self.engine.just_ended:  # find the cause on fresh readings, in a quick extra run
+            self.engine.just_ended = False
+            self.read_fresh([m.id for m in MODULES.values() if m.enabled(m.load(self))])
+            asyncio.get_running_loop().call_later(EXPLAIN_AFTER, self.wake.set)
         events += self.engine.released(names, now)
         events += self.engine.reminders(names, now)
         self.notifier.dispatch(events, self.engine.counts(), now)

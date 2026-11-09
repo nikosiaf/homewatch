@@ -10,7 +10,7 @@ import httpx
 
 from ...auth import audit
 from ...metrics import MetricsError, line
-from .. import Module
+from .. import DevEvent, Module, booted
 from ..internet import load as load_internet
 from ..internet import valid_host
 from . import checks, client
@@ -70,6 +70,28 @@ class SpeedportModule(Module):
 
     def refresh_soon(self, rt) -> None:
         rt.db.set(STATE, {**self.state(rt), "last_try": 0})  # the reader loop looks every 30 s
+
+    def device_events(self, rt, prev):
+        st = self.state(rt)
+        ts, v, status = st.get("last_ok"), st.get("values") or {}, st.get("status") or {}
+        out = []
+        if not ts:
+            return out
+        booted(prev, "modem", ts - v["modem_uptime_s"] if v.get("modem_uptime_s") else None, "modem", "The modem", out)
+        link = status.get("link_up")
+        if link == 0 and prev.get("link", 1):
+            out.append(DevEvent(ts, "line_down", "modem", "DSL line down", exact=False))
+        if link is not None:
+            prev["link"] = link
+        if link and v.get("line_up_s") is not None:
+            since, old = ts - v["line_up_s"], prev.get("line")
+            if old is not None and since - old > 120:
+                down, up = v.get("sync_down_kbps"), v.get("sync_up_kbps")
+                speed = f" at {down / 1000:.0f}/{up / 1000:.0f} Mbit/s" if down and up else ""
+                out.append(DevEvent(since, "line_resync", "modem", f"DSL line re-synced{speed}"))
+            if old is None or abs(since - old) > 120:
+                prev["line"] = since
+        return out
 
     def secret_keys(self) -> list[str]:
         return [SECRET]

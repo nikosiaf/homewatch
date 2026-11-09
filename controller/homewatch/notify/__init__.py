@@ -112,19 +112,35 @@ def _hm(ts: float, zone: ZoneInfo) -> str:
 
 def render(events: list[Event], home: str, open_counts: tuple[int, int], link: str, zone: ZoneInfo) -> Message:
     level = max((e.level for e in events), default=OK)
-    if all(e.kind in ("resolve", "selfok") for e in events):
+    if all(e.kind in ("resolve", "selfok", "close") for e in events):
         title = f"{ICON[OK]} {home}: back to OK"
+    elif all(e.kind in ("resolve", "selfok", "close", "partial") for e in events):
+        title = f"{ICON[OK]} {home}: partly back to OK"
     elif all(e.kind == "remind" for e in events):
         title = f"{ICON[level]} {home}: still {LEVEL_WORD[level]} (reminder)"
     else:
         title = f"{ICON[level]} {home}: {LEVEL_WORD[level]}"
     lines = []
     for e in sorted(events, key=lambda e: (-e.level, e.name)):
+        if e.kind in ("close", "partial"):
+            if e.kind == "close":
+                head = f"Incident over: {_hm(e.started, zone)}–{_hm(e.resolved, zone)}, {_dur(e.resolved - e.started)}"
+            else:
+                head = f"Incident since {_hm(e.started, zone)} still open"
+            lines.append(f"{ICON[OK]} {head} · {len(e.items)} check{'s' if len(e.items) != 1 else ''} back to OK")
+            for name, worst, started, resolved, detail in sorted(e.items, key=lambda i: (i[2], i[0])):
+                lines.append(f"    {ICON[worst]}→{ICON[OK]} {name}: {LEVEL_WORD[worst]} for {_dur(resolved - started)} "
+                             f"({_hm(started, zone)}–{_hm(resolved, zone)})")
+            if e.still:
+                lines.append(f"    still open: {', '.join(e.still)}")
+            lines += _cause(e, zone)
+            continue
         if e.kind in ("resolve", "selfok"):
             span = ""
             if e.started and e.resolved:
                 span = f" after {_dur(e.resolved - e.started)} ({_hm(e.started, zone)}–{_hm(e.resolved, zone)})"
             lines.append(f"{ICON[OK]} OK · {e.name}{span}\n    {_short(e.detail)}")
+            lines += _cause(e, zone)
         else:
             since = f" since {_hm(e.started, zone)}" if e.kind == "remind" and e.started else ""
             lines.append(f"{ICON[e.level]} {LEVEL_WORD[e.level]} · {e.name}{since}\n    {_short(e.detail)}")
@@ -132,6 +148,22 @@ def render(events: list[Event], home: str, open_counts: tuple[int, int], link: s
     footer = "All checks OK." if not (errors or warnings) else f"Open now: {errors} error, {warnings} warning"
     body = "\n".join(lines) + f"\n\n{footer}" + (f"\n{link}" if link else "")
     return Message(level, title, body)
+
+
+EVIDENCE_LINES = 8  # a message lists at most this many device events; History has them all
+
+
+def _cause(e: Event, zone: ZoneInfo) -> list[str]:
+    """The likely cause of an incident and the device events behind it, for a message."""
+    if not e.cause and not e.evidence:
+        return []
+    out = [f"    💡 Likely cause: {e.cause}"] if e.cause else []
+    evidence = e.evidence or []
+    for ts, _module, device, detail, exact in evidence[:EVIDENCE_LINES]:
+        out.append(f"      {'' if exact else '~'}{datetime.fromtimestamp(ts, zone).strftime('%H:%M:%S')} {device}: {detail}")
+    if len(evidence) > EVIDENCE_LINES:
+        out.append(f"      … {len(evidence) - EVIDENCE_LINES} more on the History page")
+    return out
 
 
 def in_quiet(channel, now: float, zone: ZoneInfo) -> float | None:

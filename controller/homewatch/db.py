@@ -81,6 +81,29 @@ MIGRATIONS: list[str] = [
         name TEXT NOT NULL DEFAULT '', ts REAL NOT NULL, text TEXT NOT NULL);
     CREATE INDEX device_configs_device ON device_configs (site, module, device, ts);
     """,
+    # 6: incidents: issues that start together are one incident; "back to OK" waits to be sent as one message
+    """
+    CREATE TABLE incidents (
+        id INTEGER PRIMARY KEY, site TEXT NOT NULL, started REAL NOT NULL, ended REAL,
+        worst INTEGER NOT NULL DEFAULT 0);
+    CREATE INDEX incidents_started ON incidents (site, started);
+    ALTER TABLE issues ADD COLUMN incident_id INTEGER;
+    ALTER TABLE issues ADD COLUMN name TEXT NOT NULL DEFAULT '';
+    ALTER TABLE issues ADD COLUMN ok_sent INTEGER NOT NULL DEFAULT 1;
+    CREATE INDEX issues_incident ON issues (incident_id);
+    """,
+    # 7: what the devices did (reboots, line resyncs, UPS on battery, ports down), and a likely cause per incident
+    """
+    CREATE TABLE events (
+        id INTEGER PRIMARY KEY, site TEXT NOT NULL, ts REAL NOT NULL, module TEXT NOT NULL, device TEXT NOT NULL,
+        kind TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '', exact INTEGER NOT NULL DEFAULT 1, seen REAL NOT NULL);
+    CREATE INDEX events_ts ON events (site, ts);
+    CREATE TABLE device_state (site TEXT NOT NULL, module TEXT NOT NULL, state TEXT NOT NULL,
+        PRIMARY KEY (site, module));
+    ALTER TABLE incidents ADD COLUMN cause TEXT NOT NULL DEFAULT '';
+    ALTER TABLE incidents ADD COLUMN evidence TEXT NOT NULL DEFAULT '';
+    ALTER TABLE incidents ADD COLUMN closing REAL;
+    """,
 ]
 
 

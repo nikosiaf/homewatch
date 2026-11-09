@@ -504,7 +504,9 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         for e in events:
             mid = e["key"].split(".", 1)[0]
             e["source"] = sources.get(mid, mid)
+        incidents = _incidents(rt, since, now, check_names, sources) if not module and not level else []
         return page(request, "history.html", request.state.user, events=events, groups=groups, names=check_names,
+                    incidents=incidents,
                     modules=[(m.id, m.name) for m in MODULES.values()], module=module, level=level, days=days, avail=avail, since=since, now=now, cut_off=cut_off, history_rows=HISTORY_ROWS)
 
     @app.get("/help")
@@ -1393,6 +1395,33 @@ def _module_states(rt) -> dict[str, dict]:
         levels = [states.get(r.key, OK) for r in rt.results if r.key.startswith(m.id + ".")] if on else []
         out[m.id] = {"on": on, "checks": len(levels), "worst": max(levels, default=OK),
                      "problems": sum(1 for x in levels if x > OK)}
+    return out
+
+
+def _incidents(rt, since: float, now: float, names: dict, sources: dict) -> list[dict]:
+    """Incidents of the period with more than one check, newest first, each with its checks in time order."""
+    out = []
+    for inc in rt.db.all("SELECT * FROM incidents WHERE site=? AND (started>? OR ended>? OR ended IS NULL) "
+                         "ORDER BY started DESC LIMIT 50", (rt.cfg.site, since, since)):
+        rows = rt.db.all("SELECT * FROM issues WHERE incident_id=? ORDER BY started, id", (inc["id"],))
+        if len(rows) < 2 and not inc["cause"]:
+            continue
+        from . import causes
+
+        evidence = [{"ts": ts, "device": device, "detail": detail, "exact": exact}
+                    for ts, _module, device, detail, exact in causes.loads(inc["evidence"])]
+        mods = []
+        for r in rows:
+            src = sources.get(r["check_key"].split(".", 1)[0], r["check_key"].split(".", 1)[0])
+            if src not in mods:
+                mods.append(src)
+        out.append({"cause": inc["cause"], "evidence": evidence,
+                    "started": inc["started"], "ended": inc["ended"], "worst": inc["worst"], "sources": mods,
+                    "dur": (inc["ended"] or now) - inc["started"], "open": inc["ended"] is None,
+                    "checks": [{"name": names.get(r["check_key"]) or r["name"] or r["check_key"],
+                               "source": sources.get(r["check_key"].split(".", 1)[0], ""), "worst": r["worst"],
+                               "started": r["started"], "resolved": r["resolved"], "detail": r["detail"],
+                               "dur": (r["resolved"] or now) - r["started"]} for r in rows]})
     return out
 
 

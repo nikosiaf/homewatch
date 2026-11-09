@@ -144,7 +144,7 @@ def test_cpu_is_the_median_of_three_readings(monkeypatch):
         body = {"system/resource": lambda: {"cpu-load": next(cpu), "free-memory": "50", "total-memory": "100",
                                             "uptime": "1d", "board-name": "RB2011", "version": "7.25"},
                 "system/identity": lambda: {"name": "mt2"}, "system/health": lambda: [],
-                "system/routerboard": lambda: {}, "interface": lambda: [],
+                "system/routerboard": lambda: {}, "interface": lambda: [], "system/clock": lambda: {"gmt-offset": "+02:00"},
                 "system/package/update": lambda: {"channel": "stable"}}[path]()
         return httpx.Response(200, json=body)
 
@@ -283,7 +283,7 @@ def test_export_is_read_only_when_due(monkeypatch):
             return httpx.Response(200, json={"ret": EXPORT})
         body = {"system/resource": {"cpu-load": "1", "free-memory": "50", "total-memory": "100", "uptime": "1d",
                                     "board-name": "RB2011", "version": "7.25"},
-                "system/identity": {"name": "sw1"}, "system/health": [], "system/routerboard": {}, "interface": [],
+                "system/identity": {"name": "sw1"}, "system/health": [], "system/routerboard": {}, "interface": [], "system/clock": {"gmt-offset": "+02:00"},
                 "system/package/update": {"channel": "stable"}}[path]
         return httpx.Response(200, json=body)
 

@@ -6,7 +6,7 @@ import re
 
 import httpx
 
-from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from .. import ERROR, OK, WARNING, CheckDef, CheckResult, DevEvent, booted, level
 from ...metrics import lines, num
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
@@ -112,6 +112,15 @@ class UniFiModule(ApiModule):
         wlan = next((h for h in snap["health"] if h["subsystem"] == "wlan"), {})
         snap["_summary"] = f"{len(snap['devices'])} devices, {wlan.get('users') or 0} Wi-Fi clients"
         return snap
+
+    def device_events(self, rt, prev):
+        out: list[DevEvent] = []
+        if not self.snap:
+            return out
+        for d in self.snap["devices"]:
+            if d.get("state") == 1 and d.get("uptime"):
+                booted(prev, d.get("mac") or d["name"], self.snap_ts - float(d["uptime"]), d["name"], d["name"], out)
+        return out
 
     def series(self, site: str) -> list[str]:
         snap, ts = self.snap, self.snap_ts

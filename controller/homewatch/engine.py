@@ -7,6 +7,9 @@ Rules (defaults from running it in a real home):
   still open when the silence ends is sent then
 - open issues are repeated every REMIND_H hours
 - after FAIL_ALERT runs in a row that can't read data, homeWatch alerts about itself
+- issues that start together form one incident: a new issue joins the newest incident that is still open
+  and started at most INCIDENT_JOIN ago. "Back to OK" is held and sent as one message when the whole
+  incident is over, or after OK_SETTLE when something in it stays open (so nothing waits behind it)
 """
 
 from __future__ import annotations
@@ -20,6 +23,8 @@ from .db import DB
 from .modules import ERROR, OK, WARNING, CheckDef, CheckResult, Thresholds
 
 DEFAULT_TIMING = {"interval": 120, "confirm": 2, "remind_h": 12, "fail_alert": 5}
+INCIDENT_JOIN = 30 * 60  # s: a new issue joins an open incident that started at most this long ago
+OK_SETTLE = 5 * 60  # s: "back to OK" of an incident that is still open waits at most this long
 
 
 @dataclass
@@ -32,11 +37,15 @@ class Event:
     detail: str
     started: float | None = None
     resolved: float | None = None
+    items: list | None = None  # close / partial: the checks back to OK, [(name, worst, started, resolved, detail)]
+    still: list | None = None  # partial: names of the incident's checks still open
+    cause: str = ""  # close / resolve of an incident: its likely cause (causes.explain)
+    evidence: list | None = None  # and the device events behind it [(ts, module, device, detail, exact)]
 
     @property
     def route_level(self) -> int:
         """Which level a channel filter sees: back-to-OK follows the level that opened it."""
-        return self.worst if self.kind == "resolve" else self.level
+        return self.worst if self.kind in ("resolve", "close", "partial") else self.level
 
 
 def timing(db: DB) -> dict:
@@ -69,6 +78,8 @@ class Engine:
     def __init__(self, db: DB, site: str):
         self.db = db
         self.site = site
+        self.explain = False  # look for a likely cause when an incident ends (the runtime turns it on)
+        self.just_ended = False  # an incident ended in this run: the runtime reads every device again
 
     # ---- silences -------------------------------------------------------------------------
     def silences(self, now: float):
@@ -140,7 +151,73 @@ class Engine:
                     db.run("UPDATE issues SET resolved=?, resolved_detail='check switched off', notified=1 "
                            "WHERE site=? AND check_key=? AND resolved IS NULL", (now, self.site, st["check_key"]))
                     db.run("DELETE FROM check_state WHERE site=? AND check_key=?", (self.site, st["check_key"]))
+            events += self._flush(db, now, settle=False)
         return events
+
+    # ---- incidents ------------------------------------------------------------------------
+    def _incident_for(self, db, since: float, level: int) -> int:
+        row = db.one("SELECT * FROM incidents WHERE site=? AND ended IS NULL AND started>=? ORDER BY started DESC LIMIT 1",
+                     (self.site, since - INCIDENT_JOIN))
+        if row:
+            db.run("UPDATE incidents SET worst=MAX(worst, ?) WHERE id=?", (level, row["id"]))
+            return row["id"]
+        return db.run("INSERT INTO incidents(site,started,worst) VALUES(?,?,?)", (self.site, since, level))
+
+    def flush(self, now: float) -> list[Event]:
+        """At the end of a run, after every module: also send what waited OK_SETTLE in an incident still open."""
+        with self.db.tx() as db:
+            return self._flush(db, now, settle=True)
+
+    def _flush(self, db, now: float, settle: bool) -> list[Event]:
+        """Close incidents with nothing left open, and send their held "back to OK": as it was when the
+        incident had one check, else as one message for all the checks it had. settle: also what has waited
+        OK_SETTLE in an incident that is still open (only at the end of a run, when every module has spoken)."""
+        db.run("UPDATE incidents SET ended=(SELECT MAX(resolved) FROM issues i WHERE i.incident_id=incidents.id) "
+               "WHERE site=? AND ended IS NULL AND NOT EXISTS (SELECT 1 FROM issues i WHERE i.incident_id=incidents.id "
+               "AND i.resolved IS NULL)", (self.site,))
+        held: dict = {}
+        for i in db.all("SELECT * FROM issues WHERE site=? AND ok_sent=0 ORDER BY resolved, id", (self.site,)):
+            held.setdefault(i["incident_id"] or -i["id"], []).append(i)
+        out = []
+        for inc_id, rows in held.items():
+            inc = db.one("SELECT * FROM incidents WHERE id=?", (inc_id,)) if inc_id > 0 else None
+            still = [r["name"] or r["check_key"] for r in db.all(
+                "SELECT name, check_key FROM issues WHERE incident_id=? AND resolved IS NULL AND notified=1 ORDER BY started",
+                (inc_id,))] if inc else []
+            if still and (not settle or now - rows[0]["resolved"] < OK_SETTLE):
+                continue
+            cause, evidence = "", None
+            if inc and not still and self.explain:
+                if inc["closing"] is None:  # over: one more quick run, with every device read again, then the cause
+                    db.run("UPDATE incidents SET closing=? WHERE id=?", (now, inc_id))
+                    self.just_ended = True
+                    continue
+                if now <= inc["closing"]:
+                    continue
+                cause, evidence = self._explain(db, inc)
+            db.run(f"UPDATE issues SET ok_sent=1 WHERE id IN ({','.join('?' * len(rows))})", tuple(r["id"] for r in rows))
+            told = db.one("SELECT COUNT(*) n FROM issues WHERE incident_id=? AND notified=1", (inc_id,))["n"] if inc else 1
+            if len(rows) == 1 and not still and told == 1:
+                r = rows[0]
+                out.append(Event("resolve", r["check_key"], r["name"] or r["check_key"], OK, r["worst"],
+                                 r["resolved_detail"], r["started"], r["resolved"], cause=cause, evidence=evidence))
+                continue
+            items = [(r["name"] or r["check_key"], r["worst"], r["started"], r["resolved"], r["resolved_detail"])
+                     for r in rows]
+            start = inc["started"] if inc else rows[0]["started"]
+            end = (inc["ended"] if inc and inc["ended"] else max(r["resolved"] for r in rows))
+            out.append(Event("partial" if still else "close", f"incident.{inc_id}", "Incident", OK,
+                             max(r["worst"] for r in rows), "", start, None if still else end, items, still,
+                             cause, evidence))
+        return out
+
+    def _explain(self, db, inc) -> tuple[str, list]:
+        from . import causes
+
+        keys = [r["check_key"] for r in db.all("SELECT check_key FROM issues WHERE incident_id=?", (inc["id"],))]
+        cause, evidence = causes.explain(db, self.site, inc["started"], inc["ended"], keys, tz(self.db))
+        db.run("UPDATE incidents SET cause=?, evidence=? WHERE id=?", (cause, causes.dumps(evidence), inc["id"]))
+        return cause, evidence
 
     def _transition(self, db, res: CheckResult, old: int, new: int, since: float, now: float) -> Event | None:
         silent = self.silenced(res.key, now) is not None
@@ -153,13 +230,19 @@ class Engine:
                 # never announced (it happened inside a silence): nothing to take back
                 db.run("UPDATE issues SET notified=1 WHERE id=?", (issue["id"],))
                 return None
-            return Event("resolve", res.key, res.name, OK, issue["worst"], res.detail, issue["started"], since)
+            # "back to OK" is sent by _flush: at once when its incident is over, else with the rest of it
+            db.run("UPDATE issues SET ok_sent=0, name=? WHERE id=?", (res.name, issue["id"]))
+            return None
         if issue is None:
-            db.run("INSERT INTO issues(site,check_key,level,worst,started,detail,notified) VALUES(?,?,?,?,?,?,?)",
-                   (self.site, res.key, new, new, since, res.detail, 0 if silent else 1))
+            incident = self._incident_for(db, since, new)
+            db.run("INSERT INTO issues(site,check_key,level,worst,started,detail,notified,incident_id,name) "
+                   "VALUES(?,?,?,?,?,?,?,?,?)",
+                   (self.site, res.key, new, new, since, res.detail, 0 if silent else 1, incident, res.name))
             return None if silent else Event("open", res.key, res.name, new, new, res.detail, since)
         worst = max(issue["worst"], new)
         db.run("UPDATE issues SET level=?, worst=?, detail=? WHERE id=?", (new, worst, res.detail, issue["id"]))
+        if issue["incident_id"]:
+            db.run("UPDATE incidents SET worst=MAX(worst, ?) WHERE id=?", (worst, issue["incident_id"]))
         if silent or not issue["notified"]:
             return None
         return Event("worse" if new > old else "better", res.key, res.name, new, worst, res.detail, issue["started"])

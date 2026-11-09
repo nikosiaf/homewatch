@@ -19,6 +19,34 @@
   <p class="quiet small">Showing {{ events | length }} event{{ 's' if events | length != 1 }} since {{ since | ts }}, plus anything still open.</p>
 </div>
 {% from "_more.html" import more %}
+{% if incidents %}
+<h2>Incidents <span class="quiet small">problems that started together, with their likely cause</span></h2>
+{% for inc in incidents %}
+<div class="card">
+  <p><span class="badge s{{ inc.worst }}">{{ LEVEL_WORD[inc.worst] }}</span>
+    <b>{{ inc.started | ts }}</b>{% if inc.open %} · <b>still open</b>, {{ inc.dur | dur }}{% else %} – {{ inc.ended | ts('%H:%M') }} · lasted {{ inc.dur | dur }}{% endif %}
+    · {{ inc.checks | length }} check{{ 's' if inc.checks | length != 1 }} · {{ inc.sources | join(', ') }}</p>
+  {% if inc.cause %}<p>💡 <b>Likely cause:</b> {{ inc.cause }}</p>{% endif %}
+  {% if inc.evidence %}<p class="small"><b>What the devices did</b> <span class="quiet">(~ = time of the reading that saw it)</span></p>
+  <div class="scroll"><table>
+    {% for e in inc.evidence %}<tr><td style="white-space:nowrap">{{ '' if e.exact else '~' }}{{ e.ts | ts('%H:%M:%S') }}</td>
+      <td style="white-space:nowrap">{{ e.device }}</td><td>{{ e.detail }}</td></tr>{% endfor %}
+  </table></div>
+  <p class="small"><b>Checks</b></p>{% endif %}
+  <div class="scroll"><table>
+    <tr><th>From</th><th>To</th><th>Source</th><th>Check</th><th>Worst</th><th>What happened</th></tr>
+    {% for i in inc.checks %}<tr>
+      <td style="white-space:nowrap">{{ i.started | ts('%H:%M:%S') }}</td>
+      <td style="white-space:nowrap">{% if i.resolved %}{{ i.resolved | ts('%H:%M:%S') }}{% else %}<b>open</b>{% endif %}</td>
+      <td style="white-space:nowrap">{{ i.source }}</td><td>{{ i.name }}</td>
+      <td><span class="badge s{{ i.worst }}">{{ LEVEL_WORD[i.worst] }}</span></td>
+      <td>{{ more(i.detail) }}</td>
+    </tr>{% endfor %}
+  </table></div>
+</div>
+{% endfor %}
+<h2>All events</h2>
+{% endif %}
 {% macro event_table(rows, with_source) %}
 <div class="card scroll"><table data-page="20">
   <tr><th>When</th><th>Status</th>{% if with_source %}<th>Source</th>{% endif %}<th>Check</th><th>What happened</th><th>Duration</th></tr>

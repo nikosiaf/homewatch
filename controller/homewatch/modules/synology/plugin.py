@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from .. import ERROR, OK, WARNING, CheckDef, CheckResult, DevEvent, booted, level
 from ...metrics import lines, num
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Field, Table, https_url
@@ -175,6 +175,14 @@ class SynologyModule(ApiModule):
         snap["_summary"] = f"{snap['info'].get('model', 'NAS')} {snap['info'].get('firmware_ver', '')}".strip()
         return snap
 
+    def device_events(self, rt, prev):
+        out: list[DevEvent] = []
+        if not self.snap:
+            return out
+        up = hms_s((self.snap.get("info") or {}).get("up_time"))
+        booted(prev, "boot", self.snap_ts - up if up else None, "NAS", "The NAS", out)
+        return out
+
     def series(self, site: str) -> list[str]:
         snap, ts = self.snap, self.snap_ts
         if not snap:
@@ -299,3 +307,12 @@ class SynologyModule(ApiModule):
 
 
 plugin = SynologyModule()
+
+
+def hms_s(text) -> float | None:
+    """DSM's up_time ("442:22:37", hours:minutes:seconds) in seconds."""
+    parts = str(text or "").strip().split(":")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        return None
+    h, m, sec = map(int, parts)
+    return float(h * 3600 + m * 60 + sec)

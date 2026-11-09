@@ -82,6 +82,32 @@ def level(value: float | None, t: Thresholds, lower_is_worse: bool = False) -> i
     return OK
 
 
+@dataclass
+class DevEvent:
+    """Something a device did, with its time: a reboot, a line resync, a port down, the UPS on battery.
+    exact: the device told the time itself; else it is the time of the reading that saw it."""
+
+    ts: float
+    kind: str  # reboot | line_resync | on_battery | on_mains | port_down | gateway_down | gateway_up
+    device: str
+    detail: str
+    exact: bool = True
+
+
+REBOOT_SLACK = 300  # s: a boot time that moved less than this is the same boot (rounded uptimes, clock drift)
+
+
+def booted(prev: dict, key: str, boot: float | None, device: str, what: str, events: list) -> None:
+    """Remember a device's boot time in prev[key]; a later one is a reboot (the first reading only remembers)."""
+    if not boot:
+        return
+    old = prev.get(key)
+    if old is not None and boot - old > REBOOT_SLACK:
+        events.append(DevEvent(boot, "reboot", device, f"{what} restarted"))
+    if old is None or abs(boot - old) > REBOOT_SLACK:
+        prev[key] = boot
+
+
 class Module:
     """What the runtime and the web pages need from a module."""
 
@@ -127,6 +153,12 @@ class Module:
         """A kept reading showed a change: read again for the next run, so that a new reading confirms it."""
         if hasattr(self, "snap_ts"):
             self.snap_ts = 0
+
+    def device_events(self, rt, prev: dict) -> list[DevEvent]:
+        """What the devices did since the previous reading (reboots, a line resync, the UPS on battery...).
+        Called once per new reading; prev is this module's memory between readings, kept by the runtime
+        (change it in place). [] when the module has nothing to tell."""
+        return []
 
     def secret_keys(self) -> list[str]:
         """Names of the module's entries in the encrypted secrets."""

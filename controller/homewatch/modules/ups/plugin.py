@@ -6,7 +6,7 @@ import asyncio
 import re
 import shlex
 
-from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from .. import ERROR, OK, WARNING, CheckDef, CheckResult, DevEvent, level
 from ..apibase import ApiError, ApiModule, Field, Table
 from ...metrics import lines, num as _num
 
@@ -124,6 +124,16 @@ class UPSModule(ApiModule):
               "output.voltage": "output_voltage_volts", "ups.realpower": "power_watts",
               "ups.realpower.nominal": "power_nominal_watts", "ups.temperature": "temp_celsius",
               "input.frequency": "input_frequency_hertz"}
+
+    def device_events(self, rt, prev):
+        if not self.snap:
+            return []
+        on_battery = "OB" in self.snap["vars"].get("ups.status", "").split()
+        old, prev["ob"] = prev.get("ob"), on_battery
+        if old is None or old == on_battery:
+            return []
+        return [DevEvent(self.snap_ts, "on_battery" if on_battery else "on_mains", self.snap["name"],
+                         "UPS on battery (mains power lost)" if on_battery else "UPS back on mains power", exact=False)]
 
     def series(self, site: str) -> list[str]:
         snap = self.snap

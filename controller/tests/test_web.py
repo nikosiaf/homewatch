@@ -1477,3 +1477,17 @@ def test_ha_hidden_checks_keep_their_limits(client, monkeypatch):
     assert th.enabled and (th.warn, th.error) == (30, 15)
     plugin.snap = None
 
+
+
+def test_history_shows_incidents(client):
+    setup_admin(client)
+    db = client.rt.db
+    t = time.time() - 3600
+    inc = db.run("INSERT INTO incidents(site,started,ended,worst) VALUES('home',?,?,2)", (t, t + 420))
+    db.run("INSERT INTO issues(site,check_key,level,worst,started,resolved,detail,incident_id,name) "
+           "VALUES('home','internet.reachable',2,2,?,?,'line down',?,'Internet reachable')", (t, t + 380, inc))
+    db.run("INSERT INTO issues(site,check_key,level,worst,started,resolved,detail,incident_id,name) "
+           "VALUES('home','opnsense.gateways',2,2,?,?,'WAN offline',?,'Gateways')", (t + 5, t + 420, inc))
+    r = client.get("/history")
+    assert "Incidents" in r.text and "2 checks" in r.text and "WAN offline" in r.text
+    assert "Incidents" not in client.get("/history?module=internet").text  # a module's view: its events only
