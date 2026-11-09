@@ -370,3 +370,51 @@ def test_ups_watcher_draws_the_power_cut(cfg):
     ups.watched(rt, True, "apc", T0 + 10)
     assert [x for x in rt.metric_queue if x.startswith("hw_ups,")] == [
         f"hw_ups,site=home,ups=apc on_battery=1.0,online=0.0 {int((T0 + 10) * 1e9)}"]
+
+
+# ---- OPNsense logs: exact gateway and PPPoE times -----------------------------------------------
+def test_opnsense_log_times():
+    from homewatch.modules.opnsense.plugin import log_ts, tz_offset
+
+    now = T0  # 2027-01-15 08:00 UTC = 10:00 local at +02:00
+    assert tz_offset("Fri Jan 15 10:00:03 EET 2027", now) == 7200
+    assert tz_offset("", now) is None and tz_offset("garbage text here", now) is None
+    assert log_ts("2027-01-15T10:00:00", 7200) == T0 and log_ts("2027-01-15T10:00:00", None) is None
+
+
+def test_opnsense_log_events_once_each():
+    from homewatch.modules.opnsense.plugin import log_events
+
+    L = lambda t, line: {"ts": f"2027-01-15T{t}", "line": line}  # noqa: E731
+    logs = {
+        "monitor": [L("10:00:41", "MONITOR: WAN_PPPOE (Addr: 1.1.1.1 Alarm: none -> loss RTT: 8.7 ms RTTd: 0.4 ms Loss: 12.0 %)"),
+                    L("10:00:46", "MONITOR: WAN_PPPOE (Addr: 1.1.1.1 Alarm: loss -> down RTT: 8.7 ms RTTd: 0.4 ms Loss: 21.0 %)"),
+                    L("10:07:54", "MONITOR: WAN_PPPOE (Addr: 1.1.1.1 Alarm: down -> none RTT: 9.0 ms RTTd: 0.0 ms Loss: 0.0 %)")],
+        "noecho": [L("10:01:38", "[wan_link0] LCP: peer not responding to echo requests")],
+        "linkdown": [L("10:01:38", "ppp-linkdown: executing on pppoe0 for inet")],
+        "linkup": [L("10:07:53", "ppp-linkup: executing on pppoe0 for inet")],
+        "newip": [L("10:07:54", "/usr/local/etc/rc.newwanip: IP renewal starting (new: 203.0.113.9, old: 203.0.113.4, "
+                                "interface: wan, device: pppoe0, force: yes)")],
+    }
+    prev = {}
+    evs = log_events(logs, 7200, "fw", prev, T0 + 600)
+    assert [(e.kind, e.ts - T0) for e in evs] == [("gateway_loss", 41), ("gateway_down", 46), ("ppp_down", 98),
+                                                 ("ppp_up", 473), ("gateway_up", 474)]
+    assert all(e.exact for e in evs)
+    assert "ISP stopped answering" in evs[2].detail and "new public IP 203.0.113.9" in evs[3].detail
+    assert log_events(logs, 7200, "fw", prev, T0 + 900) == []  # each line once
+    assert log_events({"monitor": None, "linkdown": None}, 7200, "fw", {}, T0) == []  # no privilege: nothing
+
+
+def test_opnsense_no_guessed_gateway_times_when_the_log_is_read(monkeypatch):
+    from homewatch.modules.registry import MODULES
+
+    fw = MODULES["opnsense"]
+    snap = {"info": {"name": "fw"}, "time": {"uptime": "7 days, 01:00:00"}, "tz_offset": 7200,
+            "gateways": [{"name": "WAN", "status_translated": "Online"}], "logs": {"monitor": []}}
+    monkeypatch.setattr(fw, "snap", snap)
+    monkeypatch.setattr(fw, "snap_ts", T0)
+    prev = {}
+    fw.device_events(None, prev)
+    snap["gateways"][0]["status_translated"] = "Offline"
+    assert fw.device_events(None, prev) == []  # the log will tell the exact time instead

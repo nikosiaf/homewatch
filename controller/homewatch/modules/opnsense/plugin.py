@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 
 import httpx
 
@@ -53,7 +54,9 @@ class OPNsenseModule(ApiModule):
                  "password\", and give it only these privileges (Effective privileges): "),
         ("code", "Lobby: Dashboard\nSystem: Gateways\nDiagnostics: System Activity\nStatus: Services\n"
                  "System: Firmware\nSystem: Trust: Certificates\nServices: HAProxy (only if you use it)\n"
-                 "Reporting: Traffic (only for the Grafana traffic graphs)"),
+                 "Reporting: Traffic (only for the Grafana traffic graphs)\n"
+                 "Diagnostics: Logs: Gateways (optional: exact gateway down / up times)\n"
+                 "Diagnostics: Logs: System (optional: exact PPPoE disconnect / reconnect times)"),
         ("text", "Lobby: Dashboard is what lets homeWatch read CPU, memory, disk, uptime and the version."),
         ("text", "Save, then press \"+\" under API keys to create a key. OPNsense downloads a file with the key "
                  "and secret: paste them below."),
@@ -114,6 +117,17 @@ class OPNsenseModule(ApiModule):
                     raise ApiError(f"OPNsense answered HTTP {r.status_code} for {path}")
                 return r.json()
 
+            async def log(name: str, phrase: str, rows: int = 40):
+                """Recent lines of an OPNsense log that contain phrase; None without the privilege to read it."""
+                try:
+                    r = await http.post(f"{s['url']}/api/diagnostics/log/core/{name}",
+                                        json={"current": 1, "rowCount": rows, "searchPhrase": phrase})
+                except httpx.HTTPError:
+                    return None
+                if r.status_code >= 300 or "json" not in r.headers.get("content-type", ""):
+                    return None
+                return [{"ts": x.get("timestamp", ""), "line": x.get("line", "")} for x in r.json().get("rows", [])]
+
             snap = {
                 "gateways": (await get("routes/gateway/status")).get("items", []),
                 "resources": await get("diagnostics/system/system_resources"),
@@ -130,7 +144,14 @@ class OPNsenseModule(ApiModule):
                 "info": await get("diagnostics/system/system_information", optional=True),
                 # for the Grafana traffic panels only; needs the privilege Reporting: Traffic
                 "traffic": (await get("diagnostics/traffic/interface", optional=True) or {}).get("interfaces"),
+                # optional, for exact times (privileges Diagnostics: Logs: Gateways / System)
+                "logs": {"monitor": await log("gateways", "MONITOR"),
+                         "linkdown": await log("system", "ppp-linkdown", 20),
+                         "linkup": await log("system", "ppp-linkup", 20),
+                         "noecho": await log("system", "peer not responding", 20),
+                         "newip": await log("system", "IP renewal starting", 20)},
             }
+            snap["tz_offset"] = tz_offset((snap["time"] or {}).get("datetime"), now)
         name = (snap["info"] or {}).get("name", "OPNsense")
         version = next((v for v in (snap["info"] or {}).get("versions", []) if v.startswith("OPNsense")), "")
         snap["_summary"] = f"{name} {version.replace('OPNsense ', '')}, up {snap['time'].get('uptime', '?')}".strip()
@@ -143,12 +164,15 @@ class OPNsenseModule(ApiModule):
         name = (self.snap.get("info") or {}).get("name") or "OPNsense"
         up = uptime_s((self.snap.get("time") or {}).get("uptime"))
         booted(prev, "boot", self.snap_ts - up if up else None, name, f"Firewall {name}", out)
+        logs = self.snap.get("logs") or {}
+        out += log_events(logs, self.snap.get("tz_offset"), name, prev, self.snap_ts)
         gws = prev.setdefault("gateways", {})
+        exact_gw = logs.get("monitor") is not None  # the gateway log tells the exact times: no guessed ones
         for g in self.snap["gateways"]:
             gname, online = g.get("name") or "?", g.get("status_translated") == "Online"
             old = gws.get(gname)
             gws[gname] = online
-            if old is not None and old != online:
+            if old is not None and old != online and not exact_gw:
                 out.append(DevEvent(self.snap_ts, "gateway_up" if online else "gateway_down", f"{name} {gname}",
                                     f"Gateway {gname} {'back online' if online else 'offline'}", exact=False))
         return out
@@ -341,3 +365,68 @@ def _servers(hap) -> list[dict]:
 
 def _server_key(x: dict) -> str:
     return f"{x['pxname']}/{x.get('svname')}"
+
+
+_MONITOR = re.compile(r"MONITOR: (\S+) \(Addr: (\S+) Alarm: (\w+) -> (\w+).*?Loss: ([\d.]+) ?%")
+_NEWIP = re.compile(r"new: ([\d.a-fA-F:]+), old: ([\d.a-fA-F:]+)")
+LOG_BACK = 24 * 3600  # s: the first reading also takes this much of the logs, so a recent outage gets its times
+
+
+def tz_offset(text, now: float) -> float | None:
+    """The firewall's UTC offset in seconds, from its local time ("Mon Nov 9 15:18:40 EET 2026") read at now."""
+    parts = str(text or "").split()
+    if len(parts) < 6:
+        return None
+    try:
+        local = datetime.strptime(" ".join([*parts[1:4], parts[-1]]), "%b %d %H:%M:%S %Y")
+    except ValueError:
+        return None
+    return round((local.replace(tzinfo=timezone.utc).timestamp() - now) / 900) * 900
+
+
+def log_ts(text: str, offset: float | None) -> float | None:
+    """A log line's local time ("2026-11-09T13:12:46") as a timestamp."""
+    if offset is None:
+        return None
+    try:
+        return datetime.strptime(text[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp() - offset
+    except ValueError:
+        return None
+
+
+def log_events(logs: dict, offset: float | None, name: str, prev: dict, now: float) -> list[DevEvent]:
+    """Exact gateway and PPPoE events from the OPNsense logs, each line once (prev["log_ts"])."""
+    if offset is None or not any(v for v in logs.values()):
+        return []
+    since = prev.get("log_ts", now - LOG_BACK)
+
+    def rows(key):
+        return sorted((t, x["line"]) for x in logs.get(key) or [] if (t := log_ts(x["ts"], offset)) and t > since)
+
+    out = []
+    for t, text in rows("monitor"):
+        m = _MONITOR.search(text)
+        if not m or m[3] == m[4]:
+            continue
+        gw, addr, old, new, loss = m.groups()
+        if new == "down":
+            out.append(DevEvent(t, "gateway_down", f"{name} {gw}", f"Gateway {gw} down ({addr} not answering)"))
+        elif new == "none" and old == "down":
+            out.append(DevEvent(t, "gateway_up", f"{name} {gw}", f"Gateway {gw} back up"))
+        elif new == "loss" and old == "none":
+            out.append(DevEvent(t, "gateway_loss", f"{name} {gw}", f"Gateway {gw}: packet loss {loss} % to {addr}"))
+    noecho = [t for t, _ in rows("noecho")]
+    for t, _text in rows("linkdown"):
+        why = " (the ISP stopped answering)" if any(0 <= t - n <= 60 for n in noecho) else ""
+        out.append(DevEvent(t, "ppp_down", f"{name} PPPoE", f"PPPoE session dropped{why}"))
+    newip = [(t, m) for t, text in rows("newip") if (m := _NEWIP.search(text))]
+    for t, _text in rows("linkup"):
+        ip = next((m for n, m in newip if 0 <= n - t <= 60 and m[1] != m[2]), None)
+        out.append(DevEvent(t, "ppp_up", f"{name} PPPoE",
+                            "PPPoE session up" + (f", new public IP {ip[1]}" if ip else "")))
+    stamps = [t for key in logs for t, _ in rows(key)]
+    if stamps:
+        prev["log_ts"] = max(stamps)
+    elif "log_ts" not in prev:
+        prev["log_ts"] = now - LOG_BACK
+    return sorted(out, key=lambda e: e.ts)
