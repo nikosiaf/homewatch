@@ -150,6 +150,24 @@ class Runtime:
             if evs:
                 db.run("DELETE FROM events WHERE site=? AND ts<?", (site, now - 400 * 86400))
 
+    def note_device_state(self, module: str, key: str, value, now: float, make) -> bool:
+        """For a module's own watcher: remember a device state (with when it was seen, key_ts); a change from
+        the last one stored is an event, make() builds it. Returns whether it changed."""
+        site = self.cfg.site
+        with self.db.tx() as db:
+            row = db.one("SELECT state FROM device_state WHERE site=? AND module=?", (site, module))
+            prev = json.loads(row["state"]) if row else {}
+            old = prev.get(key)
+            prev[key], prev[f"{key}_ts"] = value, now
+            db.run("INSERT INTO device_state(site,module,state) VALUES(?,?,?) ON CONFLICT(site,module) "
+                   "DO UPDATE SET state=excluded.state", (site, module, json.dumps(prev)))
+            if old is None or old == value:
+                return False
+            e = make()
+            db.run("INSERT INTO events(site,ts,module,device,kind,detail,exact,seen) VALUES(?,?,?,?,?,?,?,?)",
+                   (site, e.ts, module, e.device, e.kind, e.detail, int(e.exact), now))
+        return True
+
     def read_fresh(self, ids) -> list[str]:
         """Make these modules read their device at the next run, whatever their "Read every".
         Returns the ones that read it in that run (the ISP modem's own reader comes within 30 s instead)."""

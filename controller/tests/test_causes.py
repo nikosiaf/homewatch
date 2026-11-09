@@ -115,10 +115,90 @@ def test_ups_on_battery_and_back(cfg, monkeypatch):
 
     ups = MODULES["ups"]
     prev = {}
-    for status, expect in (("OL", []), ("OB DISCHRG", ["on_battery"]), ("OB DISCHRG", []), ("OL CHRG", ["on_mains"])):
+    for n, (status, expect) in enumerate((("OL", []), ("OB DISCHRG", ["on_battery"]), ("OB DISCHRG", []),
+                                          ("OL CHRG", ["on_mains"]))):
         monkeypatch.setattr(ups, "snap", {"name": "apc", "vars": {"ups.status": status}})
-        monkeypatch.setattr(ups, "snap_ts", T0)
+        monkeypatch.setattr(ups, "snap_ts", T0 + 120 * n)
         assert [x.kind for x in ups.device_events(None, prev)] == expect
+    prev["ob_ts"] = T0 + 1000  # the watcher saw something newer: an older reading adds nothing
+    monkeypatch.setattr(ups, "snap", {"name": "apc", "vars": {"ups.status": "OB"}})
+    assert ups.device_events(None, prev) == []
+
+
+def test_ups_watcher_catches_a_short_power_cut(cfg, monkeypatch):
+    from homewatch import runtime
+    from homewatch.modules.registry import MODULES
+    from homewatch.modules.ups import plugin
+
+    rt = runtime.Runtime.create(cfg)
+    ups = MODULES["ups"]
+    assert ups.watched(rt, False, "apc", T0) is False  # the first status only remembers
+    assert ups.watched(rt, True, "apc", T0 + 10) is True and rt.wake.is_set() and ups.stale
+    assert ups.watched(rt, True, "apc", T0 + 20) is False
+    assert ups.watched(rt, False, "apc", T0 + 40) is True
+    rows = rt.db.all("SELECT kind, ts, exact FROM events ORDER BY ts")
+    assert [(r["kind"], r["ts"], r["exact"]) for r in rows] == [("on_battery", T0 + 10, 0), ("on_mains", T0 + 40, 0)]
+    # a full reading from before the watcher's last look adds no second event
+    monkeypatch.setattr(ups, "snap", {"name": "apc", "vars": {"ups.status": "OB"}})
+    monkeypatch.setattr(ups, "snap_ts", T0 + 30)
+    rt.record_device_events(ups, T0 + 50)
+    assert rt.db.one("SELECT COUNT(*) n FROM events")["n"] == 2
+
+    # the watcher asks with GET (a one-line answer) and passes the flags on
+    asked = []
+
+    async def fake_nut(host, port, commands, timeout=6):
+        asked.append(commands)
+        return [[["VAR", "apc", "ups.status", "OB DISCHRG"]]]
+
+    monkeypatch.setattr(plugin, "nut", fake_nut)
+    monkeypatch.setattr(ups, "load", lambda rt_: {"enabled": True, "_configured": True, "host": "nut", "ups": "apc"})
+    seen = []
+    monkeypatch.setattr(ups, "watched", lambda rt_, ob, name, now: seen.append((ob, name)))
+
+    async def one_round():
+        monkeypatch.setattr(plugin.asyncio, "sleep", _stop_after(2))
+        try:
+            await ups.watch(rt)
+        except _Stop:
+            pass
+
+    asyncio.run(one_round())
+    assert asked == [["GET VAR apc ups.status"]] and seen == [(True, "apc")]
+
+
+class _Stop(Exception):
+    pass
+
+
+def _stop_after(n):
+    calls = {"n": 0}
+
+    async def sleep(_s):
+        calls["n"] += 1
+        if calls["n"] >= n:
+            raise _Stop
+
+    return sleep
+
+
+def test_nut_get_reads_one_line():
+    from homewatch.modules.ups.plugin import nut
+
+    async def main():
+        async def serve(reader, writer):
+            await reader.readline()
+            writer.write(b'VAR apc ups.status "OL"\n')
+            await writer.drain()
+            await reader.readline()  # LOGOUT
+            writer.close()
+
+        server = await asyncio.start_server(serve, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        async with server:
+            return await nut("127.0.0.1", port, ["GET VAR apc ups.status"], 3)
+
+    assert asyncio.run(main()) == [[["VAR", "apc", "ups.status", "OL"]]]
 
 
 def test_mikrotik_port_down_with_router_time(monkeypatch):

@@ -75,7 +75,8 @@ less install.sh          # please read it first; it's short (q to quit)
       whole incident is over, with every check's times. If part of it stays open, what is already back to OK is sent after
       5 minutes anyway. History lists the incidents with their timeline.</li>
     <li><b>Likely cause:</b> modules also note what their devices did, with the device's own time where it tells it:
-      reboots (from uptime), DSL line resyncs and modem reboots, the UPS going on battery, MikroTik ports losing link,
+      reboots (from uptime), DSL line resyncs and modem reboots, the UPS going on battery (its status is asked every
+      10 seconds, so a power cut of half a minute is caught), MikroTik ports losing link,
       OPNsense gateways going down. When an incident ends, homeWatch reads every device once more (about 30 seconds
       later) and names the likely cause from these events, for example a power cut in the area (UPS on battery, the
       modem stayed on, the DSL line re-synced), a modem restart, a line or ISP problem, or a restart of your own
