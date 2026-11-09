@@ -76,6 +76,20 @@ class Readings:
     gateway: Target | None = None
     dns: Dns | None = None
     speeds: list[Speed] = field(default_factory=list)  # newest first
+    public_trend: list[tuple[float, float]] = field(default_factory=list)  # (ts, best target's loss %), oldest first
+
+
+def began(trend: list[tuple[float, float]], down: bool) -> float | None:
+    """When the current state (down = every target at 100 %) began in the trend; None when it fills the whole
+    trend or the trend doesn't show it now."""
+    if not trend or (trend[-1][1] >= 100) != down:
+        return None
+    start = None
+    for ts, loss in reversed(trend):
+        if (loss >= 100) != down:
+            return start
+        start = ts
+    return None
 
 
 def _key(check_id: str) -> str:
@@ -114,10 +128,10 @@ def evaluate(settings: dict, thresholds: dict[str, Thresholds], r: Readings) -> 
     probes["any"] = probes["public"] or probes["gateway"] or probes["dns"]
     out: dict[str, CheckResult] = {}
 
-    def add(check_id: str, status: int, detail: str, value=None, suppressed_by=None):
+    def add(check_id: str, status: int, detail: str, value=None, suppressed_by=None, since=None):
         d = CHECK_BY_ID[check_id]
         out[check_id] = CheckResult(_key(check_id), d.name, status, detail, value, d.unit,
-                                    _key(suppressed_by) if suppressed_by else None)
+                                    _key(suppressed_by) if suppressed_by else None, since=since)
 
     # 1. freshness of the Telegraf probes
     root = None
@@ -165,13 +179,15 @@ def evaluate(settings: dict, thresholds: dict[str, Thresholds], r: Readings) -> 
         else:
             down = [n for n, t in targets if t.loss_now >= 100]
             if len(down) == len(targets):
-                add("reachable", ERROR, f"Internet line down: none of {', '.join(down)} answers", 100)
+                add("reachable", ERROR, f"Internet line down: none of {', '.join(down)} answers", 100,
+                    since=began(r.public_trend, True))
                 line_down = True
                 for c in ("loss", "latency", "jitter"):
                     add(c, OK, "line down", suppressed_by="reachable")
             else:
                 note = f" ({', '.join(down)} not answering)" if down else ""
-                add("reachable", OK, f"{len(targets) - len(down)} of {len(targets)} targets answer{note}", 0)
+                add("reachable", OK, f"{len(targets) - len(down)} of {len(targets)} targets answer{note}", 0,
+                    since=began(r.public_trend, False))
 
                 def best(attr):
                     vals = [(getattr(t, attr), n) for n, t in targets if getattr(t, attr) is not None and n not in down]

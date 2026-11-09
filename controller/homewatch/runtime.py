@@ -10,6 +10,7 @@ import math
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 
 import httpx
 
@@ -17,9 +18,9 @@ from . import __version__, grafana, report, versions
 from .auth import audit, scrub_audit
 from .config import Config
 from .db import DB
-from .engine import Engine, thresholds, timing
+from .engine import Engine, thresholds, timing, tz
 from .metrics import Metrics, MetricsError, line
-from .modules import ERROR, CheckResult
+from .modules import ERROR, LEVEL_WORD, CheckResult
 from .modules import internet as inet
 from .modules.internet import speedtest, telegraf
 from .modules.registry import MODULES
@@ -34,6 +35,8 @@ SPEED_RETRY = 15 * 60  # after a failed speed test, try again this soon instead 
 CHECK_NOW_GAP = 30  # s: "Check now" reads every device fresh at most this often; sooner it is an ordinary run
 CHECK_NOW_CONFIRM = 3  # s: a change that "Check now" saw is read again this much later, to confirm it
 EXPLAIN_AFTER = 30  # s: after an incident ends, the run that looks for its cause (on fresh readings) comes this soon
+QUICK_AFTER = 30  # s: when a check starts to recover, the run that confirms it (on fresh readings) comes this soon
+QUICK_GAP = 60  # s: at most one such quick run this often
 HISTORY_TABLES = ("issues", "incidents", "events", "device_state", "speedtests", "check_state", "outbox", "snoozes", "coverage")
 CONFIG_TABLES = ("settings", "checks", "secrets", "maintenance", "channels", "sessions", "users", "audit",
                  "config_versions")
@@ -63,6 +66,9 @@ class Runtime:
     grafana_on: bool = False  # Grafana answered at the last run: the pages then link to it
     check_now_at: float = 0  # when "Check now" last read every device fresh
     events_seen: dict = field(default_factory=dict)  # module id -> reading_ts whose device events are recorded
+    metric_queue: list = field(default_factory=list)  # lines to write with the next run's metrics (events, markers)
+    pending_seen: set = field(default_factory=set)  # checks waiting for confirmation at the end of the last run
+    quick_at: float = 0  # when the last quick confirming run was asked for
 
     @classmethod
     def create(cls, cfg: Config) -> Runtime:
@@ -147,6 +153,7 @@ class Runtime:
             for e in evs:
                 db.run("INSERT INTO events(site,ts,module,device,kind,detail,exact,seen) VALUES(?,?,?,?,?,?,?,?)",
                        (site, e.ts, m.id, e.device, e.kind, e.detail, int(e.exact), now))
+                self.queue_event_line(m.id, e)
             if evs:
                 db.run("DELETE FROM events WHERE site=? AND ts<?", (site, now - 400 * 86400))
 
@@ -166,7 +173,53 @@ class Runtime:
             e = make()
             db.run("INSERT INTO events(site,ts,module,device,kind,detail,exact,seen) VALUES(?,?,?,?,?,?,?,?)",
                    (site, e.ts, module, e.device, e.kind, e.detail, int(e.exact), now))
+        self.queue_event_line(module, e)
         return True
+
+    def queue_event_line(self, module: str, e) -> None:
+        """A device event as a Grafana marker (the dashboards draw hw_event as annotations)."""
+        at = datetime.fromtimestamp(e.ts, tz(self.db)).strftime("%H:%M:%S")
+        self.metric_queue.append(line("hw_event", {"site": self.cfg.site, "module": module, "device": e.device,
+                                                   "kind": e.kind, "detail": e.detail, "at": ("~" if not e.exact else "") + at},
+                                      {"value": 1}, e.ts))
+
+    def incident_markers(self) -> tuple[list[str], list[tuple[int, int]]]:
+        """Start and end of each incident as Grafana markers, once each: (lines, [(incident id, marked)]) — the
+        caller stores marked after the lines are written. The end waits for the incident's "back to OK" (and so
+        for its likely cause)."""
+        out, done, zone = [], [], tz(self.db)
+        for inc in self.db.all("SELECT * FROM incidents WHERE site=? AND marked<3", (self.cfg.site,)):
+            base = {"site": self.cfg.site, "incident": str(inc["id"]), "worst": LEVEL_WORD.get(inc["worst"], "")}
+            mark = inc["marked"]
+            if not mark & 1:
+                at = datetime.fromtimestamp(inc["started"], zone).strftime("%H:%M:%S")
+                out.append(line("hw_incident", base | {"phase": "start", "text": f"started {at}"},
+                                {"value": inc["worst"]}, inc["started"]))
+                mark |= 1
+            if inc["ended"] is not None and self.db.one(
+                    "SELECT 1 FROM issues WHERE incident_id=? AND ok_sent=0", (inc["id"],)) is None:
+                n = self.db.one("SELECT COUNT(*) n FROM issues WHERE incident_id=?", (inc["id"],))["n"]
+                at = datetime.fromtimestamp(inc["ended"], zone).strftime("%H:%M:%S")
+                mins = max(int((inc["ended"] - inc["started"]) // 60), 1)
+                text = f"over {at} after {mins} min, {n} check{'s' if n != 1 else ''}" + (
+                    f". Likely cause: {inc['cause']}" if inc["cause"] else "")
+                out.append(line("hw_incident", base | {"phase": "end", "text": text}, {"value": 0}, inc["ended"]))
+                mark |= 2
+            if mark != inc["marked"]:
+                done.append((inc["id"], mark))
+        return out, done
+
+    def quick_confirm(self, now: float) -> None:
+        """A check that starts to recover is confirmed on fresh readings of every device in a quick extra run,
+        instead of each module's own read interval (problems keep their normal pace: blips stay quiet)."""
+        rows = self.db.all("SELECT check_key, pending, status FROM check_state WHERE site=? AND pending IS NOT NULL",
+                           (self.cfg.site,))
+        better = [r["check_key"] for r in rows if r["pending"] < r["status"] and r["check_key"] not in self.pending_seen]
+        self.pending_seen = {r["check_key"] for r in rows}
+        if better and now - self.quick_at >= QUICK_GAP:
+            self.quick_at = now
+            self.read_fresh([m.id for m in MODULES.values() if m.enabled(m.load(self))])
+            asyncio.get_running_loop().call_later(QUICK_AFTER, self.wake.set)
 
     def read_fresh(self, ids) -> list[str]:
         """Make these modules read their device at the next run, whatever their "Read every".
@@ -276,6 +329,7 @@ class Runtime:
             self.engine.just_ended = False
             self.read_fresh([m.id for m in MODULES.values() if m.enabled(m.load(self))])
             asyncio.get_running_loop().call_later(EXPLAIN_AFTER, self.wake.set)
+        self.quick_confirm(now)
         events += self.engine.released(names, now)
         events += self.engine.reminders(names, now)
         self.notifier.dispatch(events, self.engine.counts(), now)
@@ -286,6 +340,7 @@ class Runtime:
         # takes back (a device rebooting) is not a problem there either
         confirmed = {r["check_key"]: r["status"] for r in self.db.all(
             "SELECT check_key, status FROM check_state WHERE site=?", (self.cfg.site,))}
+        markers, marked = self.incident_markers()
         try:
             await self.metrics.write([
                 line("hw_check_status", {"site": self.cfg.site, "module": r.key.split(".")[0], "check": r.key},
@@ -295,7 +350,10 @@ class Runtime:
                      {"value": float(r.value)}, now) for r in results
                 if isinstance(r.value, (int, float)) and not isinstance(r.value, bool) and math.isfinite(r.value)
             ] + [line("hw_run", {"site": self.cfg.site}, {"ok": 1, "duration_seconds": time.time() - now}, now)]
-                + series)
+                + series + self.metric_queue + markers)
+            self.metric_queue = []
+            for inc_id, mark in marked:
+                self.db.run("UPDATE incidents SET marked=? WHERE id=?", (mark, inc_id))
         except MetricsError as e:
             log.warning("%s", e)
         if not metrics_error:  # a store that can't be read is what the heartbeat must not hide

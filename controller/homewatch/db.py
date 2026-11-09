@@ -104,6 +104,11 @@ MIGRATIONS: list[str] = [
     ALTER TABLE incidents ADD COLUMN evidence TEXT NOT NULL DEFAULT '';
     ALTER TABLE incidents ADD COLUMN closing REAL;
     """,
+    # 8: which incident start / end markers are written for Grafana (1 start, 2 end); the old ones are not drawn
+    """
+    ALTER TABLE incidents ADD COLUMN marked INTEGER NOT NULL DEFAULT 0;
+    UPDATE incidents SET marked=3;
+    """,
 ]
 
 

@@ -8,6 +8,8 @@ from ...db import DB
 from ...metrics import Metrics
 from .checks import Dns, Readings, Speed, Target
 
+TREND_S = 15 * 60  # s of ping history read to find when the line went down or came back
+
 # Telegraf's dns_query result_code: 0 success, 1 timeout, 2 error
 DNS_RESULT = {0: "success", 1: "timeout", 2: "error"}
 
@@ -24,7 +26,10 @@ async def collect(metrics: Metrics, db: DB, site: str, now: float | None = None)
         s = f'{{{sel},role="{role}"}}'
         last_ts = await by_target(f"tlast_over_time(ping_percent_packet_loss{s}[1h])")
         loss_now = await by_target(f"last_over_time(ping_percent_packet_loss{s}[90s])")
-        loss_avg = await by_target(f"avg_over_time(ping_percent_packet_loss{s}[5m])")
+        # rounds at 100 % are "not answering" (the reachable check), not packet loss: left out, so an outage
+        # doesn't leave a packet loss warning behind it while it is still in the window
+        loss_avg = await by_target(f"sum_le_over_time(ping_percent_packet_loss{s}[5m], 99.9) / "
+                                   f"count_le_over_time(ping_percent_packet_loss{s}[5m], 99.9)")
         # medians: one odd ping round must not raise an alert on its own (a single 1.1 s round once
         # pushed the 10-minute jitter average to 56 ms); sustained trouble still moves the median
         rtt = await by_target(f"median_over_time(ping_average_response_ms{s}[5m])")
@@ -35,6 +40,10 @@ async def collect(metrics: Metrics, db: DB, site: str, now: float | None = None)
         }
         if role == "public":
             r.public = targets
+            # the best target's loss every 10 s over the last TREND_S: when "none answers" began or ended
+            series = await metrics.query_range(f"min(last_over_time(ping_percent_packet_loss{s}[10s]))",
+                                               now - TREND_S, now, 10)
+            r.public_trend = series[0][1] if series else []
         elif targets:
             r.gateway = next(iter(targets.values()))
 

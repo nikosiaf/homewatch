@@ -275,3 +275,98 @@ def test_runtime_records_device_events_once_per_reading(cfg, monkeypatch):
     asyncio.run(rt.run_checks(T0 + 240))  # same reading: not again
     rows = rt.db.all("SELECT kind, ts, exact FROM events")
     assert [(r["kind"], r["ts"], r["exact"]) for r in rows] == [("on_battery", T0 + 120, 0)]
+
+
+# ---- v0.39.2: exact times, no loss after an outage, quick recovery, Grafana markers ------------------
+def test_began_finds_when_the_line_went_down_and_came_back():
+    from homewatch.modules.internet.checks import began
+
+    trend = [(T0 + 10 * i, v) for i, v in enumerate([0, 0, 80, 100, 100, 100])]
+    assert began(trend, True) == T0 + 30  # every target at 100 % from here
+    assert began(trend, False) is None  # it isn't up now
+    trend += [(T0 + 60, 0), (T0 + 70, 0)]
+    assert began(trend, False) == T0 + 60
+    assert began([(T0, 100), (T0 + 10, 100)], True) is None  # down for the whole window: unknown
+    assert began([], True) is None
+
+
+def test_reachable_reports_when_the_data_changed():
+    from homewatch.modules.internet.checks import CHECKS, Readings, Target, evaluate
+    from homewatch.modules import Thresholds
+
+    s = {"public": {"enabled": True, "targets": ["1.1.1.1"]}, "gateway": {"enabled": False, "target": ""},
+         "dns": {"enabled": False, "server": "", "domain": ""}, "speed": {"enabled": False}, "line": {}}
+    th = {c.id: Thresholds(c.warn, c.error, True) for c in CHECKS}
+    r = Readings(now=T0 + 200, public={"1.1.1.1": Target(100, None, None, None, T0 + 190)},
+                 public_trend=[(T0, 0), (T0 + 100, 100), (T0 + 190, 100)])
+    reach = next(x for x in evaluate(s, th, r) if x.key == "internet.reachable")
+    assert reach.status == ERROR and reach.since == T0 + 100
+
+
+def test_engine_takes_the_time_from_the_data_but_not_before_the_last_change(db):
+    e = Engine(db, "home")
+    cr = lambda s, since=None: CheckResult("internet.reachable", "Internet reachable", s, "d", since=since)  # noqa: E731
+    e.apply("internet", [cr(OK)], T0)
+    e.apply("internet", [cr(ERROR, T0 + 70)], T0 + 120)
+    (ev,) = e.apply("internet", [cr(ERROR, T0 + 70)], T0 + 240)
+    assert ev.kind == "open" and ev.started == T0 + 70
+    e.apply("internet", [cr(OK, T0 + 300)], T0 + 360)
+    e.apply("internet", [cr(OK, T0 + 300)], T0 + 480)
+    assert db.one("SELECT resolved FROM issues")["resolved"] == T0 + 300
+    e.apply("internet", [cr(ERROR, T0 + 10)], T0 + 600)  # a hint from before the last change is not believed
+    assert db.one("SELECT pending_since FROM check_state")["pending_since"] == T0 + 600
+
+
+def test_quick_run_when_a_check_starts_to_recover(cfg):
+    from homewatch import runtime
+
+    rt = runtime.Runtime.create(cfg)
+    fresh = []
+    rt.read_fresh = lambda ids: fresh.append(list(ids))
+    rt.db.run("INSERT INTO check_state(site,check_key,status,pending,since) VALUES('home','internet.reachable',2,1,0)")
+
+    async def main():
+        rt.quick_confirm(T0)
+        rt.quick_confirm(T0 + 120)  # the same recovery: once
+
+    asyncio.run(main())
+    assert len(fresh) == 1 and rt.quick_at == T0
+    rt.db.run("UPDATE check_state SET status=0, pending=2")  # a new problem: normal pace
+    rt.pending_seen = set()
+    asyncio.run(main())
+    assert len(fresh) == 1
+
+
+def test_incident_and_event_markers_for_grafana(cfg, monkeypatch):
+    from homewatch import runtime
+    from homewatch.grafana import ANNOTATIONS, overview
+    from homewatch.modules import DevEvent
+
+    rt = runtime.Runtime.create(cfg)
+    inc = rt.db.run("INSERT INTO incidents(site,started,worst) VALUES('home',?,2)", (T0,))
+    rt.db.run("INSERT INTO issues(site,check_key,level,worst,started,incident_id) VALUES('home','internet.reachable',2,2,?,?)",
+              (T0, inc))
+    lines, marked = rt.incident_markers()
+    assert len(lines) == 1 and "phase=start" in lines[0] and marked == [(inc, 1)]
+    rt.db.run("UPDATE incidents SET marked=1, ended=?, cause='Power cut in the area' WHERE id=?", (T0 + 420, inc))
+    rt.db.run("UPDATE issues SET resolved=?, ok_sent=0", (T0 + 420,))
+    assert rt.incident_markers() == ([], [])  # its "back to OK" (and cause) isn't out yet
+    rt.db.run("UPDATE issues SET ok_sent=1")
+    (end,), marked = rt.incident_markers()
+    assert "phase=end" in end and "Likely\\ cause:\\ Power\\ cut" in end and marked == [(inc, 3)]
+    rt.queue_event_line("ups", DevEvent(T0 + 5, "on_battery", "apc", "UPS on battery", exact=False))
+    assert rt.metric_queue and rt.metric_queue[0].startswith("hw_event,") and "at=~" in rt.metric_queue[0]
+    assert {a["name"] for a in ANNOTATIONS} == {"Incidents", "Device events"}
+    assert overview(set())["annotations"]["list"] == ANNOTATIONS
+
+
+def test_ups_watcher_draws_the_power_cut(cfg):
+    from homewatch import runtime
+    from homewatch.modules.registry import MODULES
+
+    rt = runtime.Runtime.create(cfg)
+    ups = MODULES["ups"]
+    ups.watched(rt, False, "apc", T0)
+    ups.watched(rt, True, "apc", T0 + 10)
+    assert [x for x in rt.metric_queue if x.startswith("hw_ups,")] == [
+        f"hw_ups,site=home,ups=apc on_battery=1.0,online=0.0 {int((T0 + 10) * 1e9)}"]

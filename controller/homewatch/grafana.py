@@ -159,7 +159,21 @@ def dashboard(uid, title, panels, desc="", tags=(), time="now-24h"):
                                      "query": {"query": "label_values(hw_run_ok, site)", "refId": "site"},
                                      "definition": "label_values(hw_run_ok, site)", "refresh": 1,
                                      "hide": 2, "includeAll": False, "multi": False}]},
+            "annotations": {"list": ANNOTATIONS},
             "panels": _layout(panels)}
+
+
+# markers on every dashboard: incidents and what the devices did (written by homeWatch with their own time).
+# A marker sits at the first query step after its time (at most MARK_STEP late); the text has the exact time.
+MARK_STEP = "2m"
+ANNOTATIONS = [
+    {"name": "Incidents", "datasource": DS, "enable": True, "iconColor": "red", "step": MARK_STEP,
+     "expr": f'last_over_time(hw_incident_value{{site="$site"}}[{MARK_STEP}])',
+     "titleFormat": "Incident {{phase}} ({{worst}})", "textFormat": "{{text}}", "tagKeys": "phase"},
+    {"name": "Device events", "datasource": DS, "enable": True, "iconColor": "orange", "step": MARK_STEP,
+     "expr": f'last_over_time(hw_event_value{{site="$site"}}[{MARK_STEP}])',
+     "titleFormat": "{{device}}", "textFormat": "{{detail}} at {{at}}", "tagKeys": "kind,module"},
+]
 
 
 # ---- the dashboards -------------------------------------------------------------------------------

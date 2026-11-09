@@ -58,6 +58,7 @@ class CheckResult:
     extra: dict = field(default_factory=dict)
     unknown: bool = False  # OK only because nothing has been read yet
     observed_at: float | None = None  # when the reading behind this result was taken, if it can be reused between runs
+    since: float | None = None  # when the data shows this level began (earlier than the run that saw it), if known
 
     @property
     def effective(self) -> int:

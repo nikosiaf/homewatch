@@ -10,7 +10,7 @@ import time
 
 from .. import ERROR, OK, WARNING, CheckDef, CheckResult, DevEvent, level
 from ..apibase import ApiError, ApiModule, Field, Table
-from ...metrics import lines, num as _num
+from ...metrics import line, lines, num as _num
 
 log = logging.getLogger("homewatch.ups")
 
@@ -171,6 +171,9 @@ class UPSModule(ApiModule):
     def watched(self, rt, on_battery: bool, name: str, now: float) -> bool:
         if not rt.note_device_state(self.id, "ob", on_battery, now, lambda: power_event(now, on_battery, name)):
             return False
+        # the UPS graph gets the change too, even when it is over before the next full reading
+        rt.metric_queue.append(line("hw_ups", {"site": rt.cfg.site, "ups": name},
+                                    {"on_battery": float(on_battery), "online": float(not on_battery)}, now))
         self.reread()
         rt.wake.set()
         return True

@@ -132,7 +132,9 @@ class Engine:
                         continue  # the same reading again confirms nothing
                     count, since = st["pending_count"] + 1, st["pending_since"]
                 else:
-                    count, since = 1, now
+                    # the data may show when it really began (not before the last confirmed change, not in the future)
+                    hint = res.since
+                    count, since = 1, hint if hint is not None and (st["since"] or 0) <= hint <= now else now
                 if count < confirm:
                     db.run("UPDATE check_state SET pending=?,pending_count=?,pending_since=?,pending_obs=?,detail=?,value=? "
                            "WHERE site=? AND check_key=?", (level, count, since, res.observed_at, res.detail, res.value,
