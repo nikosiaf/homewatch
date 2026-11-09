@@ -31,6 +31,8 @@ log = logging.getLogger("homewatch.runtime")
 HC_SECRET = "healthchecks.url"
 MODULE_LIMIT = 90  # seconds one module may take to read; devices are read one after the other
 SPEED_RETRY = 15 * 60  # after a failed speed test, try again this soon instead of waiting a full interval
+CHECK_NOW_GAP = 30  # s: "Check now" reads every device fresh at most this often; sooner it is an ordinary run
+CHECK_NOW_CONFIRM = 3  # s: a change that "Check now" saw is read again this much later, to confirm it
 HISTORY_TABLES = ("issues", "speedtests", "check_state", "outbox", "snoozes", "coverage")
 CONFIG_TABLES = ("settings", "checks", "secrets", "maintenance", "channels", "sessions", "users", "audit",
                  "config_versions")
@@ -58,6 +60,7 @@ class Runtime:
     series_written: dict = field(default_factory=dict)  # module id -> reading_ts of the reading already written
     grafana_for: tuple | None = None  # (enabled modules, recorded HA entities) the dashboards were last written for
     grafana_on: bool = False  # Grafana answered at the last run: the pages then link to it
+    check_now_at: float = 0  # when "Check now" last read every device fresh
 
     @classmethod
     def create(cls, cfg: Config) -> Runtime:
@@ -125,7 +128,45 @@ class Runtime:
             except TimeoutError:
                 pass
 
-    async def run_checks(self, now: float | None = None) -> list[CheckResult]:
+    def read_fresh(self, ids) -> list[str]:
+        """Make these modules read their device at the next run, whatever their "Read every".
+        Returns the ones that read it in that run (the ISP modem's own reader comes within 30 s instead)."""
+        out = []
+        for mid in ids:
+            m = MODULES[mid]
+            if hasattr(m, "stale"):
+                m.stale = True
+                out.append(mid)
+            else:
+                m.refresh_soon(self)
+        return out
+
+    async def check_now(self, now: float | None = None) -> bool:
+        """The Status page's "Check now": every device read fresh, and a change that shows up read once more
+        a few seconds later, so that two fresh readings confirm it (or take it back) before the page shows.
+        False: the last one was under CHECK_NOW_GAP ago, so this was an ordinary run."""
+        now = now or time.time()
+        if now - self.check_now_at < CHECK_NOW_GAP:
+            await self.run_checks()
+            return False
+        self.check_now_at = now
+        on = [m.id for m in MODULES.values() if m.enabled(m.load(self))]
+        self.read_fresh(on)
+        await self.run_checks()
+        if self.last_error:
+            return True
+        changing = {r["check_key"].split(".", 1)[0] for r in self.db.all(
+            "SELECT check_key FROM check_state WHERE site=? AND pending IS NOT NULL", (self.cfg.site,))}
+        again = [mid for mid in on if mid in changing and hasattr(MODULES[mid], "stale")]
+        if again:
+            await asyncio.sleep(CHECK_NOW_CONFIRM)
+            self.read_fresh(again)
+            await self.run_checks(only=set(again))
+        return True
+
+    async def run_checks(self, now: float | None = None, only: set[str] | None = None) -> list[CheckResult]:
+        """One round of checks. only: just these modules; the others keep their last results untouched
+        (a quick re-read must not count as a second reading for modules whose data didn't change)."""
         now = now or time.time()
         events = []
         results: list[CheckResult] = []
@@ -133,6 +174,9 @@ class Runtime:
         series: list[str] = []  # detailed metrics of the modules that took a new reading in this run
         gap = max(3 * int(timing(self.db)["interval"]), 600)
         for m in MODULES.values():
+            if only is not None and m.id not in only:
+                results += [r for r in self.results if r.key.startswith(m.id + ".")]
+                continue
             s = m.load(self)
             if not m.enabled(s):
                 events += self.engine.apply(m.id, [], now)  # a switched-off module closes its issues silently

@@ -217,3 +217,68 @@ def test_runtime_writes_confirmed_status(cfg, monkeypatch):
     asyncio.run(rt.run_checks(1100))  # twice: confirmed
     (x,) = levels()
     assert "value=0" not in x
+
+
+def _check_now_rt(cfg, monkeypatch, statuses):
+    """A runtime with only the UPS module on; its readings give the next status of `statuses` each time."""
+    from homewatch import runtime
+    from homewatch.modules.registry import MODULES
+    from homewatch.modules.ups.plugin import UPSModule
+
+    rt = runtime.Runtime.create(cfg)
+
+    async def write(ls):
+        pass
+
+    monkeypatch.setattr(rt.metrics, "write", write)
+    monkeypatch.setattr(runtime, "CHECK_NOW_CONFIRM", 0)
+    monkeypatch.setattr(MODULES["internet"], "enabled", lambda s: False)
+    ups = next(m for m in MODULES.values() if isinstance(m, UPSModule))
+    reads = []
+
+    async def readings(rt_, s, now):
+        reads.append(ups.stale)
+        ups.stale = False
+        ups.snap = {"name": "apc", "vars": {"ups.status": statuses.pop(0), "battery.charge": "99"}}
+        ups.snap_ts = now + len(reads)  # every read is a new reading
+        return (s, ups.snap, "", now)
+
+    monkeypatch.setattr(ups, "readings", readings)
+    monkeypatch.setattr(ups, "load", lambda rt_: {"enabled": True, "_configured": True, "chosen": [], "skipped": []})
+    rt.db.run("INSERT INTO check_state(site,check_key,status,since) VALUES(?,?,0,0)", (cfg.site, "ups.power"))
+    return rt, reads
+
+
+def _ups_power(rt):
+    return rt.db.one("SELECT status, pending FROM check_state WHERE site=? AND check_key='ups.power'", (rt.cfg.site,))
+
+
+def test_check_now_confirms_a_change_in_one_click(cfg, monkeypatch):
+    rt, reads = _check_now_rt(cfg, monkeypatch, ["OB", "OB"])
+    assert asyncio.run(rt.check_now()) is True
+    assert reads == [True, True]  # read fresh, then once more for the change
+    st = _ups_power(rt)
+    assert st["status"] != 0 and st["pending"] is None  # confirmed: shown on the Status page now
+    assert rt.db.one("SELECT 1 FROM issues WHERE check_key='ups.power' AND resolved IS NULL")
+
+
+def test_check_now_one_bad_reading_is_taken_back(cfg, monkeypatch):
+    rt, reads = _check_now_rt(cfg, monkeypatch, ["OB", "OL"])
+    asyncio.run(rt.check_now())
+    assert len(reads) == 2
+    st = _ups_power(rt)
+    assert st["status"] == 0 and st["pending"] is None
+    assert not rt.db.one("SELECT 1 FROM issues WHERE check_key='ups.power'")
+
+
+def test_check_now_no_change_reads_once(cfg, monkeypatch):
+    rt, reads = _check_now_rt(cfg, monkeypatch, ["OL"])
+    asyncio.run(rt.check_now())
+    assert reads == [True]
+
+
+def test_check_now_again_within_the_gap_is_an_ordinary_run(cfg, monkeypatch):
+    rt, reads = _check_now_rt(cfg, monkeypatch, ["OL", "OL"])
+    assert asyncio.run(rt.check_now()) is True
+    assert asyncio.run(rt.check_now()) is False
+    assert reads == [True, False]  # the second click didn't force a device read

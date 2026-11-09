@@ -779,11 +779,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt = rt_of(request)
         if await form_of(request, request.state.user) is None:
             return back("/", err="Form expired")
-        await rt.run_checks()
+        await rt.check_now()
         if rt.last_error:
             return back("/", err=f"Check run failed: {rt.last_error}")
-        return back("/", msg=f"Checks ran at {_fmt_ts(rt.last_run, '%H:%M:%S')}. A change still needs "
-                             f"{int(timing(rt.db)['confirm'])} runs in a row before it is sent.")
+        return back("/", msg=f"Checks ran successfully at {_fmt_ts(rt.last_run, '%H:%M:%S')}.")
 
     @app.post("/maintenance/snooze")
     async def snooze(request: Request):
