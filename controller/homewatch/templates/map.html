@@ -1,17 +1,86 @@
 {% extends "base.html" %}
 {% block title %}Map{% endblock %}
 {% block content %}
-<h1>Map</h1>
 <div class="card">
-  <p>What hangs off what at home, found from the switches' MAC tables, the UniFi clients, Home Assistant's devices and
-    Proxmox. When a problem starts on a device behind something that has a problem, or that just restarted or lost link,
-    homeWatch names that as the likely reason; if that parent's problem was already sent, the device's own message is
-    left out and it is listed when the incident is over.</p>
-  <p class="quiet small">{{ nodes | length }} devices and ports, {{ found }} placed automatically · built
-    {{ built | ts if built else 'not yet' }} (with every check run, from the modules' last readings)</p>
+  <p>homeWatch maps how your devices are connected, using switch MAC tables, UniFi clients, Home Assistant and Proxmox.
+    When a problem traces back to an upstream device that’s down, restarting or has lost its link, homeWatch points to that
+    device as the likely cause. It sends one alert for that device and lists the affected devices behind it when the
+    incident is over.</p>
+  <div class="row" style="align-items:center;gap:10px">
+    <p class="quiet small" style="margin:0;flex:1">{{ nodes | length }} devices and ports, {{ found }} placed automatically ·
+      rebuilt {{ built | ts if built else 'not yet' }}. It is rebuilt at every check run (every 2 minutes) from the latest
+      readings: switch MAC tables and UniFi clients as often as those modules read, Home Assistant's devices every 30 minutes,
+      Proxmox guests and network cards every 6 hours. Scan now reads them all at once.</p>
+    <form method="post" action="/map/scan"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <button data-busy="Scanning…">Scan now</button></form>
+  </div>
 </div>
 
-<h2>Depends on, by hand</h2>
+{% set KIND = {"ups": "UPS", "modem": "ISP modem", "switch": "switch", "ap": "access point", "host": "host", "port": "port",
+   "guest": "VM / container", "device": "device", "bluetooth": "Bluetooth", "proxy": "Bluetooth proxy", "integration": "integration"} %}
+{% macro meta(n) %}<span class="nm-meta">{% if n.ip %}<span class="nm-ip">{{ n.ip }}</span>{% endif %}{% if n.mac %}<span class="nm-mac">{{ n.mac }}</span>{% endif %}{% if n.offline and n.last_seen %}<span class="nm-off">offline, last seen {{ n.last_seen | ts }}</span>{% endif %}</span>{% endmacro %}
+{% macro through(items) %}{% if items %}<details class="nm-under"><summary>{{ items | length }} through it</summary><ul class="nm-list">
+  {% for t in items %}<li class="{{ 'off' if t.offline }}"><b>{{ t.name }}</b> <span class="quiet">{{ KIND.get(t.kind, t.kind) }}{% if t.via and t.via not in ('wired', 'Wi-Fi') %} · {{ t.via }}{% endif %}</span> {{ meta(t) }}
+    {{ through(t.through) }}</li>{% endfor %}</ul></details>{% endif %}{% endmacro %}
+{% macro device(d) %}<div class="nm-box k-{{ d.kind }} {{ 'off' if d.offline }}">
+  {% if d.port %}<div class="nm-port">{{ d.port }}</div>{% endif %}
+  <b>{{ d.name }}</b>{% if d.ref %} <span class="quiet small">(above)</span>{% endif %}<div class="small quiet">{{ KIND.get(d.kind, d.kind) }}</div>
+  <div class="small">{{ meta(d) }}</div>
+  {{ through(d.through) }}
+  {% if d.wifi %}<details class="nm-wifi" open><summary>Wi-Fi · {{ d.wifi | selectattr('offline', 'undefined') | list | length }} on{% set off = d.wifi | selectattr('offline') | list | length %}{% if off %}, {{ off }} offline{% endif %}</summary>
+    <ul class="nm-list">{% for w in d.wifi %}<li class="{{ 'off' if w.offline }}"><b>{{ w.name }}</b> {{ meta(w) }}{{ through(w.through) }}</li>{% endfor %}</ul></details>{% endif %}
+</div>{% endmacro %}
+
+{% macro pid(d) %}p-{{ d.id | replace(':', '-') | replace('/', '-') | replace('.', '-') | replace(' ', '-') }}{% endmacro %}
+{% macro box(d) %}{% if d.kids %}<button type="button" class="nm-box k-{{ d.kind }} {{ 'off' if d.offline }}" data-open="{{ pid(d) }}" aria-expanded="false">{% else %}<div class="nm-box k-{{ d.kind }} {{ 'off' if d.offline }}">{% endif %}
+  {% if d.port %}<span class="nm-port">{{ d.port }}</span>{% endif %}
+  <b>{{ d.name }}</b><span class="small quiet nm-kind">{{ d.role if d.role and d.role != d.name else KIND.get(d.kind, d.kind) }}{% if d.via and d.via not in ('wired', 'Wi-Fi', 'MikroTik') %} · {{ d.via }}{% endif %}</span>
+  {% if d.detail %}<span class="small {{ 'nm-off' if 'BATTERY' in d.detail or d.offline }}">{{ d.detail }}</span>{% endif %}
+  <span class="small">{{ meta(d) }}</span>
+  {% if d.kids %}<span class="nm-more small">{{ d.kids | length }} {{ 'on Wi-Fi' if d.wifi and not d.through else 'below' }}</span>{% endif %}
+{% if d.kids %}</button>{% else %}</div>{% endif %}{% endmacro %}
+{% macro level(items, dir) %}<div class="nm-level dir-{{ dir }}" data-scope>
+  <div class="nm-row">{% for d in items %}{{ box(d) }}{% endfor %}</div>
+  {% for d in items if d.kids %}<div class="nm-panel" id="{{ pid(d) }}" hidden><div class="nm-from small">{{ d.name }}</div>{{ level(d.kids, dir) }}</div>{% endfor %}
+</div>{% endmacro %}
+
+<h2>Network Map</h2>
+<div class="card netmap" id="maptree" data-scope>
+{% if not (lay.modem or lay.host or lay.switches) %}<p class="quiet">Nothing yet: the map needs the MikroTik, UniFi, Home
+  Assistant or Proxmox module, and fills in at the next check run.</p>{% else %}
+<div class="nm-grid">
+  {% if lay.modem %}<div class="nm-c1"><div class="nm-box k-modem"><b>{{ lay.modem.name }}</b><span class="small quiet nm-kind">ISP modem</span>
+    {% if not lay.modem.to %}<span class="small nm-off">not linked: add its cable by hand below</span>{% endif %}</div></div>
+  <div class="nm-c2 nm-link"><span class="small">{% if lay.host and lay.host.wan %}WAN {{ lay.host.wan.port }} · {{ lay.host.wan.bridge }}{% endif %}</span></div>{% endif %}
+  {% if lay.host %}<div class="nm-c3">{% if lay.host.kids %}<button type="button" class="nm-box k-host" data-open="{{ pid(lay.host) }}" aria-expanded="false">{% else %}<div class="nm-box k-host">{% endif %}<b>{{ lay.host.name }}</b>
+    <span class="small quiet nm-kind">host{% if lay.host.ip %} · <span class="nm-ip">{{ lay.host.ip }}</span>{% endif %}</span>
+    <span class="nm-nics">{% for c in lay.host.nics or [] %}<span class="nm-nic r-{{ c.role }}">{{ c.role | upper }} {{ c.port }} · {{ c.bridge }}{% if c.ip %} · {{ c.ip }}{% endif %}</span>{% endfor %}</span>
+    {% if lay.host.kids %}<span class="nm-more small">{% set u = lay.host.kids | selectattr('kind', 'equalto', 'ups') | list | length %}{% if u %}UPS · {% endif %}{{ lay.host.guests | length }} VMs and containers</span></button>{% else %}</div>{% endif %}</div>
+{% endif %}
+</div>
+{% if lay.host and lay.host.kids %}<div class="nm-panel" id="{{ pid(lay.host) }}" hidden><div class="nm-from small right">{{ lay.host.name }}</div>{{ level(lay.host.kids, 'ltr') }}</div>{% endif %}
+<div class="nm-grid">
+  {% if lay.host %}<div class="nm-c3 nm-vlink"><span class="small">{% if lay.host.lan %}LAN {{ lay.host.lan.port }}{% endif %}{% if lay.host.lan_port %} → {{ lay.host.lan_port }}{% endif %}</span></div>{% endif %}
+  {% if lay.others %}<div class="nm-c1 nm-col">{% for sw in lay.others %}{{ box(sw) }}{% endfor %}</div>
+  <div class="nm-c2 nm-link nm-dashed"><span class="small">uplink</span><span class="small">{{ lay.others[0].uplink or '' }}</span></div>{% endif %}
+  {% if lay.core %}<div class="nm-c3">{{ box(lay.core) }}</div>{% endif %}
+</div>
+{% for sw in lay.others %}<div class="nm-panel" id="{{ pid(sw) }}" hidden><div class="nm-from small">{{ sw.name }} · wired</div>{{ level(sw.wired, 'ltr') }}</div>{% endfor %}
+{% if lay.core %}<div class="nm-panel" id="{{ pid(lay.core) }}" hidden><div class="nm-from small right">{{ lay.core.name }} · wired</div>{{ level(lay.core.wired, 'rtl') }}</div>{% endif %}
+{% endif %}
+</div>
+
+{% if lay.hubs %}<h2>Hubs, bridges and proxies <span class="quiet small">not placed yet: link them by hand to where they are</span></h2>
+<div class="map-frames">{% for h in lay.hubs %}<section class="card map-frame">{{ device(h) }}</section>{% endfor %}</div>{% endif %}
+
+{% if lay.lost %}<div class="card"><details><summary>Not connected or unknown devices · {{ lay.lost | length }}
+  <span class="quiet small">never seen on a switch or access point: cloud devices, add-ons, phones' app devices, devices off
+  since homeWatch started</span></summary><ul class="nm-list">{% for u in lay.lost %}
+  <li><b>{{ u.name }}</b> <span class="quiet">{{ KIND.get(u.kind, u.kind) }}</span> {{ meta(u) }}</li>{% endfor %}</ul></details></div>{% endif %}
+
+{% if lay.integrations %}<details class="card small"><summary>Integrations (for links by hand) · {{ lay.integrations | length }}</summary>
+  <p class="quiet">{{ lay.integrations | join(' · ') }}</p></details>{% endif %}
+<h2>Manually set dependencies</h2>
 <div class="card" id="edges">
   <p class="quiet small">For what can't be found: an integration and the device it runs through (Zigbee2MQTT → the Zigbee
     bridge), a device on a switch homeWatch doesn't read, a VM and the host it needs. A hand-made link wins over a found one.</p>
@@ -28,14 +97,5 @@
     <div><button>Add</button></div>
     <datalist id="nodes">{% for nid, name in choices %}<option value="{{ nid }}">{{ name }}</option>{% endfor %}</datalist>
   </form>
-</div>
-
-<h2>Found</h2>
-<div class="card scroll">
-  {% macro branch(items) %}<ul class="tree">{% for n in items %}
-    <li><b>{{ n.name }}</b> <span class="quiet small">{{ n.kind }}{% if n.id.startswith('mac:') %} · {{ n.id[4:] }}{% endif %}{% if n.via %} · {{ n.via }}{% endif %}</span>
-      {% if n.children %}{{ branch(n.children) }}{% endif %}</li>{% endfor %}</ul>{% endmacro %}
-  {% if tree %}{{ branch(tree) }}{% else %}<p class="quiet">Nothing yet: the map needs the MikroTik, UniFi, Home Assistant or
-    Proxmox module, and fills in at the next check run.</p>{% endif %}
 </div>
 {% endblock %}

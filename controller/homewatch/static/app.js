@@ -668,3 +668,27 @@ document.querySelectorAll("[data-entity-table]").forEach(function (box) {
     });
   });
 });
+
+// Map page: one thing open at a time on each level. A button opens its panel and closes its neighbours' (and
+// everything below them); a second click closes it.
+function mapClose(panel) {
+  panel.hidden = true;
+  panel.querySelectorAll(".nm-panel").forEach(function (p) { p.hidden = true; });
+  panel.querySelectorAll("[data-open]").forEach(function (b) { b.setAttribute("aria-expanded", "false"); });
+}
+document.addEventListener("click", function (e) {
+  const b = e.target.closest("[data-open]");
+  if (!b) return;
+  const scope = b.closest("[data-scope]");
+  const target = document.getElementById(b.dataset.open);
+  if (!scope || !target) return;
+  const wasOpen = !target.hidden;
+  scope.querySelectorAll("[data-open]").forEach(function (o) {
+    if (o.closest("[data-scope]") === scope) o.setAttribute("aria-expanded", "false");
+  });
+  Array.prototype.forEach.call(scope.children, function (c) { if (c.classList.contains("nm-panel")) mapClose(c); });
+  if (!wasOpen) {
+    target.hidden = false;
+    b.setAttribute("aria-expanded", "true");
+  }
+});

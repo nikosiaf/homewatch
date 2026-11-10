@@ -117,10 +117,28 @@ class ProxmoxModule(PinnedTLS, Module):
                 conf = await c.get(f"/nodes/{g['node']}/{g.get('type', 'qemu')}/{g['vmid']}/config") or {}
             except ApiError:
                 conf = {}
-            cache[key] = (now, sorted({m.group(1).upper() for k, v in conf.items() if k.startswith("net")
-                                       for m in [MAC_RE.search(str(v))] if m}))
+            nics = []
+            for k, v in conf.items():
+                m = MAC_RE.search(str(v)) if k.startswith("net") else None
+                if m:
+                    b = re.search(r"bridge=([\w.-]+)", str(v))
+                    nics.append((m.group(1).upper(), b.group(1) if b else ""))
+            cache[key] = (now, sorted(nics))
         for g in self.snap.guests:
-            g["macs"] = cache.get((g.get("node"), g.get("vmid"), g.get("type")), (0, []))[1]
+            nics = cache.get((g.get("node"), g.get("vmid"), g.get("type")), (0, []))[1]
+            g["nics"] = [list(n) for n in nics]
+            g["macs"] = [m for m, _ in nics]
+        # the hosts' bridges and network cards: which bridge has the host's address (LAN), which faces the modem
+        net = self.__dict__.setdefault("net", {})
+        for n in self.snap.nodes:
+            name = n.get("node")
+            if n.get("status") != "online" or (name in net and now - net[name][0] < MAC_EVERY):
+                continue
+            try:
+                ifaces = await c.get(f"/nodes/{name}/network") or []
+            except ApiError:
+                ifaces = []
+            net[name] = (now, [{k: i.get(k) for k in ("iface", "type", "address", "bridge_ports", "active")} for i in ifaces])
 
     def device_events(self, rt, prev):
         out: list[DevEvent] = []

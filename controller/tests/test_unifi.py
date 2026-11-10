@@ -27,6 +27,9 @@ def mock(login_status=200):
         return_value=httpx.Response(200, json={"data": DEVICES}))
     respx.get(BASE + "/proxy/network/api/s/default/stat/health").mock(
         return_value=httpx.Response(200, json={"data": [{"subsystem": "wlan", "status": "ok", "num_user": 20}]}))
+    respx.get(BASE + "/proxy/network/api/s/default/stat/alluser").mock(
+        return_value=httpx.Response(200, json={"data": [{"mac": "cc:01", "hostname": "door", "last_uplink_mac": "aa:01",
+                                                         "last_ip": "192.168.10.9", "last_seen": 1800000000}]}))
     respx.get(BASE + "/proxy/network/api/s/default/stat/sta").mock(
         return_value=httpx.Response(200, json={"data": [{"mac": "cc:00", "hostname": "phone", "ap_mac": "aa:01",
                                                          "is_wired": False}]}))

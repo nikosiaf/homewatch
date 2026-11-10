@@ -35,7 +35,14 @@
     <td><span class="badge s{{ i.level }}">{{ LEVEL_WORD[i.level] }}</span></td>
     <td>{{ names.get(i.check_key, i.check_key) }}</td><td>{{ more(i.detail, "i" ~ i.id) }}</td>
     <td class="nw">{{ i.started | ts }}</td><td class="nw">{{ (now - i.started) | dur }}</td>
-    {% if user.is_admin %}<td style="white-space:nowrap"><form class="inline" method="post" action="/maintenance/snooze">
+    {% if user.is_admin %}<td style="white-space:nowrap">{% if i.acked %}<span class="quiet small" title="No reminders while it stays open">acknowledged</span> {% endif %}<form class="inline" method="post" action="/issues/{{ i.id }}/ack">
+      <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status">
+      <button class="secondary" title="{{ 'Send reminders again' if i.acked else 'I know: no more reminders while it stays open' }}">{{ 'Un-ack' if i.acked else 'Ack' }}</button></form>
+      {% for name, slug in (fixes.get(i.id) or []) %}<form class="inline" method="post" action="/fix/addon" data-ask-password="Restart the add-on {{ slug }}?" data-ask-action="Restart">
+        <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status"><input type="hidden" name="current">
+        <input type="hidden" name="issue" value="{{ i.id }}"><input type="hidden" name="slug" value="{{ slug }}">
+        <button title="Restart the Home Assistant add-on {{ slug }}">Restart {{ name }}</button></form>{% endfor %}
+      <form class="inline" method="post" action="/maintenance/snooze">
       <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status"><input type="hidden" name="_from" value="status">
       <input type="hidden" name="check" value="{{ i.check_key }}">
       <select name="for" aria-label="snooze for" class="short"><option value="1h">1 h</option><option value="4h">4 h</option><option value="24h">24 h</option></select>

@@ -436,3 +436,50 @@ pre.diff .diff-del { background: color-mix(in srgb, var(--err) 12%, transparent)
 .tree { list-style: none; margin: 0; padding-left: 18px; border-left: 1px solid var(--line, #8884); }
 .tree li { margin: 3px 0; }
 .card > .tree { border-left: 0; padding-left: 0; }
+.tree summary { cursor: pointer; }
+.tree .leaf { padding-left: 16px; display: inline-block; }
+.map-frames { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; align-items: start; }
+.map-frame { margin: 0; border-left: 4px solid var(--line); }
+.map-frame.k-modem { border-left-color: #8b5cf6; }
+.map-frame.k-switch { border-left-color: var(--accent, #3b82f6); }
+.map-frame.k-ap { border-left-color: #14b8a6; }
+.map-frame.k-host { border-left-color: #f59e0b; }
+.map-frame.k-proxy { border-left-color: #6366f1; }
+.map-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.map-frame .tree { margin-top: 6px; }
+
+/* Map page: line 1 modem — host, line 2 the switches (core under the host); one thing open per level */
+.netmap { padding: 16px 12px; }
+.nm-grid { display: grid; grid-template-columns: minmax(0, auto) minmax(60px, 1fr) minmax(0, auto); align-items: center; row-gap: 0; }
+.nm-c1 { grid-column: 1; justify-self: start; } .nm-c2 { grid-column: 2; } .nm-c3 { grid-column: 3; justify-self: end; }
+.nm-col { display: flex; flex-direction: column; gap: 8px; }
+.nm-link { display: flex; flex-direction: column; align-items: center; border-top: 2px solid var(--line); margin: 0 6px;
+  padding-top: 2px; color: var(--quiet); }
+.nm-link.nm-dashed { border-top: 2px dashed var(--accent); }
+.nm-vlink { justify-self: end; border-left: 2px solid var(--line); height: 34px; margin-right: 50px; padding-left: 6px;
+  display: flex; align-items: center; color: var(--quiet); }
+.nm-box { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; font: inherit;
+  color: inherit; border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 8px;
+  background: var(--card); padding: 6px 10px; min-width: 150px; max-width: 240px; position: relative; }
+button.nm-box { cursor: pointer; }
+button.nm-box:hover { border-color: var(--accent); }
+button.nm-box[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+button.nm-box .nm-more::after { content: " ▸"; } button.nm-box[aria-expanded="true"] .nm-more::after { content: " ▾"; }
+.nm-box.k-modem { border-left-color: #8b5cf6; } .nm-box.k-host { border-left-color: #f59e0b; }
+.nm-box.k-switch { border-left-color: var(--accent); } .nm-box.k-ap { border-left-color: #14b8a6; }
+.nm-box.k-proxy { border-left-color: #6366f1; }
+.nm-box.off, .nm-off { color: var(--err); } .nm-box.off { border-color: var(--err); }
+.nm-port { position: absolute; top: -9px; right: 8px; font-size: 11px; background: var(--card); padding: 0 4px; color: var(--quiet); }
+.nm-ip { font-family: var(--mono, monospace); } .nm-meta { font-size: 12px; color: var(--quiet); }
+.nm-box.off .nm-meta { color: var(--err); } .nm-more { color: var(--accent); }
+.nm-nics { display: flex; flex-direction: column; gap: 2px; margin-top: 3px; }
+.nm-nic { font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+.nm-nic.r-wan { border-color: #8b5cf6; } .nm-nic.r-lan { border-color: var(--accent); }
+.nm-panel { margin-top: 14px; padding-top: 12px; border-top: 2px solid var(--accent); }
+.nm-from { color: var(--quiet); margin: -8px 0 8px; } .nm-from.right { text-align: right; }
+.nm-row { display: flex; flex-wrap: wrap; gap: 14px 10px; }
+.nm-level.dir-rtl > .nm-row { flex-direction: row-reverse; }
+.nm-level.dir-rtl > .nm-panel > .nm-from { text-align: right; }
+.nm-under summary { cursor: pointer; font-size: 12px; margin-top: 4px; }
+.nm-meta { display: flex; flex-direction: column; } .nm-mac { font-family: var(--mono, monospace); }
+.nm-box.k-ups { border-left-color: #22c55e; } .nm-box.k-guest { border-left-color: #f59e0b; }

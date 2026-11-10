@@ -279,7 +279,7 @@ class Engine:
         out = []
         why = self.silences(now)
         for i in self.open_issues():
-            if i["notified"] and now - i["started"] >= hours * 3600 and why(i["check_key"]) is None:
+            if i["notified"] and not i["acked"] and now - i["started"] >= hours * 3600 and why(i["check_key"]) is None:
                 out.append(Event("remind", i["check_key"], names.get(i["check_key"], i["check_key"]),
                                  i["level"], i["worst"], i["detail"], i["started"]))
         if out:

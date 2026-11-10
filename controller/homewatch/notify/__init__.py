@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -39,6 +39,7 @@ class Message:
     level: int
     title: str
     body: str
+    actions: list = field(default_factory=list)  # buttons [{label, url}] (ntfy shows them; others ignore them)
 
 
 def channel_secret(channel_id: int) -> str:
@@ -110,7 +111,8 @@ def _hm(ts: float, zone: ZoneInfo) -> str:
     return datetime.fromtimestamp(ts, zone).strftime("%H:%M")
 
 
-def render(events: list[Event], home: str, open_counts: tuple[int, int], link: str, zone: ZoneInfo) -> Message:
+def render(events: list[Event], home: str, open_counts: tuple[int, int], link: str, zone: ZoneInfo,
+           runbooks: dict[str, str] | None = None) -> Message:
     level = max((e.level for e in events), default=OK)
     if all(e.kind in ("resolve", "selfok", "close") for e in events):
         title = f"{ICON[OK]} {home}: back to OK"
@@ -144,6 +146,9 @@ def render(events: list[Event], home: str, open_counts: tuple[int, int], link: s
         else:
             since = f" since {_hm(e.started, zone)}" if e.kind == "remind" and e.started else ""
             lines.append(f"{ICON[e.level]} {LEVEL_WORD[e.level]} · {e.name}{since}\n    {_short(e.detail)}")
+            todo_text = (runbooks or {}).get(e.key) if e.kind in ("open", "worse") else None
+            if todo_text:
+                lines.append(f"    👉 {_short(todo_text)}")
     errors, warnings = open_counts
     footer = "All checks OK." if not (errors or warnings) else f"Open now: {errors} error, {warnings} warning"
     body = "\n".join(lines) + f"\n\n{footer}" + (f"\n{link}" if link else "")
@@ -190,6 +195,7 @@ class Notifier:
         self.db = db
         self.secrets = secrets
         self.http = http or httpx.AsyncClient(timeout=20)
+        self.site = "home"  # the runtime sets its own
 
     def channels(self, enabled_only: bool = True, messages_only: bool = True):
         q = "SELECT * FROM channels WHERE 1=1"
@@ -216,13 +222,25 @@ class Notifier:
         zone = tz(self.db)
         home = self.db.get("home.name") or "Home"
         link = self.db.get("home.url") or ""
+        from .. import actions, runbooks
+
+        site = self.site
+        books = runbooks.all_for(self.db, site)
+        buttons: dict[str, list] = {}  # one set of one-time links per problem, shared by the channels
         queued = 0
         for ch in self.channels():
             levels = set(json.loads(ch["levels"]))
             mine = [e for e in events if e.route_level in levels]
             if not mine:
                 continue
-            msg = render(mine, home, open_counts, link, zone)
+            msg = render(mine, home, open_counts, link, zone, books)
+            first = next((e for e in sorted(mine, key=lambda e: -e.level) if e.kind in ("open", "worse", "remind")
+                          and "." in e.key and not e.key.startswith(("incident.", "homewatch."))), None)
+            if first and getattr(KINDS.get(ch["kind"]), "ACTIONS", False):
+                if first.key not in buttons:
+                    buttons[first.key] = actions.links(self.db, site, link, first.key, now)
+                msg.actions = buttons[first.key] + ([{"label": "Open homeWatch", "url": link, "view": True}]
+                                                    if buttons[first.key] else [])
             next_try = now
             if msg.level < ERROR:
                 quiet_end = in_quiet(ch, now, zone)
@@ -233,8 +251,9 @@ class Notifier:
         return queued
 
     def queue(self, channel_id: int, msg: Message, now: float, next_try: float | None = None) -> None:
-        self.db.run("INSERT INTO outbox(channel_id,created,level,title,body,next_try) VALUES(?,?,?,?,?,?)",
-                    (channel_id, now, msg.level, msg.title, msg.body, next_try if next_try is not None else now))
+        self.db.run("INSERT INTO outbox(channel_id,created,level,title,body,next_try,actions) VALUES(?,?,?,?,?,?,?)",
+                    (channel_id, now, msg.level, msg.title, msg.body, next_try if next_try is not None else now,
+                     json.dumps(msg.actions)))
 
     async def send_due(self, now: float | None = None) -> int:
         """Deliver due messages, each channel on its own, so that a dead one doesn't hold up the others."""
@@ -306,7 +325,10 @@ class Notifier:
             raise RuntimeError(f"channel type {ch['kind']} is not available yet")
         config = full_config(self.secrets, ch) if config is None else config
         secret = secret or self.secrets.get(channel_secret(ch["id"])) or ""
-        await mod.send(self.http, config, secret, msg.level, msg.title, msg.body)
+        if getattr(mod, "ACTIONS", False) and msg.actions:
+            await mod.send(self.http, config, secret, msg.level, msg.title, msg.body, actions=msg.actions)
+        else:
+            await mod.send(self.http, config, secret, msg.level, msg.title, msg.body)
 
 
 def split_text(text: str, room: int) -> list[str]:
@@ -346,7 +368,11 @@ def join(rows, zone: ZoneInfo, now: float) -> Message:
         r = rows[0]
         late = now - r["created"] > 300
         suffix = f"\n\n(queued at {_hm(r['created'], zone)}, delivered late)" if late else ""
-        return Message(r["level"], r["title"], r["body"] + suffix)
+        try:
+            acts = json.loads(r["actions"]) if "actions" in r.keys() else []
+        except ValueError:
+            acts = []
+        return Message(r["level"], r["title"], r["body"] + suffix, acts)
     level = max(r["level"] for r in rows)
     parts = [f"— {_hm(r['created'], zone)} · {r['title']}\n{r['body']}" for r in rows]
     title = f"{ICON[level]} {len(rows)} updates (queued while offline)"

@@ -189,6 +189,41 @@ def silent_check(watched: list[dict], seen: dict[str, dict], t: Thresholds):
     return OK, f"{len(learned)} of {len(alive)} watched entities learned, none silent", 0
 
 
+def fixes(settings: dict) -> list[tuple[str, str]]:
+    """[(name, add-on slug)] from the "Fix buttons" lines."""
+    out = []
+    for line in str(settings.get("fix_addons") or "").splitlines():
+        name, _, slug = line.partition("=")
+        name, slug = name.strip(), slug.strip()
+        if name and re.fullmatch(r"[a-z0-9_]{2,64}", slug):
+            out.append((name, slug))
+    return out
+
+
+def fixes_for(settings: dict, issue) -> list[tuple[str, str]]:
+    """The fix buttons that fit an open Home Assistant problem: its integration on the map, or its name in the detail."""
+    if not str(issue["check_key"]).startswith("homeassistant."):
+        return []
+    nodes = set(json.loads(issue["nodes"] or "[]")) if "nodes" in issue.keys() else set()
+    detail = (issue["detail"] or "").lower()
+    return [(n, s) for n, s in fixes(settings) if f"integ:{n}" in nodes or n.lower() in detail]
+
+
+async def restart_addon(settings: dict, admin_token: str, slug: str) -> str:
+    """Ask Home Assistant to restart an add-on; '' when it said yes, else why not."""
+    try:
+        async with httpx.AsyncClient(verify=verify_for(settings, settings["url"]), timeout=30) as http:  # noqa: S501
+            r = await http.post(f"{settings['url']}/api/services/hassio/addon_restart", json={"addon": slug},
+                                headers={"Authorization": f"Bearer {admin_token}"})
+    except httpx.HTTPError as e:
+        return f"can't reach Home Assistant ({why(e)})"
+    if r.status_code == 401:
+        return "Home Assistant rejected the admin token"
+    if r.status_code >= 300:
+        return f"Home Assistant answered HTTP {r.status_code}: {r.text[:120]}"
+    return ""
+
+
 def _domain(eid: str) -> str:
     return eid.split(".", 1)[0]
 
@@ -287,7 +322,7 @@ def catalog_row(e: dict, reg: dict | None = None) -> dict:
     return {"id": e["entity_id"], "name": a.get("friendly_name") or "", "state": str(e.get("state", "")),
             "unit": a.get("unit_of_measurement") or "", "kind": kind(e),
             "integration": r.get("integration", ""), "device": r.get("device", ""), "area": r.get("area", ""),
-            "mac": r.get("mac", ""),
+            "mac": r.get("mac", ""), "device_id": r.get("device_id", ""),
             "first": bool(kind(e)) or dc in FIRST}
 
 
@@ -325,7 +360,59 @@ async def registries(url: str, token: str, verify) -> dict[str, dict]:
         dev, dev_area, dev_mac = devices.get(x.get("di"), ("", None, ""))
         reg[x["ei"]] = {"integration": integration_name(x.get("pl") or ""), "device": dev,
                         "area": areas.get(x.get("ai") or dev_area, ""), "mac": dev_mac}
+        if x.get("di"):
+            reg[x["ei"]]["device_id"] = x["di"]
+    # the devices themselves, for the map: their MAC or Bluetooth address and the hub they come through ("via")
+    reg[DEVICES] = {d["id"]: device_row(d) for d in out["config/device_registry/list"]}
     return reg
+
+
+DEVICES = "__devices__"  # the device registry, kept beside the entities in registries()' answer
+
+
+def map_devices(devices: dict[str, dict], catalog: list[dict], watch: set[str]) -> list[dict]:
+    """The devices the map shows: those of watched entities and every device with a MAC (they get a name), the hubs
+    they come through, and the Bluetooth proxies (a device with a Bluetooth adapter registered under it)."""
+    integ = {}
+    want = set()
+    for c in catalog:
+        if c.get("device_id"):
+            integ.setdefault(c["device_id"], c.get("integration", ""))
+            if c["id"] in watch:
+                want.add(c["device_id"])
+    want |= {i for i, d in devices.items() if d["mac"] or d["bt"]}
+    for i in list(want):  # the hubs above them
+        hops, v = 0, devices.get(i, {}).get("via")
+        while v and v in devices and hops < 6:
+            want.add(v)
+            v, hops = devices[v].get("via"), hops + 1
+    proxies = {d["via"] for d in devices.values() if d["bt"] and d["via"]}  # an adapter's "via" is its proxy
+    adapters = {i for i, d in devices.items() if d["bt"] and d["via"] in proxies}  # part of the proxy, not a device
+    return [{"id": i, **devices[i], "integration": integ.get(i, ""), "proxy": i in proxies} for i in sorted(want)
+            if i in devices and i not in adapters]
+
+
+def device_row(d: dict) -> dict:
+    """A device as the map needs it. ble: registered by its Bluetooth address (a "bluetooth" connection, or an
+    integration that names it by the same address it gives as its MAC, as Bluetooth lamp integrations do)."""
+    conns = [tuple(c) for c in d.get("connections") or [] if len(c) == 2]
+    mac = next((v for k, v in conns if k == "mac"), "")
+    bt = next((v for k, v in conns if k == "bluetooth"), "")
+    # an integration that names the device by its MAC: a Bluetooth integration, unless it is one that tracks the
+    # devices on the network (a router's or a scanner's: those see Wi-Fi and wired devices)
+    idents = {str(i[1]).upper() for i in d.get("identifiers") or [] if len(i) == 2 and i[0] not in NETWORK_TRACKERS}
+    m = re.match(r"https?://(\d+\.\d+\.\d+\.\d+)[:/]", str(d.get("configuration_url") or ""))
+    out = {"name": d.get("name_by_user") or d.get("name") or "", "mac": mac, "bt": bt, "via": d.get("via_device_id"),
+           "ble": bool(bt) or bool(mac and mac.upper() in idents)}
+    if m:
+        out["ip"] = m.group(1)
+    return out
+
+
+NETWORK_TRACKERS = {"fritz", "unifi", "nmap_tracker", "ping", "mikrotik", "asuswrt", "tplink", "tplink_omada", "netgear",
+                    "huawei_lte", "keenetic_ndms2", "luci", "ubus", "openwrt", "upnp", "synology_srm", "vodafone_station",
+                    "ruckus_unleashed", "aruba", "cisco_ios", "ddwrt", "linksys_smart", "unifi_direct", "freebox",
+                    "bt_smarthub", "tado"}
 
 
 def rule_lines(rules: dict, watched) -> str:
@@ -415,6 +502,16 @@ class HomeAssistantModule(ApiModule):
         Field("full_every", "Full read every (minutes)", "30", kind="number", default=FULL_EVERY,
               width="narrow", own_line=True,
               help=f"How often the whole entity list is read to find new entities and updates ({FULL_MIN} to {FULL_MAX})."),
+        Field("fix_addons", "Fix buttons: restart an add-on", "Zigbee2MQTT = 45df7312_zigbee2mqtt", kind="lines",
+              own_line=True,
+              help="Optional. One per line: a name = an add-on's slug (Settings → Add-ons → the add-on, from its "
+                   "address). When a problem names it (an integration whose entities went silent or unavailable, "
+                   "an add-on not running), the Status page offers a button to restart that add-on. Never automatic."),
+        Field("admin_token", "Admin token for the fix buttons", "eyJ0eXAiOiJKV1Qi…", secret=True, optional=True,
+              width="wide", own_line=True,
+              help="Optional, only for the fix buttons: a long-lived token of an administrator (restarting an add-on "
+                   "needs one). homeWatch keeps reading with the token above; this one is used only when you press a "
+                   "fix button. Leave empty for no fix buttons."),
         # chosen in the Disk / Memory / CPU rows of "Checks and limits" (limit_fields), not in a box of their own
         Field("disk_sensor", "Disk use sensor", DISK, section="limits"),
         Field("memory_sensor", "Memory use sensor", MEMORY, section="limits"),
@@ -438,6 +535,7 @@ class HomeAssistantModule(ApiModule):
         self._flap_ts = None  # the reading the flaps were last counted for
         self._flappy: set[str] = set()
         self._seen: dict[str, dict] = {}  # entity id -> how long since it reported, its usual gap
+        self._devices: dict[str, dict] = {}  # Home Assistant's device registry, for the map
         self._updates: list[dict] = []
         self._total = 0
         self._found_ts = 0.0
@@ -631,6 +729,7 @@ class HomeAssistantModule(ApiModule):
                     self._registry_error = ""
                 except Exception as e:  # noqa: BLE001 - an old Home Assistant, a proxy without websockets...
                     reg, self._registry_error = {}, type(e).__name__
+                self._devices = reg.pop(DEVICES, {})
                 self._catalog = [catalog_row(e, reg) for e in states if _domain(e["entity_id"]) not in HIDDEN]
                 self._updates = [_update(e) for e in states if e["entity_id"].startswith("update.") and _pending(e)]
                 self._total, self._found_ts, self._ids = len(states), now, wanted
@@ -679,9 +778,8 @@ class HomeAssistantModule(ApiModule):
                            if e["entity_id"] in watch | grafana],
                 "recorded": [about(e) | {"values": entity_values(e)} for e in states if e["entity_id"] in grafana],
                 "catalog": self._catalog, "catalog_ts": self._found_ts,
-                # devices with a MAC, for the map (topology.py)
-                "devices": list({c["mac"]: {"mac": c["mac"], "name": c.get("device", ""), "integration": c.get("integration", "")}
-                                 for c in self._catalog if c.get("mac")}.values())
+                # the devices of the watched entities, the hubs they come through and the Bluetooth proxies (topology.py)
+                "devices": map_devices(self._devices, self._catalog, watch)
                 + [{"mac": "", "name": "", "integration": i} for i in sorted({e["integ"] for e in watched if e["integ"]})]}
         snap["_summary"] = (f"Home Assistant {config.get('version', '?')}, {len(watch)} entities watched"
                             + (f", {len(grafana)} shown in Grafana" if grafana else ""))

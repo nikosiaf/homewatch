@@ -41,6 +41,22 @@ NOT_GUI = ("Enter the address of the OPNsense web GUI with its port, e.g. https:
 CPU_WINDOW = 600  # seconds the CPU check averages over
 
 
+def addresses(arp, leases) -> list[dict]:
+    """[{mac, ip, name}] from the ARP table and the DHCP leases (either may be missing: no privilege)."""
+    out: dict[str, dict] = {}
+    for row in (arp if isinstance(arp, list) else (arp or {}).get("rows") or []):
+        m, ip = str(row.get("mac") or "").upper(), row.get("ip") or ""
+        if m and ip and m != "(INCOMPLETE)":
+            out.setdefault(m, {"mac": m, "ip": ip, "name": row.get("hostname") or ""})
+    for row in (leases or {}).get("rows") or [] if isinstance(leases, dict) else []:
+        m = str(row.get("hwaddr") or row.get("mac") or "").upper()
+        ip = row.get("address") or row.get("ip") or ""
+        if m and ip:
+            e = out.setdefault(m, {"mac": m, "ip": ip, "name": ""})
+            e["name"] = e["name"] or row.get("hostname") or ""
+    return list(out.values()) or None
+
+
 class OPNsenseModule(ApiModule):
     id = "opnsense"
     name = "OPNsense"
@@ -56,7 +72,11 @@ class OPNsenseModule(ApiModule):
                  "System: Firmware\nSystem: Trust: Certificates\nServices: HAProxy (only if you use it)\n"
                  "Reporting: Traffic (only for the Grafana traffic graphs)\n"
                  "Diagnostics: Logs: Gateways (optional: exact gateway down / up times)\n"
-                 "Diagnostics: Logs: System (optional: exact PPPoE disconnect / reconnect times)"),
+                 "Diagnostics: Logs: System (optional: exact PPPoE disconnect / reconnect times)\n"
+                 "Diagnostics: ARP Table (optional: IP addresses on the Map)\n"
+                 "Services: Dnsmasq DNS/DHCP: Settings (optional: names and addresses from the DHCP leases on the Map)"),
+        ("text", "Services: Dnsmasq DNS/DHCP: Settings is the only privilege that opens the leases (ui/dnsmasq/* and "
+                 "api/dnsmasq/*); it would also allow changing Dnsmasq's settings. homeWatch only reads the leases."),
         ("text", "Lobby: Dashboard is what lets homeWatch read CPU, memory, disk, uptime and the version."),
         ("text", "Save, then press \"+\" under API keys to create a key. OPNsense downloads a file with the key "
                  "and secret: paste them below."),
@@ -142,6 +162,10 @@ class OPNsenseModule(ApiModule):
                           for c in (await get("trust/cert/search", optional=True) or {}).get("rows", [])] or None,
                 "firmware": await get("core/firmware/status", optional=True),
                 "info": await get("diagnostics/system/system_information", optional=True),
+                # for the map only: which IP each MAC has (privileges Diagnostics: ARP Table and
+                # Services: Dnsmasq DNS/DHCP: Settings, which opens the leases)
+                "addresses": addresses(await get("diagnostics/interface/get_arp", optional=True),
+                                       await get("dnsmasq/leases/search", optional=True)),
                 # for the Grafana traffic panels only; needs the privilege Reporting: Traffic
                 "traffic": (await get("diagnostics/traffic/interface", optional=True) or {}).get("interfaces"),
                 # optional, for exact times (privileges Diagnostics: Logs: Gateways / System)

@@ -141,6 +141,25 @@
     <div><button>Make token</button></div>
   </form>
 </div>
+<h2>Home Assistant (MQTT)</h2>
+<div class="card" id="mqtt">
+  <p class="quiet small">homeWatch as a device in Home Assistant, through the MQTT broker it uses (e.g. the Mosquitto add-on):
+    a status sensor, the number of problems and things to do, a problem sensor per module, an Alerts event for automations
+    and a Check now button. Make a broker user for homeWatch (Mosquitto: a Home Assistant user, or a login in its settings).</p>
+  {% if mqtt.enabled %}<p>Broker: {% if mqtt_state == 'connected' %}<span class="badge s0">connected</span>{% elif mqtt_state %}<span class="badge s2">not connected</span> <span class="small">{{ mqtt_state }}</span>{% else %}<span class="badge mute">connecting…</span>{% endif %}</p>{% endif %}
+  <form method="post" action="/system/mqtt" class="row">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="mqtt">
+    <label class="check" style="flex-basis:100%"><input type="checkbox" name="enabled" {{ 'checked' if mqtt.enabled }}> Publish to Home Assistant</label>
+    <div><label for="mh">Broker</label><input id="mh" name="host" value="{{ mqtt.host }}" placeholder="192.168.1.10"></div>
+    <div><label for="mp">Port</label><input id="mp" class="num" type="number" name="port" value="{{ mqtt.port }}" min="1" max="65535"></div>
+    <div><label for="mu">User</label><input id="mu" name="username" value="{{ mqtt.username }}" autocomplete="off"></div>
+    <div><label for="mw">Password</label><input id="mw" type="password" name="password" autocomplete="new-password"
+      placeholder="{{ 'kept; type to change' if mqtt_has_pw else '' }}"></div>
+    <div><label for="mx">Discovery prefix</label><input id="mx" name="prefix" value="{{ mqtt.prefix }}"></div>
+    <label class="check"><input type="checkbox" name="tls" {{ 'checked' if mqtt.tls }}> TLS (port 8883)</label>
+    <div><button>Save</button></div>
+  </form>
+</div>
 <h2>Export and import</h2>
 <div class="grid2" id="backup">
   <div class="card col">

@@ -96,12 +96,16 @@ class UniFiModule(ApiModule):
                     stations = await self._get(http, f"{base}/stat/sta", headers)
                 except ApiError:
                     stations = []
+                try:  # every client UniFi knows, with its last access point, address and time (for the map)
+                    known = await self._get(http, f"{base}/stat/alluser", headers)
+                except ApiError:
+                    known = []
             finally:
                 try:
                     await http.post(f"{s['url']}/api/auth/logout", headers=headers)
                 except httpx.HTTPError:
                     pass
-        snap = {"devices": [{"mac": d.get("mac", ""), "name": d.get("name") or d.get("model") or d.get("mac"),
+        snap = {"devices": [{"mac": d.get("mac", ""), "name": d.get("name") or d.get("model") or d.get("mac"), "ip": d.get("ip") or "",
                              "model": d.get("model"), "type": d.get("type"), "state": d.get("state"),
                              "version": d.get("version"), "upgradable": bool(d.get("upgradable")),
                              "upgrade_to": d.get("upgrade_to_firmware"), "uptime": d.get("uptime") or 0,
@@ -116,7 +120,12 @@ class UniFiModule(ApiModule):
                 "health": [{"subsystem": h.get("subsystem"), "status": h.get("status"), "users": h.get("num_user")}
                            for h in health],
                 "clients": [{"mac": c.get("mac", ""), "name": c.get("name") or c.get("hostname") or "",
-                             "ap_mac": c.get("ap_mac", ""), "wired": bool(c.get("is_wired"))} for c in stations]}
+                             "ap_mac": c.get("ap_mac", ""), "wired": bool(c.get("is_wired")), "ip": c.get("ip") or "",
+                             "essid": c.get("essid") or ""} for c in stations],
+                "history": [{"mac": c.get("mac", ""), "name": c.get("name") or c.get("hostname") or "",
+                             "ap_mac": c.get("last_uplink_mac") or "", "ip": c.get("last_ip") or "",
+                             "last_seen": c.get("last_seen") or 0, "wired": bool(c.get("is_wired"))}
+                            for c in known if c.get("mac") and c.get("last_seen")]}
         wlan = next((h for h in snap["health"] if h["subsystem"] == "wlan"), {})
         snap["_summary"] = f"{len(snap['devices'])} devices, {wlan.get('users') or 0} Wi-Fi clients"
         return snap

@@ -67,6 +67,7 @@ class Runtime:
     check_now_at: float = 0  # when "Check now" last read every device fresh
     events_seen: dict = field(default_factory=dict)  # module id -> reading_ts whose device events are recorded
     metric_queue: list = field(default_factory=list)  # lines to write with the next run's metrics (the UPS watcher)
+    mqtt: object = None  # the Home Assistant MQTT bridge (mqtt.py), made when the loops start
     new_tokens: dict = field(default_factory=dict)  # user id -> (API token, name, ts): shown once, then forgotten
     pending_seen: set = field(default_factory=set)  # checks waiting for confirmation at the end of the last run
     quick_at: float = 0  # when the last quick confirming run was asked for
@@ -86,6 +87,7 @@ class Runtime:
         db.run("DELETE FROM settings WHERE key='status.tiles' OR key LIKE 'status.open.%'")  # settings of 0.16.1 to 0.16.4
         versions.record(db, "system", "startup")  # also catches changes made while homeWatch was stopped
         rt = cls(cfg, db, secrets, Metrics(cfg.vm_url), Notifier(db, secrets), Engine(db, cfg.site))
+        rt.notifier.site = cfg.site
         rt.engine.explain = True
         rt.write_grafana()  # before Grafana starts (it waits for a healthy controller): it reads them once at start
         return rt
@@ -108,6 +110,9 @@ class Runtime:
         self.migrate_heartbeat()
         scrub_audit(self.db)
         self.sync_telegraf()
+        from .mqtt import Bridge
+        self.mqtt = Bridge(self)
+        self.mqtt.apply()
         coros = [self.check_loop(), self.outbox_loop(), self.daily_loop()]
         for m in MODULES.values():
             coros += m.loops(self)
@@ -115,6 +120,8 @@ class Runtime:
             self.tasks.append(asyncio.create_task(coro))
 
     async def stop(self) -> None:
+        if self.mqtt is not None:
+            self.mqtt.stop()
         for t in self.tasks:
             t.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
@@ -242,10 +249,6 @@ class Runtime:
         metrics_error = ""
         series: list[str] = []  # detailed metrics of the modules that took a new reading in this run
         gap = max(3 * int(timing(self.db)["interval"]), 600)
-        try:
-            topology.refresh(self)  # the map, from the modules' last readings, for the problems found in this run
-        except Exception:  # noqa: BLE001 - the map is extra; the checks go on without it
-            log.exception("topology failed")
         for m in MODULES.values():
             if only is not None and m.id not in only:
                 results += [r for r in self.results if r.key.startswith(m.id + ".")]
@@ -317,7 +320,13 @@ class Runtime:
         self.quick_confirm(now)
         events += self.engine.released(names, now)
         events += self.engine.reminders(names, now)
+        try:  # the map, from the readings of this run (the next run's problems are traced on it)
+            topology.refresh(self)
+        except Exception:  # noqa: BLE001 - the map is extra; the checks go on without it
+            log.exception("topology failed")
         self.notifier.dispatch(events, self.engine.counts(), now)
+        if self.mqtt is not None:
+            self.mqtt.publish_events(events)
         self.results, self.last_run = results, now
         self.write_grafana()
         self.grafana_on = await grafana.running(self.notifier.http, self.cfg.grafana_url)
@@ -342,6 +351,8 @@ class Runtime:
             log.warning("%s", e)
         if self.grafana_on:
             await markers.sync(self, now)
+        if self.mqtt is not None:
+            self.mqtt.publish_state()
         if not metrics_error:  # a store that can't be read is what the heartbeat must not hide
             await self.heartbeat()
         return results

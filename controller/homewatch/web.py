@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import math
@@ -24,6 +25,7 @@ from fastapi.templating import Jinja2Templates
 from . import __version__
 from . import config as config_mod
 from .auth import ROLES, Auth, AuthError, Throttled, User, audit
+from . import runbooks
 from .engine import DEFAULT_TIMING, thresholds, timing, tz
 from .modules import CATALOG, LEVEL_WORD, OK
 from .modules.registry import MODULES
@@ -75,6 +77,22 @@ def _fmt_num(v) -> str:
 templates.env.filters["num"] = _fmt_num
 templates.env.globals["LEVEL_WORD"] = LEVEL_WORD
 templates.env.globals["version"] = __version__
+
+
+def _asset_version() -> str:
+    """A short hash of the static files: their links change whenever a file does, so a browser never keeps an old
+    script or stylesheet (the release number alone stays the same on a development build)."""
+    h = hashlib.sha256()
+    folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+    for name in sorted(os.listdir(folder)):
+        path = os.path.join(folder, name)
+        if os.path.isfile(path):
+            with open(path, "rb") as f:
+                h.update(f.read())
+    return h.hexdigest()[:10]
+
+
+templates.env.globals["asset_v"] = _asset_version()
 templates.env.globals["CATALOG"] = CATALOG
 
 
@@ -137,6 +155,9 @@ def page(request: Request, name: str, user: User | None, **ctx) -> HTMLResponse:
 
 # the card a form belongs to ("_box" field): its message is shown inside that card after the redirect
 _box: ContextVar[str] = ContextVar("box", default="")
+
+
+MAP_SCAN_GAP = 60  # s: Scan now on the Map page at most this often
 
 
 def back(url: str, msg: str = "", err: str = "") -> RedirectResponse:
@@ -295,6 +316,13 @@ def _dropped_note(rt) -> str:
             + ", ".join(rt.dropped) + ".")
 
 
+def _int(v, default=0) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def _float(v, default=None):
     try:
         return float(v) if v not in (None, "") else default
@@ -310,6 +338,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
     async def guard(request: Request, call_next):
         path = request.url.path
         if path.startswith("/static") or path in ("/healthz",):
+            return await call_next(request)
+        if path.startswith("/act/"):  # a notification's button: its one-time token is the permission
             return await call_next(request)
         auth: Auth = request.app.state.auth
         if not auth.has_users():
@@ -416,6 +446,96 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             audit(rt.db, user.username, "api.token.delete", row["name"])
         return back("/system", msg="Token deleted")
 
+    # -- buttons in notifications (actions.py): the link's token is the permission ----------------------
+    @app.get("/act/{token}")
+    async def act_page(request: Request, token: str):
+        return HTMLResponse(
+            "<!doctype html><meta name=viewport content='width=device-width'><title>homeWatch</title>"
+            "<body style='font-family:system-ui;padding:24px'><p>Do what the notification's button says?</p>"
+            f"<form method=post action='/act/{token}'><button style='font-size:18px;padding:10px 18px'>Yes, do it</button>"
+            "</form></body>", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+    @app.post("/act/{token}")
+    async def act_do(request: Request, token: str):
+        from . import actions
+        rt = rt_of(request)
+        done, text = actions.use(rt.db, rt.cfg.site, token)
+        if done:
+            rt.wake.set()
+        return PlainTextResponse(text, status_code=200 if done else 410, headers={"Cache-Control": "no-store"})
+
+    @app.post("/system/mqtt")
+    async def mqtt_save(request: Request):
+        from . import mqtt
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/system", err="Form expired")
+        host = str(form.get("host", "")).strip()
+        enabled = form.get("enabled") == "on"
+        if enabled and not re.fullmatch(r"[A-Za-z0-9.\-:\[\]]{1,253}", host):
+            return back("/system", err="MQTT broker: a host name or IP address, e.g. 192.168.1.10")
+        port = _int(form.get("port"), 1883)
+        if not 1 <= port <= 65535:
+            return back("/system", err="MQTT broker port: 1 to 65535")
+        prefix = str(form.get("prefix", "homeassistant")).strip() or "homeassistant"
+        if not re.fullmatch(r"[A-Za-z0-9_/-]{1,64}", prefix):
+            return back("/system", err="Discovery prefix: letters, digits, _ - /")
+        old = mqtt.load(rt.db)
+        new = {"enabled": enabled, "host": host, "port": port, "username": str(form.get("username", "")).strip()[:128],
+               "tls": form.get("tls") == "on", "prefix": prefix}
+        if old.get("host") and old.get("host") != host:  # a new destination: the old password doesn't go there
+            rt.secrets.delete(mqtt.SECRET)
+        if str(form.get("password", "")):
+            rt.secrets.put(mqtt.SECRET, str(form.get("password")))
+        rt.db.set(mqtt.SETTINGS, new)
+        audit(rt.db, user.username, "mqtt", json.dumps({k: v for k, v in new.items()}))
+        rt.mqtt.apply()
+        return back("/system", msg="Saved; Home Assistant finds homeWatch under Settings → Devices" if enabled else "Saved")
+
+    @app.post("/fix/addon")
+    async def fix_addon(request: Request):
+        """A fix button: restart a Home Assistant add-on, with the admin token kept for this (never automatic)."""
+        from .modules.homeassistant.plugin import fixes_for, restart_addon
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/", err="Form expired")
+        problem = await password_problem(request, user, form)
+        if problem:
+            return back("/", err=problem)
+        ha = MODULES["homeassistant"]
+        s = ha.load(rt)
+        issue = rt.db.one("SELECT * FROM issues WHERE id=? AND site=? AND resolved IS NULL", (_int(form.get("issue")), rt.cfg.site))
+        slug = str(form.get("slug", ""))
+        if issue is None or slug not in [x for _, x in fixes_for(s, issue)]:
+            return back("/", err="That fix doesn't fit an open problem any more")
+        token = rt.secrets.get(ha.field_secret_key(ha.field("admin_token"))) or ""
+        if not token:
+            return back("/", err="No admin token for fix buttons (Home Assistant module settings)")
+        err = await restart_addon(ha.with_secret_fields(rt, s), token, slug)
+        audit(rt.db, user.username, "fix", f"restart add-on {slug} for {issue['check_key']}" + (f": {err}" if err else ""))
+        if err:
+            return back("/", err=f"Restart failed: {err}")
+        rt.wake.set()
+        return back("/", msg=f"Asked Home Assistant to restart {slug}; the next checks show if it helped")
+
+    @app.post("/issues/{iid}/ack")
+    async def issue_ack(request: Request, iid: int):
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/", err="Form expired")
+        row = rt.db.one("SELECT check_key, acked FROM issues WHERE id=? AND site=? AND resolved IS NULL", (iid, rt.cfg.site))
+        if row is None:
+            return back("/", err="That problem is already over")
+        rt.db.run("UPDATE issues SET acked=? WHERE id=?", (None if row["acked"] else time.time(), iid))
+        audit(rt.db, user.username, "acknowledge", f"{row['check_key']}{' taken back' if row['acked'] else ''}")
+        return back("/", msg="Taken back: reminders again" if row["acked"] else "Acknowledged: no more reminders")
+
     # -- the map (topology.py) --------------------------------------------------------------------------
     @app.get("/map")
     async def map_page(request: Request):
@@ -424,10 +544,38 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         nodes = topology.load(rt.db)
         edges = rt.db.all("SELECT * FROM topology_edges WHERE site=? ORDER BY id", (rt.cfg.site,))
         found = sum(1 for n in nodes.values() if n["parent"] and n["via"] != "by hand")
-        return page(request, "map.html", request.state.user, tree=topology.tree(nodes), nodes=nodes, edges=edges,
+        return page(request, "map.html", request.state.user, lay=topology.layers(nodes), nodes=nodes, edges=edges,
                     found=found, built=rt.db.get("topology.built", 0), csrf=request.state.user.csrf,
-                    choices=sorted(((nid, n["name"]) for nid, n in nodes.items() if n["kind"] != "port"),
-                                   key=lambda x: x[1].lower()))
+                    choices=sorted(((nid, n["name"]) for nid, n in nodes.items()), key=lambda x: x[1].lower()))
+
+    @app.post("/map/scan")
+    async def map_scan(request: Request):
+        """Read every device the map comes from now (MAC tables, UniFi clients, Home Assistant's devices, Proxmox's
+        guests and network cards, the firewall's addresses) and rebuild it, instead of waiting for their intervals."""
+        from . import topology
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/map", err="Form expired")
+        now = time.time()
+        if now - (rt.db.get("map.scanned") or 0) < MAP_SCAN_GAP:
+            return back("/map", msg="Scanned less than a minute ago; the map is current")
+        rt.db.set("map.scanned", now)
+        ids = [mid for mid in ("mikrotik", "unifi", "homeassistant", "proxmox", "opnsense")
+               if mid in MODULES and MODULES[mid].enabled(MODULES[mid].load(rt))]
+        for mid in ids:
+            m = MODULES[mid]
+            if mid == "homeassistant":
+                m.reread()  # a full read: the device registry too
+            if mid == "proxmox":
+                m.__dict__.pop("macs", None)
+                m.__dict__.pop("net", None)
+        rt.read_fresh(ids)
+        await rt.run_checks(only=set(ids))
+        nodes = topology.refresh(rt)
+        audit(rt.db, user.username, "map.scan", f"{len(nodes)} devices and ports")
+        return back("/map", msg=f"Scanned: {len(nodes)} devices and ports")
 
     @app.post("/map/edges")
     async def map_edge_add(request: Request):
@@ -672,6 +820,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         return page(request, template, request.state.user, s=s, csrf=request.state.user.csrf,
                     wizard=_wizard_ctx(rt, mid),
                     module=m, th_rows=thresholds(rt.db, rt.cfg.site, m.id, m.checks),
+                    runbooks={f"{m.id}.{d.id}": runbooks.get(rt.db, rt.cfg.site, f"{m.id}.{d.id}") for d in m.checks},
                     th_current={r.key: r for r in rt.results}, **ctx)
 
     @app.post("/modules/{mid}")
@@ -883,6 +1032,15 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             rt.db.run("INSERT INTO checks(site,check_key,enabled,warn,error) VALUES(?,?,?,?,?) "
                       "ON CONFLICT(site,check_key) DO UPDATE SET enabled=excluded.enabled, "
                       "warn=excluded.warn, error=excluded.error", row)
+        for d in m.checks:  # "What to do": stored only when it differs from the built-in text
+            key = f"{m.id}.{d.id}"
+            if f"{key}.runbook" not in form:
+                continue
+            text = " ".join(str(form.get(f"{key}.runbook", "")).split())[:500]
+            stored = None if text == runbooks.DEFAULTS.get(key, "") else text
+            if text != runbooks.get(rt.db, rt.cfg.site, key):
+                changes.append(f"{key}: what to do changed")
+            rt.db.run("UPDATE checks SET runbook=? WHERE site=? AND check_key=?", (stored, rt.cfg.site, key))
         if changes:
             audit(rt.db, user.username, "checks", "; ".join(changes))
         rt.wake.set()
@@ -1188,8 +1346,10 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         log_rows = rt.db.all("SELECT * FROM audit ORDER BY id DESC LIMIT 100")
         version_rows = rt.db.all("SELECT id, ts, username, action, summary FROM config_versions ORDER BY id DESC LIMIT 200")
         vm_ok = await rt.metrics.healthy()
+        from . import mqtt
         return page(request, "system.html", request.state.user, users=users, log=log_rows, vm_ok=vm_ok,
-                    tokens=tokens, new_token=new_token,
+                    tokens=tokens, new_token=new_token, mqtt=mqtt.load(rt.db), mqtt_has_pw=bool(rt.secrets.get(mqtt.SECRET)),
+                    mqtt_state=("connected" if rt.mqtt and rt.mqtt.connected else (rt.mqtt.error if rt.mqtt else "")),
                     **await _grafana_ctx(rt),
                     last_run=rt.last_run, last_error=rt.last_error, csrf=request.state.user.csrf,
                     updates=rt.db.get("updates.check", True), latest=rt.db.get("updates.latest", ""),
@@ -1664,7 +1824,14 @@ def _status_ctx(request: Request) -> dict:
     todos = [{"key": t["check_key"], "name": t["name"] or t["check_key"], "item": t["item"], "first": t["first_seen"],
               "source": MODULES[t["check_key"].split(".", 1)[0]].name if t["check_key"].split(".", 1)[0] in MODULES else "",
               "limit": _todo_limit(rt, t["check_key"])} for t in todo.open_items(rt.db, rt.cfg.site)]
-    return dict(todos=todos, grafana=rt.grafana_on, boards=set(grafana.BUILDERS), module_info=info, switched_off=switched_off, unknown=unknown, tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
+    fix = {}
+    ha = MODULES.get("homeassistant")
+    if ha is not None and request.state.user.is_admin and ha.enabled(ha.load(rt)):
+        from .modules.homeassistant.plugin import fixes_for
+        if rt.secrets.get(ha.field_secret_key(ha.field("admin_token"))):
+            hs = ha.load(rt)
+            fix = {i["id"]: fixes_for(hs, i) for i in rt.engine.open_issues()}
+    return dict(fixes=fix, todos=todos, grafana=rt.grafana_on, boards=set(grafana.BUILDERS), module_info=info, switched_off=switched_off, unknown=unknown, tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
                 last_run=rt.last_run, last_error=rt.last_error, errors=errors, warnings=warnings,
                 setup_done=rt.db.get("setup.done", False))
 

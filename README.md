@@ -188,7 +188,10 @@ each log is read once.
 
 Reads an OPNsense firewall through the API key of a user that has only the status pages it needs
 (the module page lists them). Missing privileges show as "not readable", not as alarms. For the
-Grafana traffic graphs, also give it **Reporting: Traffic**.
+Grafana traffic graphs, also give it **Reporting: Traffic**. For IP addresses and names on the
+Map page, give it **Diagnostics: ARP Table** and **Services: Dnsmasq DNS/DHCP:
+Settings** (the only privilege that opens the DHCP leases, `ui/dnsmasq/*` and `api/dnsmasq/*`; it would
+also allow changing Dnsmasq's settings, homeWatch only reads the leases).
 
 | Check | WARNING | ERROR |
 |---|---|---|
@@ -419,7 +422,9 @@ Alerting works like this:
   WARNING comes when it repeats (3 resyncs or 2 reboots in 24 h by default).
 - **Map and root cause:** homeWatch builds a map of what hangs off what (the Map page) from the
   MikroTik switches' MAC tables, the UniFi clients, Home Assistant's devices and Proxmox; links it can't
-  find (an integration and the bridge it runs through) are added by hand. A problem behind something
+  find (an integration and the bridge it runs through) are added under **Manually set dependencies**.
+  The map is rebuilt at every check run (Home Assistant's devices every 30 minutes, Proxmox's guests
+  and network cards every 6 hours); **Scan now** reads them all at once. A problem behind something
   that has a problem, or that just restarted or lost link, names it; if that parent's problem was
   already sent, the child's message is left out and listed with the incident. When an incident ends,
   "a switch / access point restarted and N devices behind it went with it" is one of the likely causes.
@@ -434,7 +439,15 @@ Alerting works like this:
 - **Flapping entities:** a Home Assistant entity that keeps going unavailable and coming back by itself
   (3 short spells in 7 days) is named but not counted, unless you untick that in the module's settings.
 - **Useful or noise:** mark problems on the History page; the weekly report lists the noisiest checks.
-- **Reminders:** open problems are repeated every 12 h.
+- **Buttons in ntfy:** Snooze 1 day, Acknowledge (no more reminders) and Open homeWatch, as one-time
+  links valid for 24 h. They need homeWatch's address (System → Home) reachable from the phone (home
+  network or VPN); homeWatch is never opened to the internet for them.
+- **What to do:** messages carry a line on what to check first; write your own per check under the
+  module's **Checks and limits → What to do**.
+- **Fix buttons (Home Assistant, optional):** list add-ons as `name = slug` in the module's settings and
+  give an administrator token for them; a problem that names one gets a **Restart** button on the
+  Status page (your password is asked). Never automatic.
+- **Reminders:** open problems are repeated every 12 h (not for acknowledged ones).
 - **Offline queue:** messages that can't be sent while the line is down go out when it's back, with the outage times.
 - **Snooze and maintenance windows:** they hold notifications without losing the history.
 - **Quiet hours** per channel: warnings wait until they end, errors are always sent.
@@ -466,6 +479,21 @@ Discord (cut to 2000 characters). For Home Assistant, Node-RED or n8n use `level
 There are two account roles: **admin**, who can change everything, and **viewer**, who can only see
 status and history.
 
+
+## Home Assistant (MQTT)
+
+**System → Home Assistant (MQTT)**: homeWatch publishes itself to the MQTT broker Home Assistant uses
+(e.g. the Mosquitto add-on) with MQTT discovery, and appears as one device:
+
+| Entity | What |
+|---|---|
+| Status | OK / WARNING / ERROR, with the error and warning counts |
+| Problems, To do | how many are open |
+| one problem sensor per module | on while that module has a problem |
+| Alerts (event) | fires `problem` and `back_to_ok`, with the check, detail and likely cause, for automations |
+| Check now (button) | runs the checks |
+
+Make a broker user for homeWatch. States are retained; when homeWatch stops, the entities show unavailable.
 
 ## API
 

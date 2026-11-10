@@ -45,6 +45,9 @@
 			forward_auth controller:8000 {
 				uri /auth/grafana
 				copy_headers X-Webauth-User X-Webauth-Role
+				# the check itself is a plain request, also for Grafana Live's websocket
+				header_up -Upgrade
+				header_up -Connection
 			}
 			reverse_proxy grafana:3000
 		}

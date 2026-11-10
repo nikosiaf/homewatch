@@ -11,6 +11,9 @@
     <tr>
       <td><input type="checkbox" name="{{ key }}.enabled" {{ 'checked' if t.enabled }} aria-label="enable {{ d.name }}"></td>
       <td><b>{{ d.name }}</b><div class="quiet small">{{ d.help }}</div>
+        {% if runbooks is defined %}<details class="small"><summary>What to do{{ ': ' ~ (runbooks[key] | truncate(40)) if runbooks[key] }}</summary>
+          <textarea name="{{ key }}.runbook" rows="3" maxlength="500" aria-label="What to do when {{ d.name }} goes wrong"
+            placeholder="A line or two for the message: what to look at first">{{ runbooks[key] }}</textarea></details>{% endif %}
         {% if limit_sensors is defined and d.id in limit_sensors %}{% set ls = limit_sensors[d.id] %}
         <select name="{{ key }}.sensor" class="limit-sensor" aria-label="{{ d.name }} sensor">
           {% for v, label in ls.options %}<option value="{{ v }}" {{ 'selected' if v == ls.value }}>{{ label }}</option>{% endfor %}

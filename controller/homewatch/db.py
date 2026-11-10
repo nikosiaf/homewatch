@@ -151,6 +151,15 @@ MIGRATIONS: list[str] = [
         id INTEGER PRIMARY KEY, site TEXT NOT NULL, child TEXT NOT NULL, parent TEXT NOT NULL,
         created_by TEXT NOT NULL, created REAL NOT NULL);
     """,
+    # 13: buttons in notifications (one-time links), acknowledged problems, what to do per check
+    """
+    ALTER TABLE outbox ADD COLUMN actions TEXT NOT NULL DEFAULT '[]';
+    CREATE TABLE action_tokens (
+        id INTEGER PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, check_key TEXT NOT NULL,
+        issue_id INTEGER, created REAL NOT NULL, expires REAL NOT NULL, used REAL);
+    ALTER TABLE issues ADD COLUMN acked REAL;
+    ALTER TABLE checks ADD COLUMN runbook TEXT;
+    """,
 ]
 
 

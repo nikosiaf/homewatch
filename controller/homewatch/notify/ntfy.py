@@ -20,6 +20,7 @@ PRIVATE = ("url", "topic")  # a hard-to-guess topic is its own password
 DESTINATION = ("server",)
 PRIORITY = {0: "default", 1: "high", 2: "urgent"}
 TAGS = {0: "white_check_mark", 1: "warning", 2: "rotating_light"}
+ACTIONS = True  # buttons under the message: one-time links to homeWatch (see actions.py)
 
 
 def normalize(config: dict) -> tuple[dict, str]:
@@ -50,7 +51,20 @@ def imported(config: dict) -> tuple[dict, str]:
     return (config, err) if err else ({"server": out["server"]}, "")
 
 
-async def send(http: httpx.AsyncClient, config: dict, secret: str, level: int, title: str, body: str) -> None:
+def actions_header(actions: list[dict]) -> str:
+    """ntfy's Actions header: an http button calls the link from the phone (POST); view opens a page."""
+    out = []
+    for a in actions[:3]:  # ntfy shows at most three
+        label = a["label"].replace(",", " ").replace(";", " ")
+        if a.get("view"):
+            out.append(f"view, {label}, {a['url']}")
+        else:
+            out.append(f"http, {label}, {a['url']}, method=POST, clear=true")
+    return "; ".join(out)
+
+
+async def send(http: httpx.AsyncClient, config: dict, secret: str, level: int, title: str, body: str,
+               actions: list[dict] | None = None) -> None:
     server = (config.get("server") or "https://ntfy.sh").rstrip("/")
     topic = config.get("topic", "").strip("/")
     if not topic:
@@ -63,6 +77,8 @@ async def send(http: httpx.AsyncClient, config: dict, secret: str, level: int, t
     }
     if secret:
         headers["Authorization"] = f"Bearer {secret}"
+    if actions:
+        headers["Actions"] = actions_header(actions)
     r = await http.post(f"{server}/{topic}", content=body.encode(), headers=headers)
     if r.status_code == 429:
         raise RateLimited("ntfy asks to slow down", retry_after(r.headers))
