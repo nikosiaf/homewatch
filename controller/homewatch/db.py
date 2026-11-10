@@ -160,6 +160,13 @@ MIGRATIONS: list[str] = [
     ALTER TABLE issues ADD COLUMN acked REAL;
     ALTER TABLE checks ADD COLUMN runbook TEXT;
     """,
+    # 14: every device seen on the network, so a new one can be pointed out (until it is marked as known)
+    """
+    CREATE TABLE known_devices (
+        site TEXT NOT NULL, node TEXT NOT NULL, first_seen REAL NOT NULL, last_seen REAL NOT NULL,
+        name TEXT NOT NULL DEFAULT '', ip TEXT NOT NULL DEFAULT '', place TEXT NOT NULL DEFAULT '', acked REAL,
+        PRIMARY KEY (site, node));
+    """,
 ]
 
 

@@ -235,7 +235,7 @@ class Notifier:
                 continue
             msg = render(mine, home, open_counts, link, zone, books)
             first = next((e for e in sorted(mine, key=lambda e: -e.level) if e.kind in ("open", "worse", "remind")
-                          and "." in e.key and not e.key.startswith(("incident.", "homewatch."))), None)
+                          and "." in e.key and not e.key.startswith(("incident.", "homewatch.", "network."))), None)
             if first and getattr(KINDS.get(ch["kind"]), "ACTIONS", False):
                 if first.key not in buttons:
                     buttons[first.key] = actions.links(self.db, site, link, first.key, now)

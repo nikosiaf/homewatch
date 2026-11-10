@@ -74,6 +74,10 @@ less install.sh          # please read it first; it's short (q to quit)
       are one incident. Each problem is still sent as it comes, but "back to OK" waits and arrives as one message when the
       whole incident is over, with every check's times. If part of it stays open, what is already back to OK is sent after
       5 minutes anyway. History lists the incidents with their timeline.</li>
+    <li><b>New on the network:</b> a device homeWatch has never seen (a MAC on a switch port or access point, or a new
+      VM) is listed on the Status page, marked "new" on the Map, and sent once as a WARNING message, until you press
+      Known. Everything there when this started, and UniFi's client history, counts as known. Phones with a private
+      Wi-Fi address show up again now and then; they are labelled so.</li>
     <li><b>Map:</b> what hangs off what (Map page), found from the MikroTik switches' MAC tables, the UniFi clients,
       Home Assistant's devices and Proxmox, rebuilt at every check run (Home Assistant's devices are read every 30 minutes,
       Proxmox's guests and network cards every 6 hours; Scan now on the Map reads them all at once); add what can't be
@@ -121,9 +125,6 @@ less install.sh          # please read it first; it's short (q to quit)
       the phone must reach that address (home network or VPN). On the Status page, Ack does the same.</li>
     <li><b>What to do:</b> messages carry a line on what to look at first, for the checks where that is always the same;
       write your own for any check under its module's Checks and limits → What to do.</li>
-    <li><b>Fix buttons</b> (Home Assistant, optional): list add-ons in the module's settings (a name = the add-on's slug)
-      and give an administrator's token for them. When a problem names one, the Status page offers to restart it, after
-      your password. Never automatic.</li>
     <li><b>Home Assistant over MQTT</b> (System page): homeWatch appears as a device with its status, problems, to-dos, a
       problem sensor per module, an Alerts event for automations and a Check now button.</li>
     <li><b>Reminders:</b> open problems are repeated every 12 hours. Change this, the confirmation and how often checks run under Timing on the Notifications page.</li>

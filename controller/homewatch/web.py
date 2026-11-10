@@ -494,33 +494,25 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         rt.mqtt.apply()
         return back("/system", msg="Saved; Home Assistant finds homeWatch under Settings → Devices" if enabled else "Saved")
 
-    @app.post("/fix/addon")
-    async def fix_addon(request: Request):
-        """A fix button: restart a Home Assistant add-on, with the admin token kept for this (never automatic)."""
-        from .modules.homeassistant.plugin import fixes_for, restart_addon
+    @app.post("/devices/known")
+    async def devices_known(request: Request):
+        """Mark a new device (or all of them) as known: it leaves the Status page and loses its "new" mark."""
         rt = rt_of(request)
         user = request.state.user
         form = await form_of(request, user)
         if form is None:
             return back("/", err="Form expired")
-        problem = await password_problem(request, user, form)
-        if problem:
-            return back("/", err=problem)
-        ha = MODULES["homeassistant"]
-        s = ha.load(rt)
-        issue = rt.db.one("SELECT * FROM issues WHERE id=? AND site=? AND resolved IS NULL", (_int(form.get("issue")), rt.cfg.site))
-        slug = str(form.get("slug", ""))
-        if issue is None or slug not in [x for _, x in fixes_for(s, issue)]:
-            return back("/", err="That fix doesn't fit an open problem any more")
-        token = rt.secrets.get(ha.field_secret_key(ha.field("admin_token"))) or ""
-        if not token:
-            return back("/", err="No admin token for fix buttons (Home Assistant module settings)")
-        err = await restart_addon(ha.with_secret_fields(rt, s), token, slug)
-        audit(rt.db, user.username, "fix", f"restart add-on {slug} for {issue['check_key']}" + (f": {err}" if err else ""))
-        if err:
-            return back("/", err=f"Restart failed: {err}")
-        rt.wake.set()
-        return back("/", msg=f"Asked Home Assistant to restart {slug}; the next checks show if it helped")
+        node = str(form.get("node", ""))
+        if node == "*":
+            n = rt.db.run("UPDATE known_devices SET acked=? WHERE site=? AND acked IS NULL", (time.time(), rt.cfg.site))
+            audit(rt.db, user.username, "devices.known", "all new devices")
+            return back("/", msg="All marked as known")
+        row = rt.db.one("SELECT name FROM known_devices WHERE site=? AND node=?", (rt.cfg.site, node))
+        if row is None:
+            return back("/", err="Unknown device")
+        rt.db.run("UPDATE known_devices SET acked=? WHERE site=? AND node=?", (time.time(), rt.cfg.site, node))
+        audit(rt.db, user.username, "devices.known", f"{row['name']} ({node})")
+        return back("/", msg=f"{row['name']} marked as known")
 
     @app.post("/issues/{iid}/ack")
     async def issue_ack(request: Request, iid: int):
@@ -1824,14 +1816,8 @@ def _status_ctx(request: Request) -> dict:
     todos = [{"key": t["check_key"], "name": t["name"] or t["check_key"], "item": t["item"], "first": t["first_seen"],
               "source": MODULES[t["check_key"].split(".", 1)[0]].name if t["check_key"].split(".", 1)[0] in MODULES else "",
               "limit": _todo_limit(rt, t["check_key"])} for t in todo.open_items(rt.db, rt.cfg.site)]
-    fix = {}
-    ha = MODULES.get("homeassistant")
-    if ha is not None and request.state.user.is_admin and ha.enabled(ha.load(rt)):
-        from .modules.homeassistant.plugin import fixes_for
-        if rt.secrets.get(ha.field_secret_key(ha.field("admin_token"))):
-            hs = ha.load(rt)
-            fix = {i["id"]: fixes_for(hs, i) for i in rt.engine.open_issues()}
-    return dict(fixes=fix, todos=todos, grafana=rt.grafana_on, boards=set(grafana.BUILDERS), module_info=info, switched_off=switched_off, unknown=unknown, tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
+    from . import newdevices
+    return dict(new_devices=newdevices.pending(rt.db, rt.cfg.site), todos=todos, grafana=rt.grafana_on, boards=set(grafana.BUILDERS), module_info=info, switched_off=switched_off, unknown=unknown, tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
                 last_run=rt.last_run, last_error=rt.last_error, errors=errors, warnings=warnings,
                 setup_done=rt.db.get("setup.done", False))
 

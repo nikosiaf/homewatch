@@ -14,7 +14,7 @@ from datetime import datetime
 
 import httpx
 
-from . import __version__, grafana, markers, report, todo, topology, versions
+from . import __version__, grafana, markers, newdevices, report, todo, topology, versions
 from .auth import audit, scrub_audit
 from .config import Config
 from .db import DB
@@ -68,7 +68,8 @@ class Runtime:
     events_seen: dict = field(default_factory=dict)  # module id -> reading_ts whose device events are recorded
     metric_queue: list = field(default_factory=list)  # lines to write with the next run's metrics (the UPS watcher)
     mqtt: object = None  # the Home Assistant MQTT bridge (mqtt.py), made when the loops start
-    new_tokens: dict = field(default_factory=dict)  # user id -> (API token, name, ts): shown once, then forgotten
+    new_tokens: dict = field(default_factory=dict)
+    new_devices: list = field(default_factory=list)  # devices that joined the network in this run (newdevices.py)  # user id -> (API token, name, ts): shown once, then forgotten
     pending_seen: set = field(default_factory=set)  # checks waiting for confirmation at the end of the last run
     quick_at: float = 0  # when the last quick confirming run was asked for
 
@@ -321,7 +322,9 @@ class Runtime:
         events += self.engine.released(names, now)
         events += self.engine.reminders(names, now)
         try:  # the map, from the readings of this run (the next run's problems are traced on it)
+            self.new_devices = []
             topology.refresh(self)
+            events += newdevices.events(self.new_devices, now)
         except Exception:  # noqa: BLE001 - the map is extra; the checks go on without it
             log.exception("topology failed")
         self.notifier.dispatch(events, self.engine.counts(), now)

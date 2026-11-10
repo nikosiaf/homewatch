@@ -34,7 +34,7 @@
 {% macro pid(d) %}p-{{ d.id | replace(':', '-') | replace('/', '-') | replace('.', '-') | replace(' ', '-') }}{% endmacro %}
 {% macro box(d) %}{% if d.kids %}<button type="button" class="nm-box k-{{ d.kind }} {{ 'off' if d.offline }}" data-open="{{ pid(d) }}" aria-expanded="false">{% else %}<div class="nm-box k-{{ d.kind }} {{ 'off' if d.offline }}">{% endif %}
   {% if d.port %}<span class="nm-port">{{ d.port }}</span>{% endif %}
-  <b>{{ d.name }}</b><span class="small quiet nm-kind">{{ d.role if d.role and d.role != d.name else KIND.get(d.kind, d.kind) }}{% if d.via and d.via not in ('wired', 'Wi-Fi', 'MikroTik') %} · {{ d.via }}{% endif %}</span>
+  <b>{{ d.name }}{% if d.new %} <span class="badge s1" title="New on the network: mark it as known on the Status page">new</span>{% endif %}</b><span class="small quiet nm-kind">{{ d.role if d.role and d.role != d.name else KIND.get(d.kind, d.kind) }}{% if d.via and d.via not in ('wired', 'Wi-Fi', 'MikroTik') %} · {{ d.via }}{% endif %}</span>
   {% if d.detail %}<span class="small {{ 'nm-off' if 'BATTERY' in d.detail or d.offline }}">{{ d.detail }}</span>{% endif %}
   <span class="small">{{ meta(d) }}</span>
   {% if d.kids %}<span class="nm-more small">{{ d.kids | length }} {{ 'on Wi-Fi' if d.wifi and not d.through else 'below' }}</span>{% endif %}
@@ -92,8 +92,8 @@
   </table>{% endif %}
   <form method="post" action="/map/edges" class="row" style="margin-top:12px">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="edges">
-    <div><label for="ec">Device</label><input id="ec" name="child" list="nodes" required placeholder="start typing a name"></div>
-    <div><label for="ep">depends on</label><input id="ep" name="parent" list="nodes" required placeholder="start typing a name"></div>
+    <div><label for="ec">Device</label><input id="ec" type="text" name="child" list="nodes" required placeholder="start typing a name"></div>
+    <div><label for="ep">depends on</label><input id="ep" type="text" name="parent" list="nodes" required placeholder="start typing a name"></div>
     <div><button>Add</button></div>
     <datalist id="nodes">{% for nid, name in choices %}<option value="{{ nid }}">{{ name }}</option>{% endfor %}</datalist>
   </form>

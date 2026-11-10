@@ -1,4 +1,4 @@
-"""0.44: buttons in notifications (one-time links), acknowledged problems, runbooks, fix buttons, MQTT to Home
+"""0.44: buttons in notifications (one-time links), acknowledged problems, runbooks, MQTT to Home
 Assistant."""
 
 import json
@@ -106,40 +106,6 @@ def test_runbook_defaults_name_real_checks_and_can_be_changed(client):  # noqa: 
     form["internet.reachable.runbook"] = runbooks.DEFAULTS["internet.reachable"]
     client.post("/modules/internet/thresholds", data=form)  # back to the built-in text: nothing stored
     assert rt.db.one("SELECT runbook FROM checks WHERE check_key='internet.reachable'")["runbook"] is None
-
-
-# ---- fix buttons -----------------------------------------------------------------------------------------
-def test_fix_lines_and_which_problem_they_fit():
-    from homewatch.modules.homeassistant.plugin import fixes, fixes_for
-
-    s = {"fix_addons": "MQTT = 45df7312_zigbee2mqtt\nNode-RED=a0d7b954_nodered\nbad line\nX = Not A Slug"}
-    assert fixes(s) == [("MQTT", "45df7312_zigbee2mqtt"), ("Node-RED", "a0d7b954_nodered")]
-    door = {"check_key": "homeassistant.silent", "detail": "MQTT: 2 of 2 silent", "nodes": json.dumps(["integ:MQTT"])}
-    assert fixes_for(s, door) == [("MQTT", "45df7312_zigbee2mqtt")]
-    addon = {"check_key": "homeassistant.addons", "detail": "not running: Node-RED", "nodes": "[]"}
-    assert fixes_for(s, addon) == [("Node-RED", "a0d7b954_nodered")]
-    assert fixes_for(s, {"check_key": "internet.loss", "detail": "MQTT", "nodes": "[]"}) == []
-
-
-def test_fix_button_restarts_the_addon(client, respx_mock):  # noqa: F811
-    tok = setup_admin(client)
-    rt = client.rt
-    ha = MODULES["homeassistant"]
-    rt.db.set(ha.key, {"enabled": True, "url": "https://ha.test", "verify": True, "watch": ["binary_sensor.door"],
-                       "fix_addons": "MQTT = 45df7312_zigbee2mqtt", "entities_v": 2})
-    iid = open_issue(rt.db, key="homeassistant.silent", level=2, worst=2, detail="MQTT: 2 of 2 silent",
-                     nodes=json.dumps(["integ:MQTT"]))
-    assert "Restart MQTT" not in client.get("/").text  # no admin token: no button
-    rt.secrets.put(ha.field_secret_key(ha.field("admin_token")), "admintok")
-    assert "Restart MQTT" in client.get("/").text
-    route = respx_mock.post("https://ha.test/api/services/hassio/addon_restart").mock(return_value=httpx.Response(200, json=[]))
-    form = {"csrf": tok, "issue": str(iid), "slug": "45df7312_zigbee2mqtt", "current": "a-long-password"}
-    assert "Asked Home Assistant to restart" in client.post("/fix/addon", data=form).text
-    req = route.calls[0].request
-    assert req.headers["authorization"] == "Bearer admintok" and json.loads(req.content) == {"addon": "45df7312_zigbee2mqtt"}
-    bad = client.post("/fix/addon", data=form | {"slug": "core_ssh"}).text
-    assert "fit an open problem" in bad and len(route.calls) == 1
-    assert "password" in client.post("/fix/addon", data=form | {"current": "wrong"}).text.lower()
 
 
 # ---- MQTT to Home Assistant ------------------------------------------------------------------------------

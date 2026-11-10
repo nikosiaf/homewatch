@@ -150,12 +150,12 @@
   <form method="post" action="/system/mqtt" class="row">
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="mqtt">
     <label class="check" style="flex-basis:100%"><input type="checkbox" name="enabled" {{ 'checked' if mqtt.enabled }}> Publish to Home Assistant</label>
-    <div><label for="mh">Broker</label><input id="mh" name="host" value="{{ mqtt.host }}" placeholder="192.168.1.10"></div>
+    <div><label for="mh">Broker</label><input id="mh" type="text" name="host" value="{{ mqtt.host }}" placeholder="192.168.1.10"></div>
     <div><label for="mp">Port</label><input id="mp" class="num" type="number" name="port" value="{{ mqtt.port }}" min="1" max="65535"></div>
-    <div><label for="mu">User</label><input id="mu" name="username" value="{{ mqtt.username }}" autocomplete="off"></div>
+    <div><label for="mu">User</label><input id="mu" type="text" name="username" value="{{ mqtt.username }}" autocomplete="off"></div>
     <div><label for="mw">Password</label><input id="mw" type="password" name="password" autocomplete="new-password"
       placeholder="{{ 'kept; type to change' if mqtt_has_pw else '' }}"></div>
-    <div><label for="mx">Discovery prefix</label><input id="mx" name="prefix" value="{{ mqtt.prefix }}"></div>
+    <div><label for="mx">Discovery prefix</label><input id="mx" type="text" name="prefix" value="{{ mqtt.prefix }}"></div>
     <label class="check"><input type="checkbox" name="tls" {{ 'checked' if mqtt.tls }}> TLS (port 8883)</label>
     <div><button>Save</button></div>
   </form>

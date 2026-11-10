@@ -189,41 +189,6 @@ def silent_check(watched: list[dict], seen: dict[str, dict], t: Thresholds):
     return OK, f"{len(learned)} of {len(alive)} watched entities learned, none silent", 0
 
 
-def fixes(settings: dict) -> list[tuple[str, str]]:
-    """[(name, add-on slug)] from the "Fix buttons" lines."""
-    out = []
-    for line in str(settings.get("fix_addons") or "").splitlines():
-        name, _, slug = line.partition("=")
-        name, slug = name.strip(), slug.strip()
-        if name and re.fullmatch(r"[a-z0-9_]{2,64}", slug):
-            out.append((name, slug))
-    return out
-
-
-def fixes_for(settings: dict, issue) -> list[tuple[str, str]]:
-    """The fix buttons that fit an open Home Assistant problem: its integration on the map, or its name in the detail."""
-    if not str(issue["check_key"]).startswith("homeassistant."):
-        return []
-    nodes = set(json.loads(issue["nodes"] or "[]")) if "nodes" in issue.keys() else set()
-    detail = (issue["detail"] or "").lower()
-    return [(n, s) for n, s in fixes(settings) if f"integ:{n}" in nodes or n.lower() in detail]
-
-
-async def restart_addon(settings: dict, admin_token: str, slug: str) -> str:
-    """Ask Home Assistant to restart an add-on; '' when it said yes, else why not."""
-    try:
-        async with httpx.AsyncClient(verify=verify_for(settings, settings["url"]), timeout=30) as http:  # noqa: S501
-            r = await http.post(f"{settings['url']}/api/services/hassio/addon_restart", json={"addon": slug},
-                                headers={"Authorization": f"Bearer {admin_token}"})
-    except httpx.HTTPError as e:
-        return f"can't reach Home Assistant ({why(e)})"
-    if r.status_code == 401:
-        return "Home Assistant rejected the admin token"
-    if r.status_code >= 300:
-        return f"Home Assistant answered HTTP {r.status_code}: {r.text[:120]}"
-    return ""
-
-
 def _domain(eid: str) -> str:
     return eid.split(".", 1)[0]
 
@@ -502,16 +467,6 @@ class HomeAssistantModule(ApiModule):
         Field("full_every", "Full read every (minutes)", "30", kind="number", default=FULL_EVERY,
               width="narrow", own_line=True,
               help=f"How often the whole entity list is read to find new entities and updates ({FULL_MIN} to {FULL_MAX})."),
-        Field("fix_addons", "Fix buttons: restart an add-on", "Zigbee2MQTT = 45df7312_zigbee2mqtt", kind="lines",
-              own_line=True,
-              help="Optional. One per line: a name = an add-on's slug (Settings → Add-ons → the add-on, from its "
-                   "address). When a problem names it (an integration whose entities went silent or unavailable, "
-                   "an add-on not running), the Status page offers a button to restart that add-on. Never automatic."),
-        Field("admin_token", "Admin token for the fix buttons", "eyJ0eXAiOiJKV1Qi…", secret=True, optional=True,
-              width="wide", own_line=True,
-              help="Optional, only for the fix buttons: a long-lived token of an administrator (restarting an add-on "
-                   "needs one). homeWatch keeps reading with the token above; this one is used only when you press a "
-                   "fix button. Leave empty for no fix buttons."),
         # chosen in the Disk / Memory / CPU rows of "Checks and limits" (limit_fields), not in a box of their own
         Field("disk_sensor", "Disk use sensor", DISK, section="limits"),
         Field("memory_sensor", "Memory use sensor", MEMORY, section="limits"),

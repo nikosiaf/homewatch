@@ -420,6 +420,9 @@ Alerting works like this:
   WARNING only after waiting 14 days (7 for OPNsense and RouterOS); the limit is editable per check.
 - **Events, not warnings:** a single DSL resync or device reboot is an event and a Grafana marker; a
   WARNING comes when it repeats (3 resyncs or 2 reboots in 24 h by default).
+- **New on the network:** a device never seen before (a MAC on a switch port or access point, or a new
+  VM) is listed on the Status page, marked "new" on the Map and sent once as a WARNING, until you mark
+  it as **Known**. What was there when this started (and UniFi's client history) counts as known.
 - **Map and root cause:** homeWatch builds a map of what hangs off what (the Map page) from the
   MikroTik switches' MAC tables, the UniFi clients, Home Assistant's devices and Proxmox; links it can't
   find (an integration and the bridge it runs through) are added under **Manually set dependencies**.
@@ -444,9 +447,6 @@ Alerting works like this:
   network or VPN); homeWatch is never opened to the internet for them.
 - **What to do:** messages carry a line on what to check first; write your own per check under the
   module's **Checks and limits → What to do**.
-- **Fix buttons (Home Assistant, optional):** list add-ons as `name = slug` in the module's settings and
-  give an administrator token for them; a problem that names one gets a **Restart** button on the
-  Status page (your password is asked). Never automatic.
 - **Reminders:** open problems are repeated every 12 h (not for acknowledged ones).
 - **Offline queue:** messages that can't be sent while the line is down go out when it's back, with the outage times.
 - **Snooze and maintenance windows:** they hold notifications without losing the history.

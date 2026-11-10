@@ -38,16 +38,31 @@
     {% if user.is_admin %}<td style="white-space:nowrap">{% if i.acked %}<span class="quiet small" title="No reminders while it stays open">acknowledged</span> {% endif %}<form class="inline" method="post" action="/issues/{{ i.id }}/ack">
       <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status">
       <button class="secondary" title="{{ 'Send reminders again' if i.acked else 'I know: no more reminders while it stays open' }}">{{ 'Un-ack' if i.acked else 'Ack' }}</button></form>
-      {% for name, slug in (fixes.get(i.id) or []) %}<form class="inline" method="post" action="/fix/addon" data-ask-password="Restart the add-on {{ slug }}?" data-ask-action="Restart">
-        <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status"><input type="hidden" name="current">
-        <input type="hidden" name="issue" value="{{ i.id }}"><input type="hidden" name="slug" value="{{ slug }}">
-        <button title="Restart the Home Assistant add-on {{ slug }}">Restart {{ name }}</button></form>{% endfor %}
       <form class="inline" method="post" action="/maintenance/snooze">
       <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="status"><input type="hidden" name="_from" value="status">
       <input type="hidden" name="check" value="{{ i.check_key }}">
       <select name="for" aria-label="snooze for" class="short"><option value="1h">1 h</option><option value="4h">4 h</option><option value="24h">24 h</option></select>
       <button class="secondary">Snooze</button></form></td>{% endif %}</tr>{% endfor %}
 </table></div>
+{% endif %}
+{% if new_devices %}
+<div class="card scroll callout-warn" id="newdev">
+  <h2 class="card-title">New on the network <span class="quiet small">devices homeWatch hadn't seen before; mark the ones you
+    know</span></h2><table class="attention">
+  <tr><th>Device</th><th>Address</th><th>Where</th><th>First seen</th>{% if user.is_admin %}<th></th>{% endif %}</tr>
+  {% for d in new_devices %}<tr>
+    <td><b>{{ d.name }}</b>{% if d.node.startswith('mac:') and d.node[5] in '26AE' and not d.node.startswith('mac:02:11:32') %}
+      <div class="quiet small">private Wi-Fi address (a phone or tablet)</div>{% endif %}</td>
+    <td class="nw"><span class="nm-ip">{{ d.ip }}</span>{% if d.node.startswith('mac:') %}<div class="quiet small nm-ip">{{ d.node[4:] }}</div>{% endif %}</td>
+    <td>{{ d.place }}</td><td class="nw">{{ d.first_seen | ts }}</td>
+    {% if user.is_admin %}<td><form class="inline" method="post" action="/devices/known">
+      <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="newdev"><input type="hidden" name="node" value="{{ d.node }}">
+      <button class="secondary" title="I know this device: stop pointing it out">Known</button></form></td>{% endif %}</tr>{% endfor %}
+  </table>
+  {% if user.is_admin and new_devices | length > 1 %}<form method="post" action="/devices/known" style="margin-top:8px">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="_box" value="newdev"><input type="hidden" name="node" value="*">
+    <button class="secondary">Mark all as known</button></form>{% endif %}
+</div>
 {% endif %}
 {% if todos %}
 <div class="card scroll">

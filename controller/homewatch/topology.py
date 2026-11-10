@@ -370,6 +370,9 @@ def refresh(rt) -> dict:
     now = time.time()
     seen = rt.db.get("topology.seen") or {}
     nodes = remember(nodes, seen, now)
+    from . import newdevices
+    rt.new_devices = newdevices.update(rt.db, rt.cfg.site, nodes, now,
+                                       [mac(c.get("mac")) for c in (uf or {}).get("history", [])])
     rt.db.set("topology.seen", seen)
     rt.db.set("topology.map", nodes)
     rt.db.set("topology.built", now)

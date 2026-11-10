@@ -483,3 +483,4 @@ button.nm-box .nm-more::after { content: " ▸"; } button.nm-box[aria-expanded="
 .nm-under summary { cursor: pointer; font-size: 12px; margin-top: 4px; }
 .nm-meta { display: flex; flex-direction: column; } .nm-mac { font-family: var(--mono, monospace); }
 .nm-box.k-ups { border-left-color: #22c55e; } .nm-box.k-guest { border-left-color: #f59e0b; }
+.callout-warn { border-left: 4px solid var(--warn); }
