@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from .. import ERROR, OK, WARNING, CheckDef, CheckResult, DevEvent, booted, level
+from .. import ERROR, OK, WARNING, CheckDef, CheckResult, DevEvent, booted, level, reboots
 from ...metrics import lines, num
 from ..pinning import host_port, verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table
@@ -40,19 +40,21 @@ CHECKS = [
     CheckDef("ports", "Ports up", "api", help="ERROR when a port you chose is not running."),
     CheckDef("errors", "Port errors", "api", warn=10, error=1000, editable=("warn", "error"),
              help="Receive/transmit errors on all ports together in the last hour."),
-    CheckDef("uptime", "Uptime", "api", unit="min", warn=60, editable=("warn",), lower_is_worse=True,
-             help="WARNING after a reboot, for this many minutes."),
-    CheckDef("firmware", "RouterBOOT", "api",
-             help="WARNING when the RouterBOOT firmware is older than the installed RouterOS."),
+    CheckDef("reboots", "Reboots (24 h)", "api", warn=2, editable=("warn",),
+             help="Reboots in the last 24 hours, all devices together. Each one is also an event and a Grafana marker; "
+                  "WARNING at this many."),
+    CheckDef("firmware", "RouterBOOT", "api", unit="days", warn=14, editable=("warn",), todo=True,
+             help="The RouterBOOT firmware is older than the installed RouterOS. Listed under To do; WARNING once it has waited this many days."),
     CheckDef("backup", "Configuration copies", "api",
              help="WARNING when homeWatch couldn't save a copy of a device's configuration for 2 days. Only while "
                   "\"Keep a daily copy of the configuration\" is ticked."),
     CheckDef("changed", "Configuration changed", "api", default_on=False,
              help="WARNING for a day after a device's configuration changed (seen in the daily copy), so changes "
                   "nobody announced don't go unnoticed. Off by default; turn it on here."),
-    CheckDef("routeros", "RouterOS updates", "api",
-             help="WARNING when MikroTik has published a newer RouterOS for a device's update channel. Looked up once "
-                  "a day on upgrade.mikrotik.com, only while \"Check daily for RouterOS updates\" is ticked."),
+    CheckDef("routeros", "RouterOS updates", "api", unit="days", warn=7, editable=("warn",), todo=True,
+             help="MikroTik has published a newer RouterOS for a device's update channel. Looked up once a day on "
+                  "upgrade.mikrotik.com, only while \"Check daily for RouterOS updates\" is ticked. Listed under To do; "
+                  "WARNING once it has waited this many days."),
 ]
 _UNITS = {"w": 604800, "d": 86400, "h": 3600, "m": 60, "s": 1}
 _HOST = re.compile(r"^[a-zA-Z0-9.-]+$")
@@ -436,13 +438,8 @@ class MikroTikModule(ApiModule):
             f"{new_errors} errors in the last hour, most on {worst_port}" if new_errors else "no errors in the last hour",
             new_errors)
 
-        recent = [(d["uptime"] / 60, d["name"]) for d in devs if d["uptime"]]
-        if recent:
-            m, name = min(recent)
-            add("uptime", level(m, th["uptime"], True), f"{name} rebooted {m:.0f} min ago" if level(m, th["uptime"], True)
-                else f"shortest uptime {name} {m / 1440:.1f} days", m)
-        else:
-            add("uptime", OK, "not reported")
+        add("reboots", *reboots(self.events_24h, [(d["uptime"], d["name"]) for d in devs if d["uptime"]],
+                                th["reboots"], now))
 
         old = [f"{d['name']} {d['boot']} (RouterOS {str(d['version']).split()[0]})" for d in devs
                if d.get("boot") and d.get("boot_upgrade") and d["boot"] != d["boot_upgrade"]]

@@ -102,6 +102,24 @@ async def build(db: DB, metrics: Metrics, site: str, now: float | None = None) -
             when = datetime.fromtimestamp(t["started"], zone).strftime("%a %d %b %H:%M")
             lines.append(f"  · {t['check_key']}: {_dur(t['dur'])} from {when}")
 
+    from .todo import days, open_items
+
+    todos = open_items(db, site)
+    if todos:
+        lines.append("")
+        lines.append("To do:")
+        for t in todos:
+            lines.append(f"  · {t['name'] or t['check_key']}: {t['item']} (waiting {days(now - t['first_seen'])})")
+
+    noisy = db.all("SELECT check_key, COUNT(*) n, SUM(feedback=-1) noise FROM issues WHERE site=? AND started>? "
+                   "GROUP BY check_key HAVING n>=3 OR noise>0 ORDER BY noise DESC, n DESC LIMIT 3", (site, start))
+    if noisy:
+        lines.append("")
+        lines.append("Most issues this week:")
+        for t in noisy:
+            mark = f", {t['noise']} marked as noise" if t["noise"] else ""
+            lines.append(f"  · {t['check_key']}: {t['n']} issue{'s' if t['n'] != 1 else ''}{mark}")
+
     first = datetime.fromtimestamp(start, zone).strftime("%d %b")
     last = datetime.fromtimestamp(now, zone).strftime("%d %b")
     link = db.get("home.url") or ""

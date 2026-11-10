@@ -6,7 +6,7 @@ import re
 
 import httpx
 
-from .. import ERROR, OK, WARNING, CheckDef, CheckResult, DevEvent, booted, level
+from .. import ERROR, OK, WARNING, CheckDef, CheckResult, DevEvent, booted, level, reboots
 from ...metrics import lines, num
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
@@ -17,9 +17,11 @@ CHECKS = [
     CheckDef("cpu", "CPU", "api", unit="%", warn=90, editable=("warn", "error"),
              help="Busiest watched device's CPU use, as UniFi reports it."),
     CheckDef("wifi", "Wi-Fi", "api", help="WARNING when UniFi reports the WLAN subsystem as not OK."),
-    CheckDef("uptime", "Uptime", "api", unit="min", warn=60, editable=("warn",), lower_is_worse=True,
-             help="WARNING after a device restarted, for this many minutes."),
-    CheckDef("firmware", "Firmware", "api", help="WARNING when a device has a firmware update."),
+    CheckDef("reboots", "Restarts (24 h)", "api", warn=2, editable=("warn",),
+             help="Device restarts in the last 24 hours, all watched devices together. Each one is also an event and "
+                  "a Grafana marker; WARNING at this many."),
+    CheckDef("firmware", "Firmware", "api", unit="days", warn=14, editable=("warn",), todo=True,
+             help="A device has a firmware update. Listed under To do; WARNING once it has waited this many days."),
 ]
 STATE = {0: "disconnected", 1: "connected", 2: "pending adoption", 4: "upgrading", 5: "provisioning",
          6: "heartbeat missed", 7: "adopting", 9: "adoption failed", 10: "isolated", 11: "isolated"}
@@ -194,13 +196,10 @@ class UniFiModule(ApiModule):
         else:
             add("wifi", OK if wlan["status"] == "ok" else WARNING, f"WLAN {wlan['status']}, {wlan.get('users') or 0} clients")
 
-        ups = [(d["uptime"] / 60, d["name"]) for d in watched if d["state"] == 1 and d["uptime"]]
-        if ups:
-            m, name = min(ups)
-            lv = level(m, th["uptime"], True)
-            add("uptime", lv, f"{name} restarted {m:.0f} min ago" if lv else f"shortest uptime {name} {m / 1440:.1f} days", m)
-        else:
-            add("uptime", OK, "not reported")
+        names = {d["name"] for d in watched}
+        add("reboots", *reboots([e for e in self.events_24h if e["device"] in names],
+                                [(d["uptime"], d["name"]) for d in watched if d["state"] == 1 and d["uptime"]],
+                                th["reboots"], now, "restart"))
 
         upd = [f"{d['name']} {d['version']} → {d['upgrade_to'] or 'newer'}" for d in watched if d["upgradable"]]
         add("firmware", WARNING if upd else OK, "; ".join(upd) if upd else "all watched devices up to date")

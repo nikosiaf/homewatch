@@ -23,8 +23,9 @@ CHECKS: list[CheckDef] = [
                   "Without a contracted speed it only shows the rates."),
     CheckDef("snr", "SNR margin", "modem", unit="dB", warn=6, error=3, editable=("warn", "error"),
              lower_is_worse=True, help="Lower of the downstream and upstream noise margin."),
-    CheckDef("resyncs", "Resyncs (24 h)", "modem", warn=1, error=5, editable=("warn", "error"),
-             help="How often the DSL line re-trained in the last 24 hours."),
+    CheckDef("resyncs", "Resyncs (24 h)", "modem", warn=3, error=5, editable=("warn", "error"),
+             help="How often the DSL line re-trained in the last 24 hours. Each resync is also an event and a Grafana "
+                  "marker; one now and then is normal, so the WARNING starts at 3."),
     CheckDef("ppp", "PPP session on the modem", "modem", default_on=False,
              help="Only when the modem itself dials PPPoE (router mode). Off by default for bridge setups."),
 ]

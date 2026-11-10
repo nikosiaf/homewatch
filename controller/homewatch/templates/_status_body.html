@@ -42,6 +42,16 @@
       <button class="secondary">Snooze</button></form></td>{% endif %}</tr>{% endfor %}
 </table></div>
 {% endif %}
+{% if todos %}
+<div class="card scroll">
+  <h2 class="card-title">To do <span class="quiet small">updates and firmware: not problems, until they wait too long</span></h2><table class="attention">
+  <tr><th>Source</th><th>What</th><th>Waiting</th><th>Warning after</th></tr>
+  {% for t in todos %}<tr>
+    <td class="nw">{{ t.source }}</td><td><b>{{ t.name }}</b>: {{ more(t.item, "td" ~ loop.index) }}</td>
+    <td class="nw">{{ (now - t.first) | dur }}</td>
+    <td class="nw">{% if t.limit is none %}never{% else %}{{ '%g' | format(t.limit) }} days{% endif %}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
 <div class="module-grid">
 {% for c in cards %}
 {% set info = module_info.get(c.id, {}) %}

@@ -14,7 +14,7 @@ from datetime import datetime
 
 import httpx
 
-from . import __version__, grafana, report, versions
+from . import __version__, grafana, report, todo, versions
 from .auth import audit, scrub_audit
 from .config import Config
 from .db import DB
@@ -273,11 +273,16 @@ class Runtime:
             s = m.load(self)
             if not m.enabled(s):
                 events += self.engine.apply(m.id, [], now)  # a switched-off module closes its issues silently
+                todo.close_module(self.db, self.cfg.site, m.id, now)
                 continue
             th = thresholds(self.db, self.cfg.site, m.id, m.checks)
             failure = ""
             try:
-                mine = m.evaluate(s, th, await asyncio.wait_for(m.readings(self, s, now), MODULE_LIMIT))
+                got = await asyncio.wait_for(m.readings(self, s, now), MODULE_LIMIT)
+                m.events_24h = tuple(dict(e) for e in self.db.all(
+                    "SELECT ts, device, kind FROM events WHERE site=? AND module=? AND ts>?",
+                    (self.cfg.site, m.id, now - 86400)))
+                mine = todo.apply(self.db, self.cfg.site, m, th, m.evaluate(s, th, got), now)
             except MetricsError as e:  # our own store, not this module's device: keep what the module last showed
                 metrics_error = str(e)
                 results += [r for r in self.results if r.key.startswith(m.id + ".")]
@@ -431,11 +436,14 @@ class Runtime:
             await asyncio.sleep(60)
 
     def speed_due(self, interval_h: float, now: float) -> bool:
-        last = self.db.one("SELECT ts, ok FROM speedtests WHERE site=? ORDER BY ts DESC LIMIT 1", (self.cfg.site,))
-        if last is None:
+        """After a failed test try again sooner, waiting twice as long after each failure in a row (15, 30, 60 min…),
+        never longer than the usual interval."""
+        rows = self.db.all("SELECT ts, ok FROM speedtests WHERE site=? ORDER BY ts DESC LIMIT 8", (self.cfg.site,))
+        if not rows:
             return True
-        wait = interval_h * 3600 if last["ok"] else min(SPEED_RETRY, interval_h * 3600)
-        return now - last["ts"] >= wait
+        fails = next((i for i, r in enumerate(rows) if r["ok"]), len(rows))
+        wait = interval_h * 3600 if not fails else min(SPEED_RETRY * 2 ** (fails - 1), interval_h * 3600)
+        return now - rows[0]["ts"] >= wait
 
     async def reset(self, everything: bool) -> str:
         """Delete history (issues, speed tests, metrics); with everything=True also all settings and users."""
@@ -564,19 +572,29 @@ class Runtime:
             self.speed_started = time.time()
         try:
             s = self.internet_settings()["speed"]
-            if s["engine"] == "ookla":
+            engine = s["engine"]
+            if engine == "ookla":
                 if not s.get("ookla_accepted"):
                     res = speedtest.Result(False, error="Ookla license not accepted")
                 else:
                     res = await speedtest.ookla(self.cfg.ookla_dir)
             else:
                 res = await speedtest.cloudflare()
+                # Cloudflare's test servers answer 502 now and then; Ookla, when its license is accepted and it is
+                # installed, measures the line instead of leaving a gap
+                if not res.ok and s.get("ookla_accepted") and os.access(speedtest.ookla_path(self.cfg.ookla_dir), os.X_OK):
+                    log.info("Cloudflare speed test failed (%s), trying Ookla", res.error.splitlines()[0][:120])
+                    first = res.error.splitlines()[0][:200]
+                    res = await speedtest.ookla(self.cfg.ookla_dir)
+                    engine = "ookla"
+                    if not res.ok:
+                        res.error = f"Cloudflare: {first}; Ookla: {res.error}"
             now = time.time()
             self.db.run("INSERT INTO speedtests(site,ts,engine,down,up,latency,ok,error) VALUES(?,?,?,?,?,?,?,?)",
-                        (self.cfg.site, now, s["engine"], res.down, res.up, res.latency, int(res.ok), res.error))
+                        (self.cfg.site, now, engine, res.down, res.up, res.latency, int(res.ok), res.error))
             if res.ok:
                 try:
-                    await self.metrics.write([line("hw_speedtest", {"site": self.cfg.site, "engine": s["engine"]},
+                    await self.metrics.write([line("hw_speedtest", {"site": self.cfg.site, "engine": engine},
                                                    {"download_mbps": res.down, "upload_mbps": res.up,
                                                     "latency_ms": res.latency}, now)])
                 except MetricsError as e:

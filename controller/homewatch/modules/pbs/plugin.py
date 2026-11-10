@@ -19,7 +19,8 @@ CHECKS = [
              help="Age of the newest backup of each VM, container or host you chose."),
     CheckDef("jobs", "Verify, prune, GC, sync", "api",
              help="ERROR when the latest run of a job type failed in the last 8 days; WARNING when it had warnings."),
-    CheckDef("updates", "Updates", "api", help="WARNING when package updates are available on the PBS host."),
+    CheckDef("updates", "Updates", "api", unit="days", warn=14, editable=("warn",), todo=True,
+             help="Package updates available on the PBS host. Listed under To do; WARNING once it has waited this many days."),
 ]
 JOB_TYPES = {"verificationjob": "verify", "verify": "verify", "prunejob": "prune", "prune": "prune",
              "garbage_collection": "garbage collection", "syncjob": "sync"}

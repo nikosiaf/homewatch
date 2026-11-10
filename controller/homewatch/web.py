@@ -142,7 +142,8 @@ _box: ContextVar[str] = ContextVar("box", default="")
 def back(url: str, msg: str = "", err: str = "") -> RedirectResponse:
     box = _box.get()
     q = urlencode({k: v for k, v in (("msg", msg), ("err", err), ("box", box)) if v})
-    return RedirectResponse(url + ("?" + q if q else "") + (f"#{box}" if box else ""), status_code=303)
+    return RedirectResponse(url + (("&" if "?" in url else "?") + q if q else "") + (f"#{box}" if box else ""),
+                            status_code=303)
 
 
 MAX_BODY = 8 * 1024 * 1024  # the same limit as the Caddyfile; the largest real form is a long entity list
@@ -485,6 +486,7 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         events = []
         for i in rows:
             events.append({"ts": i["started"], "kind": "problem", "level": i["worst"], "key": i["check_key"],
+                           "id": i["id"], "feedback": i["feedback"],
                            "detail": i["detail"], "open_for": None if i["resolved"] else now - i["started"],
                            "after": i["resolved"] - i["started"] if i["resolved"] else None})
             if i["resolved"] and level not in ("1", "2"):  # filtering by level: the problems only
@@ -827,6 +829,29 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         audit(rt.db, user.username, "unsnooze", form.get("check", ""))
         rt.wake.set()
         return back("/maintenance", msg="Snooze ended")
+
+    @app.post("/issues/{iid}/feedback")
+    async def issue_feedback(request: Request, iid: int):
+        """"Useful" or "noise" on an issue (a second click on the same one takes it back); the weekly report
+        lists the checks marked as noise, so their limits can be changed."""
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/history", err="Form expired")
+        keep = {k: str(form.get(k, "")) for k in ("module", "level", "days") if str(form.get(k, "")).isalnum()}
+        here = "/history" + ("?" + urlencode(keep) if keep else "")
+        if form is None:
+            return back(here, err="Form expired")
+        row = rt.db.one("SELECT id, check_key, feedback FROM issues WHERE id=? AND site=?", (iid, rt.cfg.site))
+        value = {"useful": 1, "noise": -1}.get(form.get("v", ""))
+        if row is None or value is None:
+            return back(here, err="Unknown issue")
+        value = None if row["feedback"] == value else value
+        rt.db.run("UPDATE issues SET feedback=? WHERE id=?", (value, iid))
+        audit(rt.db, user.username, "feedback", f"issue {iid} {row['check_key']}: "
+                                                f"{ {1: 'useful', -1: 'noise', None: 'cleared'}[value] }")
+        return back(here, msg="Thanks, noted" if value else "Taken back")
 
     # -- maintenance -----------------------------------------------------------------------------
     @app.get("/maintenance")
@@ -1460,6 +1485,16 @@ def _exports(rt) -> list[dict]:
     return out
 
 
+def _todo_limit(rt, key: str) -> float | None:
+    """After how many days a to-do becomes a WARNING (the check's limit), None = never."""
+    mid, cid = key.split(".", 1)
+    m = MODULES.get(mid)
+    if m is None:
+        return None
+    t = thresholds(rt.db, rt.cfg.site, mid, m.checks).get(cid)
+    return t.warn if t else None
+
+
 def _status_ctx(request: Request) -> dict:
     rt = rt_of(request)
     now = time.time()
@@ -1486,8 +1521,11 @@ def _status_ctx(request: Request) -> dict:
             info[m.id] = {"observed": m.observed(mine), "last_good": m.reading_ts(rt) or rt.engine.last_observed(m.id)}
     switched_off = [m.name for m in MODULES.values() if m.is_set_up(rt) and not m.enabled(m.load(rt))]
     unknown = [m.name for m in MODULES.values() if m.id in info and not info[m.id]["observed"]]
-    from . import grafana
-    return dict(grafana=rt.grafana_on, boards=set(grafana.BUILDERS), module_info=info, switched_off=switched_off, unknown=unknown, tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
+    from . import grafana, todo
+    todos = [{"key": t["check_key"], "name": t["name"] or t["check_key"], "item": t["item"], "first": t["first_seen"],
+              "source": MODULES[t["check_key"].split(".", 1)[0]].name if t["check_key"].split(".", 1)[0] in MODULES else "",
+              "limit": _todo_limit(rt, t["check_key"])} for t in todo.open_items(rt.db, rt.cfg.site)]
+    return dict(todos=todos, grafana=rt.grafana_on, boards=set(grafana.BUILDERS), module_info=info, switched_off=switched_off, unknown=unknown, tiles=tiles, tile_groups=groups, dsl=sp.enabled(sp.load(rt)), overall=overall, open=rt.engine.open_issues(), names=rt.names(), now=now,
                 last_run=rt.last_run, last_error=rt.last_error, errors=errors, warnings=warnings,
                 setup_done=rt.db.get("setup.done", False))
 

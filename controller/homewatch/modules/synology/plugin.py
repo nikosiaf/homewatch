@@ -22,7 +22,8 @@ CHECKS = [
              help="Hottest disk; ERROR when a disk is not normal, SMART fails or bad sectors appear."),
     CheckDef("storage", "Pools and volumes", "api", unit="%", warn=85, error=95, editable=("warn", "error"),
              help="Fullest volume; ERROR when a pool or volume is degraded or crashed."),
-    CheckDef("updates", "DSM updates", "api", help="WARNING when a DSM update is available."),
+    CheckDef("updates", "DSM updates", "api", unit="days", warn=14, editable=("warn",), todo=True,
+             help="A DSM update is available. Listed under To do; WARNING once it has waited this many days."),
     CheckDef("hardware", "Fans and power", "api",
              help="Optional, over SNMPv3: ERROR when the NAS reports a failed fan, power supply or system; "
                   "WARNING when SNMP can't be read. DSM's Web API doesn't report these."),

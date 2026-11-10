@@ -86,6 +86,17 @@ less install.sh          # please read it first; it's short (q to quit)
       extra run about 30 seconds later; problems keep the normal pace, so short blips still stay quiet.</li>
     <li><b>Grafana:</b> every dashboard shows incidents (start and end, with the likely cause) and what the devices
       did as markers. A marker sits within 2 minutes of its time; its text has the exact time.</li>
+    <li><b>To do:</b> updates and firmware (Home Assistant, PBS, DSM, UniFi, RouterOS and RouterBOOT, OPNsense) are
+      things to do, not problems. They are listed under To do on the Status page and in the weekly report, and become a
+      WARNING only when they have waited too long: 14 days, 7 for OPNsense and RouterOS (change it under the module's
+      Checks and limits; empty = never).</li>
+    <li><b>Events, not warnings:</b> one DSL resync or one switch, access point reboot is an event and a Grafana marker.
+      A WARNING comes only when it repeats: 3 resyncs or 2 reboots in 24 hours by default.</li>
+    <li><b>Flapping entities:</b> a Home Assistant entity that went unavailable 3 times in 7 days and came back by itself
+      within 2 hours each time (phone and cloud sensors often do) is named under Unavailable entities but not counted.
+      Untick "Leave out entities that keep flapping" in the module's settings to count every one.</li>
+    <li><b>Useful or noise:</b> on History, mark a problem as worth telling you or as noise. The weekly report lists the
+      checks with the most issues and the ones marked as noise, so you know which limits to change.</li>
     <li><b>Reminders:</b> open problems are repeated every 12 hours. Change this, the confirmation and how often checks run under Timing on the Notifications page.</li>
     <li><b>Offline queue:</b> messages that can't be sent while the line is down go out when it's back, with the outage times.</li>
     <li><b>Snooze:</b> holds one check's notifications for a while, from Maintenance or next to the problem on Status. The history is still recorded.</li>

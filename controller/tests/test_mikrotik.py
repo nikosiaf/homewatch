@@ -44,7 +44,7 @@ def test_port_down_errors_reboot_and_firmware():
     res = run(m, snap, ["sw1/ether1"])
     assert res["ports"].status == ERROR and "UpLink" in res["ports"].detail
     assert res["errors"].status == WARNING and res["errors"].value == 50
-    assert res["uptime"].status == WARNING and "rebooted 10 min ago" in res["uptime"].detail
+    assert res["reboots"].status == OK and "shortest uptime sw1 0.0 days" in res["reboots"].detail  # see test_noise
     assert res["firmware"].status == WARNING and res["each"].status == ERROR
 
 

@@ -37,6 +37,8 @@ class CheckDef:
     lower_is_worse: bool = False  # e.g. line speed: below the threshold is bad
     help: str = ""
     default_on: bool = True
+    todo: bool = False  # something to do (updates, firmware), not a problem: listed under To do, and a WARNING only
+    #                     once it has waited "warn" days (see todo.py)
 
 
 @dataclass
@@ -109,6 +111,24 @@ def booted(prev: dict, key: str, boot: float | None, device: str, what: str, eve
         prev[key] = boot
 
 
+def ago(seconds: float) -> str:
+    return f"{seconds / 60:.0f} min ago" if seconds < 5400 else f"{seconds / 3600:.0f} h ago"
+
+
+def reboots(events, uptimes: list[tuple[float, str]], t: Thresholds, now: float, word: str = "reboot"):
+    """The "Reboots (24 h)" check from the module's device events: (status, detail, value).
+    uptimes: (seconds, device name) now, for the "shortest uptime" note when nothing rebooted."""
+    seen = sorted((e["ts"], e["device"]) for e in events if e["kind"] == "reboot" and now - e["ts"] <= 86400)
+    n = len(seen)
+    if n:
+        what = ", ".join(f"{dev} {ago(now - ts)}" for ts, dev in seen[-4:]) + (" …" if n > 4 else "")
+        return level(n, t), f"{n} {word}{'s' if n != 1 else ''} in 24 h: {what}", n
+    if uptimes:
+        up, name = min(uptimes)
+        return OK, f"no {word}s in 24 h; shortest uptime {name} {up / 86400:.1f} days", 0
+    return OK, f"no {word}s in 24 h", 0
+
+
 class Module:
     """What the runtime and the web pages need from a module."""
 
@@ -122,6 +142,7 @@ class Module:
     transport_keys = ("https", "verify")  # settings that protect them on the way, on or off
     icon = "server"  # the Status page tile's line icon (static/icons in _icons.html)
     headline: tuple[str, str] = ("", "")  # (check id, label): the number the Status tile shows big, with its 24 h line
+    events_24h: tuple = ()  # this module's device events of the last 24 h (ts, device, kind), set before each evaluate
 
     def series(self, site: str) -> list[str]:
         """The latest reading as detailed metrics (Influx line protocol, one line per device/port/guest...),

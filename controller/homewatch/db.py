@@ -109,6 +109,23 @@ MIGRATIONS: list[str] = [
     ALTER TABLE incidents ADD COLUMN marked INTEGER NOT NULL DEFAULT 0;
     UPDATE incidents SET marked=3;
     """,
+    # 9: less noise: things to do (updates, firmware) instead of issues; "useful / noise" on issues; entities that
+    # keep going unavailable and coming back by themselves; resyncs and reboots warn only when repeated
+    """
+    CREATE TABLE todos (
+        id INTEGER PRIMARY KEY, site TEXT NOT NULL, check_key TEXT NOT NULL, name TEXT NOT NULL DEFAULT '',
+        item TEXT NOT NULL DEFAULT '', first_seen REAL NOT NULL, last_seen REAL NOT NULL, done REAL);
+    CREATE INDEX todos_open ON todos (site, check_key, done);
+    ALTER TABLE issues ADD COLUMN feedback INTEGER;
+    CREATE TABLE flaps (
+        id INTEGER PRIMARY KEY, site TEXT NOT NULL, entity_id TEXT NOT NULL, start REAL NOT NULL, end REAL);
+    CREATE INDEX flaps_entity ON flaps (site, entity_id, start);
+    UPDATE checks SET warn=3 WHERE check_key='speedport.resyncs' AND warn=1;
+    UPDATE checks SET warn=7 WHERE check_key IN ('opnsense.firmware', 'mikrotik.routeros') AND warn IS NULL;
+    UPDATE checks SET warn=14 WHERE check_key IN ('homeassistant.updates', 'pbs.updates', 'synology.updates',
+        'mikrotik.firmware', 'unifi.firmware') AND warn IS NULL;
+    DELETE FROM checks WHERE check_key IN ('mikrotik.uptime', 'unifi.uptime');
+    """,
 ]
 
 

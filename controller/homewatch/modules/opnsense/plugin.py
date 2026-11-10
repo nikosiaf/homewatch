@@ -24,8 +24,8 @@ CHECKS = [
     CheckDef("haproxy", "HAProxy servers", "api", help="ERROR when a health-checked HAProxy server is down."),
     CheckDef("certs", "Certificates", "api", unit="days", warn=20, error=7, editable=("warn", "error"),
              lower_is_worse=True, help="Days until the first certificate in use expires."),
-    CheckDef("firmware", "Firmware", "api",
-             help="WARNING when the last update check found updates, or a reboot is needed."),
+    CheckDef("firmware", "Firmware", "api", unit="days", warn=7, editable=("warn",), todo=True,
+             help="Updates found by the last update check, or a reboot needed to finish one. Listed under To do; WARNING once it has waited this many days."),
 ]
 GW_LEVEL = {"none": OK, "down": ERROR, "force_down": ERROR, "loss": WARNING, "delay": WARNING,
             "highloss": ERROR, "highdelay": WARNING, "delay+loss": WARNING}

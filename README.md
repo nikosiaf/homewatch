@@ -141,7 +141,7 @@ is changed. Supported model:
 | DSL link | | the modem has no sync |
 | Sync rate (share of the contracted speed) | < 85 % | < 50 % |
 | SNR margin (lower of down and up) | < 6 dB | < 3 dB |
-| Resyncs in 24 h | ≥ 1 | ≥ 5 |
+| Resyncs in 24 h (each one is a Grafana marker) | ≥ 3 | ≥ 5 |
 | PPP session on the modem | | down (off by default; for router-mode setups) |
 
 Things to know before you add a modem:
@@ -194,7 +194,7 @@ Grafana traffic graphs, also give it **Reporting: Traffic**.
 | Services (the ones you choose) | | not running |
 | HAProxy servers | | a health-checked server down |
 | Certificates in use | expires in < 20 days | < 7 days, or expired |
-| Firmware | updates found at the last check, or reboot needed | |
+| Firmware (to do) | updates found at the last check, or reboot needed, for 7 days | |
 
 ### Home Assistant module (optional)
 
@@ -207,7 +207,7 @@ Home Assistant's own health is checked from the start:
 | Check | WARNING | ERROR |
 |---|---|---|
 | Core | starting, stopping, or safe / recovery mode | |
-| Updates (skipped versions don't count) | updates available | |
+| Updates (to do; skipped versions don't count) | updates available for 14 days | |
 | Automatic backups | last success > 26 h ago | > 50 h ago, or the last attempt failed |
 | Disk use of the host (%) | ≥ 80 % | ≥ 90 % |
 | Memory use of the host (%) | ≥ 80 % | ≥ 90 % |
@@ -276,7 +276,7 @@ shared folders or applications.
 | CPU / memory | ≥ 85 / 90 % | ≥ 95 % |
 | Disks | hottest ≥ 50 °C | ≥ 60 °C, a disk not normal, SMART failing or bad sectors |
 | Pools and volumes | fullest volume ≥ 85 %, or repairing / scrubbing | ≥ 95 %, degraded or crashed |
-| DSM updates | update available | |
+| DSM updates (to do) | update available for 14 days | |
 | Fans and power (optional, SNMPv3) | SNMP can't be read | a fan, the power supply or the system failed |
 
 DSM's Web API doesn't report fans or the power supply; the NAS's SNMP agent does. To watch them,
@@ -296,9 +296,9 @@ user on every device). The device's `www` service must allow the homeWatch host.
 | CPU / memory / temperature | ≥ 85 % / 90 % / 60 °C | ≥ 95 % / 95 % / 70 °C |
 | Ports up (the ones you choose) | | a chosen port down |
 | Port errors in the last hour | ≥ 10 | ≥ 1000 |
-| Uptime | rebooted in the last 60 min | |
-| RouterBOOT | older than the installed RouterOS | |
-| RouterOS updates (option) | a newer RouterOS exists for the device's update channel | |
+| Reboots in 24 h (each one is a Grafana marker) | ≥ 2 | |
+| RouterBOOT (to do) | older than the installed RouterOS for 14 days | |
+| RouterOS updates (option, to do) | a newer RouterOS for the device's channel, waiting 7 days | |
 | Configuration copies (option) | no good copy for 2 days | |
 | Configuration changed (option, off by default) | for 24 h after a device's configuration changed | |
 
@@ -329,8 +329,8 @@ Reads the devices of a UniFi Network application (UniFi OS Server or a UniFi con
 | Devices online (the ones you choose) | upgrading or provisioning | disconnected, heartbeat missed |
 | CPU (busiest watched device) | ≥ 90 % | |
 | Wi-Fi | WLAN subsystem not OK | |
-| Uptime | restarted in the last 60 min | |
-| Firmware | update available | |
+| Restarts in 24 h (each one is a Grafana marker) | ≥ 2 | |
+| Firmware (to do) | update available for 14 days | |
 
 ### Proxmox Backup Server module (optional)
 
@@ -342,7 +342,7 @@ shows the commands to create it).
 | Datastores | fullest ≥ 85 % | ≥ 95 %, or a datastore error (e.g. not mounted) |
 | Backups (the groups you choose) | newest snapshot > 26 h old | > 50 h old, or no snapshots |
 | Verify, prune, garbage collection, sync | latest run had warnings | latest run failed (last 8 days) |
-| Updates | package updates available | |
+| Updates (to do) | package updates available for 14 days | |
 
 The Datastores table and the Grafana dashboard also show each datastore's **deduplication factor**,
 as the PBS web interface does: the size of all backups over the space their chunks take on disk,
@@ -406,11 +406,20 @@ Notification providers: **Telegram**, **ntfy** (one topic URL), **email** (any S
 
 Alerting works like this:
 - **Confirmation:** a change must hold for 2 runs (about 4 minutes) before it's sent.
+- **To do instead of problems:** updates and firmware (Home Assistant, PBS, DSM, UniFi, RouterOS and
+  RouterBOOT, OPNsense) are listed under To do on the Status page and in the weekly report. They become a
+  WARNING only after waiting 14 days (7 for OPNsense and RouterOS); the limit is editable per check.
+- **Events, not warnings:** a single DSL resync or device reboot is an event and a Grafana marker; a
+  WARNING comes when it repeats (3 resyncs or 2 reboots in 24 h by default).
+- **Flapping entities:** a Home Assistant entity that keeps going unavailable and coming back by itself
+  (3 short spells in 7 days) is named but not counted, unless you untick that in the module's settings.
+- **Useful or noise:** mark problems on the History page; the weekly report lists the noisiest checks.
 - **Reminders:** open problems are repeated every 12 h.
 - **Offline queue:** messages that can't be sent while the line is down go out when it's back, with the outage times.
 - **Snooze and maintenance windows:** they hold notifications without losing the history.
 - **Quiet hours** per channel: warnings wait until they end, errors are always sent.
-- **Weekly report:** optional; pick the day, the time and the channels.
+- **Weekly report:** optional; pick the day, the time and the channels. It has the week's uptime, line
+  quality and speed, the longest issues, what is still to do and the checks with the most issues.
 - **healthchecks.io heartbeat:** optional. homeWatch pings it after every run, and healthchecks.io
   alerts you when the pings stop (host, power or internet down).
 - **History** is a timeline of every problem and its return to OK.

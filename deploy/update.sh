@@ -113,4 +113,7 @@ docker compose -f docker-compose.yml up -d || back "it didn't start"
 healthy || back "it didn't become healthy within 3 minutes, so the previous release is back"
 # Grafana reads its data source only when it starts; the new homeWatch may have changed it
 docker compose -f docker-compose.yml restart grafana >/dev/null 2>&1 || true
+# keep the new release and the one before it (to go back to); older homeWatch images only take disk space
+docker image ls ghcr.io/nikosiaf/homewatch --format '{{.Tag}}' 2>/dev/null | grep -vxF -e "$latest" -e "${current:-none}" \
+  | while read -r tag; do docker image rm "ghcr.io/nikosiaf/homewatch:$tag" >/dev/null 2>&1 || true; done
 status ok "$latest installed (was ${current:-?})"

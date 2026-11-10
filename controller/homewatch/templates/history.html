@@ -49,7 +49,7 @@
 {% endif %}
 {% macro event_table(rows, with_source) %}
 <div class="card scroll"><table data-page="20">
-  <tr><th>When</th><th>Status</th>{% if with_source %}<th>Source</th>{% endif %}<th>Check</th><th>What happened</th><th>Duration</th></tr>
+  <tr><th>When</th><th>Status</th>{% if with_source %}<th>Source</th>{% endif %}<th>Check</th><th>What happened</th><th>Duration</th>{% if user.is_admin %}<th title="Was this worth telling you? The weekly report lists the checks marked as noise.">Worth it?</th>{% endif %}</tr>
   {% for e in rows %}<tr>
     <td style="white-space:nowrap">{{ e.ts | ts }}</td>
     <td>{% if e.kind == 'ok' %}<span class="badge s0">OK</span>{% elif e.kind == 'off' %}<span class="badge mute">OFF</span>
@@ -58,6 +58,10 @@
     <td>{{ names.get(e.key, e.key) }}</td>
     <td>{% if e.kind == 'ok' %}Back to OK: {% elif e.kind == 'off' %}Check switched off while open{% endif %}{{ more(e.detail) if e.kind != 'off' }}</td>
     <td style="white-space:nowrap">{% if e.kind in ('ok', 'off') %}after {{ e.after | dur }}{% elif e.open_for is not none %}<b>still open</b>, {{ e.open_for | dur }}{% else %}lasted {{ e.after | dur }}{% endif %}</td>
+    {% if user.is_admin %}<td style="white-space:nowrap">{% if e.kind == 'problem' %}<form class="inline" method="post" action="/issues/{{ e.id }}/feedback">
+      <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="module" value="{{ module }}"><input type="hidden" name="level" value="{{ level }}"><input type="hidden" name="days" value="{{ days }}">
+      <button name="v" value="useful" class="{{ 'small' if e.feedback == 1 else 'secondary small' }}" aria-pressed="{{ 'true' if e.feedback == 1 else 'false' }}" title="It was worth telling me">Useful</button>
+      <button name="v" value="noise" class="{{ 'small' if e.feedback == -1 else 'secondary small' }}" aria-pressed="{{ 'true' if e.feedback == -1 else 'false' }}" title="Not worth a message">Noise</button></form>{% endif %}</td>{% endif %}
   </tr>{% endfor %}
 </table></div>
 {% endmacro %}

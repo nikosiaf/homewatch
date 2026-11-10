@@ -35,7 +35,8 @@ CHECKS = [
     CheckDef("tamper", "Tamper", "api", help="Watched tamper sensors: ERROR when one reports tampering."),
     CheckDef("batteries", "Batteries", "api", unit="%", warn=25, error=10, editable=("warn", "error"),
              lower_is_worse=True, help="Lowest level among the watched battery sensors."),
-    CheckDef("updates", "Updates", "api", help="WARNING when updates are available (skipped versions don't count)."),
+    CheckDef("updates", "Updates", "api", unit="days", warn=14, editable=("warn",), todo=True,
+             help="Updates Home Assistant can install (skipped versions don't count). Listed under To do; WARNING once it has waited this many days."),
     CheckDef("backups", "Automatic backups", "api", unit="h", warn=26, error=50, editable=("warn", "error"),
              help="Age of the last successful automatic backup; ERROR when the last attempt failed."),
     CheckDef("addons", "Add-ons", "api",
@@ -54,6 +55,9 @@ CHECKS = [
 # checks with nothing to look at until a fitting entity is watched: hidden until then
 BY_ENTITY = ("unavailable", "alarm", "safety", "tamper", "batteries", "addons", "rules")
 SETTLE = 30 * 60
+FLAP_SHORT = 2 * 3600  # s: unavailable for less than this, then back by itself, is one flap
+FLAP_COUNT = 3  # flaps in FLAP_DAYS that make an entity "keeps flapping"
+FLAP_DAYS = 7
 FULL_EVERY = 30  # minutes between full state reads, which find new entities and new updates
 FULL_MIN, FULL_MAX = 5, 1440
 NOT_READY = ("unavailable", "unknown")
@@ -88,6 +92,23 @@ RULE_HELP = (
     "is not home warning (a person or tracker) · is not online error (a connection status). "
     "\"is\" compares the state as Home Assistant shows it under Developer tools → States, ignoring capitals. "
     "A rule needs Watch: without it the rule is kept but not checked.")
+
+
+def flaps(db, site: str, unavailable: set[str], now: float) -> set[str]:
+    """Count unavailable spells per entity (one row from going unavailable to coming back) and return the
+    entities that keep flapping: FLAP_COUNT short spells (back by itself within FLAP_SHORT) in FLAP_DAYS."""
+    with db.tx() as t:
+        open_ = {r["entity_id"]: r["id"] for r in t.all("SELECT id, entity_id FROM flaps WHERE site=? AND end IS NULL",
+                                                       (site,))}
+        for eid in unavailable - set(open_):
+            t.run("INSERT INTO flaps(site,entity_id,start) VALUES(?,?,?)", (site, eid, now))
+        for eid, rid in open_.items():
+            if eid not in unavailable:
+                t.run("UPDATE flaps SET end=? WHERE id=?", (now, rid))
+        t.run("DELETE FROM flaps WHERE site=? AND end IS NOT NULL AND end<?", (site, now - 30 * 86400))
+        rows = t.all("SELECT entity_id FROM flaps WHERE site=? AND start>? AND end IS NOT NULL AND end-start<? "
+                     "GROUP BY entity_id HAVING COUNT(*)>=?", (site, now - FLAP_DAYS * 86400, FLAP_SHORT, FLAP_COUNT))
+    return {r["entity_id"] for r in rows}
 
 
 def _domain(eid: str) -> str:
@@ -306,6 +327,10 @@ class HomeAssistantModule(ApiModule):
         Field("url", "Home Assistant address", "http://homeassistant.local:8123", width="wide"),
         Field("verify", "Check the HTTPS certificate", kind="check", default=True,
               help=SELF_SIGNED),
+        Field("flap_quiet", "Leave out entities that keep flapping", kind="check", default=True,
+              help=f"An entity that went unavailable {FLAP_COUNT} times in {FLAP_DAYS} days and came back by itself "
+                   "within 2 hours each time (phone and cloud sensors often do) is not counted by Unavailable "
+                   "entities; it is still named there. Untick to count every one."),
         Field("full_every", "Full read every (minutes)", "30", kind="number", default=FULL_EVERY,
               width="narrow", own_line=True,
               help=f"How often the whole entity list is read to find new entities and updates ({FULL_MIN} to {FULL_MAX})."),
@@ -329,6 +354,8 @@ class HomeAssistantModule(ApiModule):
     def __init__(self):
         super().__init__()
         self._ids: list[str] | None = None  # entities read one by one between full reads
+        self._flap_ts = None  # the reading the flaps were last counted for
+        self._flappy: set[str] = set()
         self._updates: list[dict] = []
         self._total = 0
         self._found_ts = 0.0
@@ -475,6 +502,9 @@ class HomeAssistantModule(ApiModule):
             audit(rt.db, "system", self.id, f"entities converted to ticks: {len(new['watch'])} watched, "
                                             f"{len(new['grafana'])} shown in Grafana, {len(new['entity_rules'])} with rules")
             self._converted = None
+        if self.snap and self.snap_ts != self._flap_ts:
+            self._flap_ts = self.snap_ts
+            self._flappy = flaps(rt.db, rt.cfg.site, {e["entity_id"] for e in self.snap.get("unavailable", [])}, now)
         return out
 
     def notice(self, settings):
@@ -593,10 +623,14 @@ class HomeAssistantModule(ApiModule):
         watched = snap.get("watched", [])
         if watched:
             gone = [e for e in snap["unavailable"] if (now - (_ts(e.get("last_changed")) or now)) >= SETTLE]
+            quiet = [e for e in gone if e["entity_id"] in self._flappy] if s.get("flap_quiet", True) else []
+            gone = [e for e in gone if e not in quiet]
             n = len(gone)
+            note = ("; not counted, they keep flapping: " + ", ".join(e.get("name") or e["entity_id"] for e in quiet)
+                    if quiet else "")
             add("unavailable", level(n, th["unavailable"]) if n else OK,
-                f"{n} unavailable: " + ", ".join(e.get("name") or e["entity_id"] for e in gone) if n
-                else f"{len(watched)} watched, none unavailable", n)
+                (f"{n} unavailable: " + ", ".join(e.get("name") or e["entity_id"] for e in gone) if n
+                 else f"{len(watched)} watched, none unavailable") + note, n)
         self._kinds(th, watched, add)
 
         ups = [u for u in snap["updates"] if not u.get("skipped_version") or u["skipped_version"] != u.get("latest_version")]
