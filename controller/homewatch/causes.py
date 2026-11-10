@@ -24,7 +24,28 @@ def window(start: float, end: float | None) -> tuple[float, float]:
     return start - BEFORE, (end or start) + AFTER
 
 
-def explain(db, site: str, start: float, end: float | None, keys: list[str], zone: ZoneInfo) -> tuple[str, list]:
+def _parent_event(db, site: str, evs, nodes: list[str]):
+    """A device the incident's problems sit behind (on the map) that restarted or lost link in the window:
+    (event, its name, how many of the problem's devices are behind it), or None."""
+    from . import topology
+
+    if not nodes:
+        return None
+    m = topology.load(db)
+    for e in evs:
+        if e["kind"] not in topology.EVENT_KINDS:
+            continue
+        en = topology.event_node(m, e["module"], e["device"])
+        if not en:
+            continue
+        under = [n for n in nodes if en in topology.ancestors(m, n)]
+        if under:
+            return e, m[en]["name"], len(under)
+    return None
+
+
+def explain(db, site: str, start: float, end: float | None, keys: list[str], zone: ZoneInfo,
+            nodes: list[str] | None = None) -> tuple[str, list]:
     """(likely cause or '', evidence [(ts, module, device, detail, exact)]) for an incident."""
     lo, hi = window(start, end)
     evs = db.all("SELECT * FROM events WHERE site=? AND ts BETWEEN ? AND ? ORDER BY ts, id", (site, lo, hi))
@@ -59,6 +80,10 @@ def explain(db, site: str, start: float, end: float | None, keys: list[str], zon
         cause = f"The DSL line dropped and re-synced at {t(line)} with no power cut at home: a line or ISP-side problem"
     elif internet and _line_watched(db, site, start, end):
         cause = "The internet stopped answering while the DSL line stayed up: a problem in the ISP's network"
+    elif (parent := _parent_event(db, site, evs, nodes)):
+        e, name, n = parent
+        cause = (f"{name}: {e['detail'].lower()} at {t(e)}, and {n} device{'s' if n != 1 else ''} behind it "
+                 "went with it")
     elif (other := first("reboot")):
         cause = f"{other['detail']} at {t(other)}"
     else:

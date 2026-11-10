@@ -92,6 +92,10 @@ class UniFiModule(ApiModule):
             try:
                 devices = await self._get(http, f"{base}/stat/device", headers)
                 health = await self._get(http, f"{base}/stat/health", headers)
+                try:  # the clients: which access point each one uses (for the map)
+                    stations = await self._get(http, f"{base}/stat/sta", headers)
+                except ApiError:
+                    stations = []
             finally:
                 try:
                     await http.post(f"{s['url']}/api/auth/logout", headers=headers)
@@ -110,7 +114,9 @@ class UniFiModule(ApiModule):
                                          "clients": _num(r.get("num_sta")), "use": _num(r.get("cu_total"))}
                                         for r in d.get("radio_table_stats") or []]} for d in devices],
                 "health": [{"subsystem": h.get("subsystem"), "status": h.get("status"), "users": h.get("num_user")}
-                           for h in health]}
+                           for h in health],
+                "clients": [{"mac": c.get("mac", ""), "name": c.get("name") or c.get("hostname") or "",
+                             "ap_mac": c.get("ap_mac", ""), "wired": bool(c.get("is_wired"))} for c in stations]}
         wlan = next((h for h in snap["health"] if h["subsystem"] == "wlan"), {})
         snap["_summary"] = f"{len(snap['devices'])} devices, {wlan.get('users') or 0} Wi-Fi clients"
         return snap
@@ -172,14 +178,19 @@ class UniFiModule(ApiModule):
             dd = next(c for c in CHECKS if c.id == cid)
             out.append(CheckResult(f"{self.id}.{cid}", dd.name, status, detail, value, dd.unit))
 
+        def on_map(devs):  # the access points with the problem, as nodes of the map (topology.py)
+            out[-1].extra["nodes"] = [f"mac:{d['mac'].upper()}" for d in devs if d.get("mac")]
+
         chosen = set(s.get("chosen", []))
         watched = [d for d in snap["devices"] if d["mac"] in chosen]
         bad = [f"{d['name']} {STATE.get(d['state'], d['state'])}" for d in watched if d["state"] not in (1, 4, 5)]
         busy = [f"{d['name']} {STATE[d['state']]}" for d in watched if d["state"] in (4, 5)]
         if bad:
             add("devices", ERROR, "; ".join(bad))
+            on_map([d for d in watched if d["state"] not in (1, 4, 5)])
         elif busy:
             add("devices", WARNING, "; ".join(busy))
+            on_map([d for d in watched if d["state"] in (4, 5)])
         else:
             add("devices", OK, f"{len(watched)} watched devices connected")
 

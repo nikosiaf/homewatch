@@ -431,3 +431,8 @@ pre.diff span { display: block; white-space: pre; }
 .diff-add { color: var(--ok); } .diff-del { color: var(--err); } .diff-at { color: var(--quiet); }
 pre.diff .diff-add { background: color-mix(in srgb, var(--ok) 12%, transparent); }
 pre.diff .diff-del { background: color-mix(in srgb, var(--err) 12%, transparent); }
+
+/* Map page: the device tree */
+.tree { list-style: none; margin: 0; padding-left: 18px; border-left: 1px solid var(--line, #8884); }
+.tree li { margin: 3px 0; }
+.card > .tree { border-left: 0; padding-left: 0; }

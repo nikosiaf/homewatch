@@ -14,7 +14,7 @@ from datetime import datetime
 
 import httpx
 
-from . import __version__, grafana, markers, report, todo, versions
+from . import __version__, grafana, markers, report, todo, topology, versions
 from .auth import audit, scrub_audit
 from .config import Config
 from .db import DB
@@ -242,6 +242,10 @@ class Runtime:
         metrics_error = ""
         series: list[str] = []  # detailed metrics of the modules that took a new reading in this run
         gap = max(3 * int(timing(self.db)["interval"]), 600)
+        try:
+            topology.refresh(self)  # the map, from the modules' last readings, for the problems found in this run
+        except Exception:  # noqa: BLE001 - the map is extra; the checks go on without it
+            log.exception("topology failed")
         for m in MODULES.values():
             if only is not None and m.id not in only:
                 results += [r for r in self.results if r.key.startswith(m.id + ".")]

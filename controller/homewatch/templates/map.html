@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Map{% endblock %}
+{% block content %}
+<h1>Map</h1>
+<div class="card">
+  <p>What hangs off what at home, found from the switches' MAC tables, the UniFi clients, Home Assistant's devices and
+    Proxmox. When a problem starts on a device behind something that has a problem, or that just restarted or lost link,
+    homeWatch names that as the likely reason; if that parent's problem was already sent, the device's own message is
+    left out and it is listed when the incident is over.</p>
+  <p class="quiet small">{{ nodes | length }} devices and ports, {{ found }} placed automatically · built
+    {{ built | ts if built else 'not yet' }} (with every check run, from the modules' last readings)</p>
+</div>
+
+<h2>Depends on, by hand</h2>
+<div class="card" id="edges">
+  <p class="quiet small">For what can't be found: an integration and the device it runs through (Zigbee2MQTT → the Zigbee
+    bridge), a device on a switch homeWatch doesn't read, a VM and the host it needs. A hand-made link wins over a found one.</p>
+  {% if edges %}<table><tr><th>Device</th><th>Depends on</th><th>By</th><th></th></tr>
+  {% for e in edges %}<tr><td>{{ nodes.get(e.child, {}).get('name', e.child) }}</td><td>{{ nodes.get(e.parent, {}).get('name', e.parent) }}</td>
+    <td class="quiet small">{{ e.created_by }}, {{ e.created | ts }}</td>
+    <td><form class="inline" method="post" action="/map/edges/{{ e.id }}/delete"><input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="_box" value="edges"><button class="secondary small">Remove</button></form></td></tr>{% endfor %}
+  </table>{% endif %}
+  <form method="post" action="/map/edges" class="row" style="margin-top:12px">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="edges">
+    <div><label for="ec">Device</label><input id="ec" name="child" list="nodes" required placeholder="start typing a name"></div>
+    <div><label for="ep">depends on</label><input id="ep" name="parent" list="nodes" required placeholder="start typing a name"></div>
+    <div><button>Add</button></div>
+    <datalist id="nodes">{% for nid, name in choices %}<option value="{{ nid }}">{{ name }}</option>{% endfor %}</datalist>
+  </form>
+</div>
+
+<h2>Found</h2>
+<div class="card scroll">
+  {% macro branch(items) %}<ul class="tree">{% for n in items %}
+    <li><b>{{ n.name }}</b> <span class="quiet small">{{ n.kind }}{% if n.id.startswith('mac:') %} · {{ n.id[4:] }}{% endif %}{% if n.via %} · {{ n.via }}{% endif %}</span>
+      {% if n.children %}{{ branch(n.children) }}{% endif %}</li>{% endfor %}</ul>{% endmacro %}
+  {% if tree %}{{ branch(tree) }}{% else %}<p class="quiet">Nothing yet: the map needs the MikroTik, UniFi, Home Assistant or
+    Proxmox module, and fills in at the next check run.</p>{% endif %}
+</div>
+{% endblock %}

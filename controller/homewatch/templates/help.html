@@ -74,6 +74,11 @@ less install.sh          # please read it first; it's short (q to quit)
       are one incident. Each problem is still sent as it comes, but "back to OK" waits and arrives as one message when the
       whole incident is over, with every check's times. If part of it stays open, what is already back to OK is sent after
       5 minutes anyway. History lists the incidents with their timeline.</li>
+    <li><b>Map:</b> what hangs off what (Map page), found from the MikroTik switches' MAC tables, the UniFi clients,
+      Home Assistant's devices and Proxmox; add what can't be found by hand (e.g. Zigbee2MQTT depends on the Zigbee
+      bridge). A problem on a device behind something that has a problem, or that just restarted or lost link, says so;
+      when that parent's problem was already sent, the device's own message is left out and it is listed with the
+      incident when it is over.</li>
     <li><b>Likely cause:</b> modules also note what their devices did, with the device's own time where it tells it:
       reboots (from uptime), DSL line resyncs and modem reboots, the UPS going on battery (its status is asked every
       10 seconds, so a power cut of half a minute is caught), MikroTik ports losing link,

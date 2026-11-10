@@ -144,6 +144,13 @@ MIGRATIONS: list[str] = [
     ALTER TABLE speedtests ADD COLUMN loaded_down REAL;
     ALTER TABLE speedtests ADD COLUMN loaded_up REAL;
     """,
+    # 12: the map: which devices a problem is about, and edges added by hand
+    """
+    ALTER TABLE issues ADD COLUMN nodes TEXT NOT NULL DEFAULT '[]';
+    CREATE TABLE topology_edges (
+        id INTEGER PRIMARY KEY, site TEXT NOT NULL, child TEXT NOT NULL, parent TEXT NOT NULL,
+        created_by TEXT NOT NULL, created REAL NOT NULL);
+    """,
 ]
 
 

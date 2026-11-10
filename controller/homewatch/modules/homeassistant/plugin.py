@@ -287,6 +287,7 @@ def catalog_row(e: dict, reg: dict | None = None) -> dict:
     return {"id": e["entity_id"], "name": a.get("friendly_name") or "", "state": str(e.get("state", "")),
             "unit": a.get("unit_of_measurement") or "", "kind": kind(e),
             "integration": r.get("integration", ""), "device": r.get("device", ""), "area": r.get("area", ""),
+            "mac": r.get("mac", ""),
             "first": bool(kind(e)) or dc in FIRST}
 
 
@@ -316,12 +317,14 @@ async def registries(url: str, token: str, verify) -> dict[str, dict]:
                 return {}
             out[cmd] = r["result"]
     areas = {x["area_id"]: x.get("name") or x["area_id"] for x in out["config/area_registry/list"]}
-    devices = {d["id"]: (d.get("name_by_user") or d.get("name") or "", d.get("area_id")) for d in out["config/device_registry/list"]}
+    devices = {d["id"]: (d.get("name_by_user") or d.get("name") or "", d.get("area_id"),
+                         next((c[1] for c in d.get("connections") or [] if len(c) == 2 and c[0] == "mac"), ""))
+               for d in out["config/device_registry/list"]}
     reg = {}
     for x in out["config/entity_registry/list_for_display"].get("entities", []):
-        dev, dev_area = devices.get(x.get("di"), ("", None))
+        dev, dev_area, dev_mac = devices.get(x.get("di"), ("", None, ""))
         reg[x["ei"]] = {"integration": integration_name(x.get("pl") or ""), "device": dev,
-                        "area": areas.get(x.get("ai") or dev_area, "")}
+                        "area": areas.get(x.get("ai") or dev_area, ""), "mac": dev_mac}
     return reg
 
 
@@ -654,7 +657,8 @@ class HomeAssistantModule(ApiModule):
                     "unit": a.get("unit_of_measurement") or "", "dc": a.get("device_class") or ""}
 
         integ = {c["id"]: c.get("integration", "") for c in self._catalog}
-        watched = [about(e) | {"kind": kind(e), "integ": integ.get(e["entity_id"], ""),
+        macs = {c["id"]: c.get("mac", "") for c in self._catalog}
+        watched = [about(e) | {"kind": kind(e), "integ": integ.get(e["entity_id"], ""), "mac": macs.get(e["entity_id"], ""),
                                "lr": _ts(e.get("last_reported") or e.get("last_updated"))}
                    for e in states if e["entity_id"] in watch]
         snap = {"config": {k: config.get(k) for k in ("version", "state", "safe_mode", "recovery_mode", "location_name")},
@@ -674,7 +678,11 @@ class HomeAssistantModule(ApiModule):
                 "stored": [{"entity_id": e["entity_id"], "values": entity_values(e)} for e in states
                            if e["entity_id"] in watch | grafana],
                 "recorded": [about(e) | {"values": entity_values(e)} for e in states if e["entity_id"] in grafana],
-                "catalog": self._catalog, "catalog_ts": self._found_ts}
+                "catalog": self._catalog, "catalog_ts": self._found_ts,
+                # devices with a MAC, for the map (topology.py)
+                "devices": list({c["mac"]: {"mac": c["mac"], "name": c.get("device", ""), "integration": c.get("integration", "")}
+                                 for c in self._catalog if c.get("mac")}.values())
+                + [{"mac": "", "name": "", "integration": i} for i in sorted({e["integ"] for e in watched if e["integ"]})]}
         snap["_summary"] = (f"Home Assistant {config.get('version', '?')}, {len(watch)} entities watched"
                             + (f", {len(grafana)} shown in Grafana" if grafana else ""))
         return snap
@@ -691,9 +699,21 @@ class HomeAssistantModule(ApiModule):
     def check(self, s, th, snap, now):
         out = []
 
-        def add(cid, status, detail, value=None):
+        def add(cid, status, detail, value=None, nodes=None):
             d = next(c for c in CHECKS if c.id == cid)
-            out.append(CheckResult(f"{self.id}.{cid}", d.name, status, detail, value, d.unit))
+            out.append(CheckResult(f"{self.id}.{cid}", d.name, status, detail, value, d.unit,
+                                   extra={"nodes": nodes} if nodes else {}))
+
+        def nodes_of(ents):
+            """The map's nodes these entities hang on: their device (by MAC) and their integration."""
+            by_id = {e["entity_id"]: e for e in watched}
+            out_ = []
+            for x in ents:
+                e = by_id.get(x["entity_id"], x)
+                for n in ([f"mac:{e['mac'].upper()}"] if e.get("mac") else []) + ([f"integ:{e['integ']}"] if e.get("integ") else []):
+                    if n not in out_:
+                        out_.append(n)
+            return out_
 
         c = snap["config"]
         if c.get("safe_mode") or c.get("recovery_mode"):
@@ -713,9 +733,13 @@ class HomeAssistantModule(ApiModule):
                     if quiet else "")
             add("unavailable", level(n, th["unavailable"]) if n else OK,
                 (f"{n} unavailable: " + ", ".join(e.get("name") or e["entity_id"] for e in gone) if n
-                 else f"{len(watched)} watched, none unavailable") + note, n)
+                 else f"{len(watched)} watched, none unavailable") + note, n, nodes_of(gone))
             if th["silent"].enabled:
-                add("silent", *silent_check(watched, self._seen, th["silent"]))
+                st, det, val = silent_check(watched, self._seen, th["silent"])
+                quiet = [e for e in watched if e["entity_id"] in self._seen and st
+                         and self._seen[e["entity_id"]]["learned"]
+                         and self._seen[e["entity_id"]]["age"] > max(GROUP_FACTOR * (self._seen[e["entity_id"]]["usual"] or 0), SILENT_MIN)]
+                add("silent", st, det, val, nodes_of(quiet))
         self._kinds(th, watched, add)
 
         ups = [u for u in snap["updates"] if not u.get("skipped_version") or u["skipped_version"] != u.get("latest_version")]

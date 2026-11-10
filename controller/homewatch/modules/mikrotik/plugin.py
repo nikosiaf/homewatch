@@ -248,6 +248,10 @@ class MikroTikModule(ApiModule):
         except ApiError:
             channel = ""
         ifs = await get("interface")
+        try:  # the MAC table: which device is on which port (for the map); read-only
+            table = await get("interface/bridge/host")
+        except ApiError:
+            table = []
         try:  # the router's clock: its port times are local time
             offset = gmt_offset((await get("system/clock")).get("gmt-offset"))
         except ApiError:
@@ -277,6 +281,10 @@ class MikroTikModule(ApiModule):
             "temp": next((float(h["value"]) for h in health if "temperature" in h.get("name", "")), None),
             "voltage": next((float(h["value"]) for h in health if h.get("name") == "voltage"), None),
             "boot": board.get("current-firmware"), "boot_upgrade": board.get("upgrade-firmware"),
+            "macs": sorted({i["mac-address"] for i in ifs if i.get("mac-address")}
+                           | {h["mac-address"] for h in table if str(h.get("local")) == "true" and h.get("mac-address")}),
+            "hosts": sorted({(h["mac-address"], h.get("on-interface") or h.get("interface") or "") for h in table
+                             if str(h.get("local")) != "true" and h.get("mac-address")}),
             "ports": [{"name": i["name"], "comment": i.get("comment") or "",
                        "running": str(i.get("running")) == "true", "disabled": str(i.get("disabled")) == "true",
                        "errors": int(i.get("rx-error", 0) or 0) + int(i.get("tx-error", 0) or 0),
@@ -420,6 +428,8 @@ class MikroTikModule(ApiModule):
         down = [f"{d['name']} {p['name']}" + (f" ({p['comment']})" if p["comment"] else "")
                 for d in devs for p in d["ports"] if self._key(d, p) in chosen and not p["running"]]
         add("ports", ERROR if down else OK, f"Down: {', '.join(down)}" if down else f"{len(chosen)} chosen ports up")
+        out[-1].extra["nodes"] = [f"port:{d['name']}/{p['name']}" for d in devs for p in d["ports"]
+                                  if self._key(d, p) in chosen and not p["running"]]
 
         new_errors, worst_port, worst_n = 0, "", 0
         for d in devs:

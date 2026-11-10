@@ -416,6 +416,55 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             audit(rt.db, user.username, "api.token.delete", row["name"])
         return back("/system", msg="Token deleted")
 
+    # -- the map (topology.py) --------------------------------------------------------------------------
+    @app.get("/map")
+    async def map_page(request: Request):
+        from . import topology
+        rt = rt_of(request)
+        nodes = topology.load(rt.db)
+        edges = rt.db.all("SELECT * FROM topology_edges WHERE site=? ORDER BY id", (rt.cfg.site,))
+        found = sum(1 for n in nodes.values() if n["parent"] and n["via"] != "by hand")
+        return page(request, "map.html", request.state.user, tree=topology.tree(nodes), nodes=nodes, edges=edges,
+                    found=found, built=rt.db.get("topology.built", 0), csrf=request.state.user.csrf,
+                    choices=sorted(((nid, n["name"]) for nid, n in nodes.items() if n["kind"] != "port"),
+                                   key=lambda x: x[1].lower()))
+
+    @app.post("/map/edges")
+    async def map_edge_add(request: Request):
+        from . import topology
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/map", err="Form expired")
+        nodes = topology.load(rt.db)
+        child, parent = str(form.get("child", "")).strip(), str(form.get("parent", "")).strip()
+        if child not in nodes or parent not in nodes:
+            return back("/map", err="Pick both from the list (start typing a name)")
+        if child == parent or child in topology.ancestors(nodes, parent):
+            return back("/map", err="That would make a loop")
+        rt.db.run("DELETE FROM topology_edges WHERE site=? AND child=?", (rt.cfg.site, child))
+        rt.db.run("INSERT INTO topology_edges(site,child,parent,created_by,created) VALUES(?,?,?,?,?)",
+                  (rt.cfg.site, child, parent, user.username, time.time()))
+        audit(rt.db, user.username, "map.edge", f"{nodes[child]['name']} depends on {nodes[parent]['name']}")
+        topology.refresh(rt)
+        return back("/map", msg=f"{nodes[child]['name']} now hangs off {nodes[parent]['name']}")
+
+    @app.post("/map/edges/{eid}/delete")
+    async def map_edge_delete(request: Request, eid: int):
+        from . import topology
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/map", err="Form expired")
+        row = rt.db.one("SELECT * FROM topology_edges WHERE id=? AND site=?", (eid, rt.cfg.site))
+        if row:
+            rt.db.run("DELETE FROM topology_edges WHERE id=?", (eid,))
+            audit(rt.db, user.username, "map.edge.delete", f"{row['child']} → {row['parent']}")
+            topology.refresh(rt)
+        return back("/map", msg="Removed")
+
     @app.get("/healthz")
     async def healthz(request: Request):
         rt = rt_of(request)

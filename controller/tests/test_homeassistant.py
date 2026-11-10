@@ -303,7 +303,8 @@ def test_registries_give_integration_device_and_area(monkeypatch):
             {"ei": "sensor.door_battery", "pl": "esphome", "di": "d1"},
             {"ei": "sensor.oil", "pl": "garmin_connect", "di": "d2", "ai": "kitchen"},
             {"ei": "input_boolean.x", "pl": "input_boolean"}]},
-        "config/device_registry/list": [{"id": "d1", "name": "sh_basement_door", "area_id": "basement"},
+        "config/device_registry/list": [{"id": "d1", "name": "sh_basement_door", "area_id": "basement",
+                                         "connections": [["mac", "aa:bb:cc:dd:ee:ff"]]},
                                         {"id": "d2", "name": "Tank", "name_by_user": "Oil tank", "area_id": None}],
         "config/area_registry/list": [{"area_id": "basement", "name": "Basement"}, {"area_id": "kitchen", "name": "Kitchen"}]}
     seen = {}
@@ -336,9 +337,10 @@ def test_registries_give_integration_device_and_area(monkeypatch):
     monkeypatch.setattr("websockets.asyncio.client.connect", fake_connect)
     reg = asyncio.run(ha.registries("https://ha.example:8123", "tok", True))
     assert seen["url"] == "wss://ha.example:8123/api/websocket" and seen["token"] == "tok" and seen["ssl"] is not None
-    assert reg["sensor.door_battery"] == {"integration": "ESPHome", "device": "sh_basement_door", "area": "Basement"}
-    assert reg["sensor.oil"] == {"integration": "Garmin connect", "device": "Oil tank", "area": "Kitchen"}
-    assert reg["input_boolean.x"] == {"integration": "Input boolean", "device": "", "area": ""}
+    assert reg["sensor.door_battery"] == {"integration": "ESPHome", "device": "sh_basement_door", "area": "Basement",
+                                          "mac": "aa:bb:cc:dd:ee:ff"}
+    assert reg["sensor.oil"] == {"integration": "Garmin connect", "device": "Oil tank", "area": "Kitchen", "mac": ""}
+    assert reg["input_boolean.x"] == {"integration": "Input boolean", "device": "", "area": "", "mac": ""}
     asyncio.run(ha.registries("http://ha.local:8123", "tok", True))
     assert seen["url"] == "ws://ha.local:8123/api/websocket" and seen["ssl"] is None
     row = ha.catalog_row({"entity_id": "sensor.door_battery", "state": "80",

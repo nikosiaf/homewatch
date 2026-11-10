@@ -39,6 +39,7 @@
     <a href="/history" class="{{ 'on' if p == '/history' }}">History</a>
     {% if user.is_admin %}
     <a href="/modules" class="{{ 'on' if p.startswith('/modules') }}">Modules</a>
+    <a href="/map" class="{{ 'on' if p.startswith('/map') }}">Map</a>
     <a href="/maintenance" class="{{ 'on' if p == '/maintenance' }}">Maintenance</a>
     <a href="/notifications" class="{{ 'on' if p == '/notifications' }}">Notifications</a>
     <a href="/system" class="{{ 'on' if p == '/system' }}">System</a>

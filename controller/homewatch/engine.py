@@ -124,8 +124,8 @@ class Engine:
                     db.run("UPDATE check_state SET pending=NULL,pending_count=0,pending_since=NULL,detail=?,value=? "
                            "WHERE site=? AND check_key=?", (res.detail, res.value, self.site, res.key))
                     if level != OK:
-                        db.run("UPDATE issues SET detail=? WHERE site=? AND check_key=? AND resolved IS NULL",
-                               (res.detail, self.site, res.key))
+                        db.run("UPDATE issues SET detail=?, nodes=? WHERE site=? AND check_key=? AND resolved IS NULL",
+                               (res.detail, json.dumps(res.extra.get("nodes") or []), self.site, res.key))
                     continue
                 if st["pending"] == level:
                     if res.observed_at is not None and res.observed_at == st["pending_obs"]:
@@ -216,8 +216,10 @@ class Engine:
     def _explain(self, db, inc) -> tuple[str, list]:
         from . import causes
 
-        keys = [r["check_key"] for r in db.all("SELECT check_key FROM issues WHERE incident_id=?", (inc["id"],))]
-        cause, evidence = causes.explain(db, self.site, inc["started"], inc["ended"], keys, tz(self.db))
+        rows = db.all("SELECT check_key, nodes FROM issues WHERE incident_id=?", (inc["id"],))
+        keys = [r["check_key"] for r in rows]
+        nodes = sorted({n for r in rows for n in json.loads(r["nodes"] or "[]")})
+        cause, evidence = causes.explain(db, self.site, inc["started"], inc["ended"], keys, tz(self.db), nodes)
         db.run("UPDATE incidents SET cause=?, evidence=? WHERE id=?", (cause, causes.dumps(evidence), inc["id"]))
         return cause, evidence
 
@@ -236,11 +238,20 @@ class Engine:
             db.run("UPDATE issues SET ok_sent=0, name=? WHERE id=?", (res.name, issue["id"]))
             return None
         if issue is None:
+            from . import topology
+
+            nodes = res.extra.get("nodes") or []
+            # a device behind something that has a problem, or just restarted or lost link: say so; and when that
+            # parent's problem was already sent, this one goes with it (listed when the incident is over)
+            above = topology.behind(db, self.site, nodes, now) if nodes else None
+            detail = f"{res.detail} ({above[0]})" if above else res.detail
             incident = self._incident_for(db, since, new)
-            db.run("INSERT INTO issues(site,check_key,level,worst,started,detail,notified,incident_id,name) "
-                   "VALUES(?,?,?,?,?,?,?,?,?)",
-                   (self.site, res.key, new, new, since, res.detail, 0 if silent else 1, incident, res.name))
-            return None if silent else Event("open", res.key, res.name, new, new, res.detail, since)
+            db.run("INSERT INTO issues(site,check_key,level,worst,started,detail,notified,incident_id,name,nodes) "
+                   "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                   (self.site, res.key, new, new, since, detail, 0 if silent else 1, incident, res.name, json.dumps(nodes)))
+            if silent or (above and above[1]):
+                return None
+            return Event("open", res.key, res.name, new, new, detail, since)
         worst = max(issue["worst"], new)
         db.run("UPDATE issues SET level=?, worst=?, detail=? WHERE id=?", (new, worst, res.detail, issue["id"]))
         if issue["incident_id"]:

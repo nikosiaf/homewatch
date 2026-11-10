@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import time
 from urllib.parse import urlsplit
 
@@ -34,6 +36,9 @@ def normalize_url(url: str) -> str:
     port = parts.port or 8006
     return f"https://{parts.hostname}:{port}"
 
+
+MAC_EVERY = 6 * 3600  # s: guest MACs are read again this often (they rarely change)
+MAC_RE = re.compile(r"(?:=|hwaddr=)([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})")
 
 class ProxmoxModule(PinnedTLS, Module):
     id = checks.MODULE
@@ -94,9 +99,28 @@ class ProxmoxModule(PinnedTLS, Module):
             elif self.snap:
                 snap.disks = self.snap.disks
             self.snap, self.snap_ts, self.error = snap, now, ""
+            await self._guest_macs(rt, s, now)
         except ApiError as e:
             self.snap, self.error = None, str(e)
             await self.note_changes(rt, s, str(e))
+
+    async def _guest_macs(self, rt, s, now: float) -> None:
+        """Each guest's network MACs from its config (net0: virtio=02:8F:…,bridge=vmbr0), for the map: the host sits
+        on the switch port where its guests are seen. Read once per guest, again every MAC_EVERY."""
+        cache = self.__dict__.setdefault("macs", {})
+        c = await self._client(rt, s)
+        for g in self.snap.guests:
+            key = (g.get("node"), g.get("vmid"), g.get("type"))
+            if key in cache and now - cache[key][0] < MAC_EVERY:
+                continue
+            try:
+                conf = await c.get(f"/nodes/{g['node']}/{g.get('type', 'qemu')}/{g['vmid']}/config") or {}
+            except ApiError:
+                conf = {}
+            cache[key] = (now, sorted({m.group(1).upper() for k, v in conf.items() if k.startswith("net")
+                                       for m in [MAC_RE.search(str(v))] if m}))
+        for g in self.snap.guests:
+            g["macs"] = cache.get((g.get("node"), g.get("vmid"), g.get("type")), (0, []))[1]
 
     def device_events(self, rt, prev):
         out: list[DevEvent] = []

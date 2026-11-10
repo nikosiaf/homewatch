@@ -417,6 +417,12 @@ Alerting works like this:
   WARNING only after waiting 14 days (7 for OPNsense and RouterOS); the limit is editable per check.
 - **Events, not warnings:** a single DSL resync or device reboot is an event and a Grafana marker; a
   WARNING comes when it repeats (3 resyncs or 2 reboots in 24 h by default).
+- **Map and root cause:** homeWatch builds a map of what hangs off what (the Map page) from the
+  MikroTik switches' MAC tables, the UniFi clients, Home Assistant's devices and Proxmox; links it can't
+  find (an integration and the bridge it runs through) are added by hand. A problem behind something
+  that has a problem, or that just restarted or lost link, names it; if that parent's problem was
+  already sent, the child's message is left out and listed with the incident. When an incident ends,
+  "a switch / access point restarted and N devices behind it went with it" is one of the likely causes.
 - **Silent entities:** Home Assistant keeps showing the last value of an entity whose hub, bridge or
   coordinator stopped. homeWatch learns how often each watched entity reports (from Home Assistant's
   "last reported" time, over its first 7 days) and names the ones silent for 3 times their usual gap
