@@ -92,6 +92,13 @@ less install.sh          # please read it first; it's short (q to quit)
       Checks and limits; empty = never).</li>
     <li><b>Events, not warnings:</b> one DSL resync or one switch, access point reboot is an event and a Grafana marker.
       A WARNING comes only when it repeats: 3 resyncs or 2 reboots in 24 hours by default.</li>
+    <li><b>Silent entities:</b> when a hub, bridge or coordinator stops, Home Assistant keeps showing its entities'
+      last values. homeWatch learns how often each watched entity reports (its first 7 days) and names the ones silent
+      for 3 times their usual gap, at least an hour. Half or more of one integration's watched entities silent together
+      is an ERROR. Entities that report only when something happens (door contacts) have long gaps and are noticed late;
+      sensors reporting every few minutes are noticed within the hour.</li>
+    <li><b>No new reading:</b> a module tile on Status says so when its device hasn't been read for 3 of its read
+      intervals (10 minutes at least).</li>
     <li><b>Flapping entities:</b> a Home Assistant entity that went unavailable 3 times in 7 days and came back by itself
       within 2 hours each time (phone and cloud sensors often do) is named under Unavailable entities but not counted.
       Untick "Leave out entities that keep flapping" in the module's settings to count every one.</li>

@@ -137,7 +137,7 @@ def test_rule_lines_and_check_rule():
 def test_hidden_checks_follow_the_ticks():
     m = HomeAssistantModule()
     m._catalog = [{"id": "sensor.door_battery", "kind": "battery"}, {"id": "sensor.oil", "kind": ""}]
-    assert m.hidden_checks({}) == {"unavailable", "alarm", "safety", "tamper", "batteries", "addons", "rules"}
+    assert m.hidden_checks({}) == {"unavailable", "silent", "alarm", "safety", "tamper", "batteries", "addons", "rules"}
     s = {"watch": ["sensor.door_battery", "sensor.oil"], "entity_rules": {"sensor.oil": "below 1 error"}}
     assert m.hidden_checks(s) == {"alarm", "safety", "tamper", "addons"}
     assert "rules" in m.hidden_checks({"watch": ["sensor.door_battery"], "entity_rules": {"sensor.oil": "below 1 error"}})

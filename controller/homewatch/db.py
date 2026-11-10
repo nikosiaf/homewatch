@@ -126,6 +126,12 @@ MIGRATIONS: list[str] = [
         'mikrotik.firmware', 'unifi.firmware') AND warn IS NULL;
     DELETE FROM checks WHERE check_key IN ('mikrotik.uptime', 'unifi.uptime');
     """,
+    # 10: how often each watched Home Assistant entity reports, to notice when one goes silent
+    """
+    CREATE TABLE entity_seen (
+        site TEXT NOT NULL, entity_id TEXT NOT NULL, first REAL NOT NULL, last REAL NOT NULL,
+        gaps TEXT NOT NULL DEFAULT '[]', PRIMARY KEY (site, entity_id));
+    """,
 ]
 
 

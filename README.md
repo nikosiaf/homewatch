@@ -229,6 +229,7 @@ you last saved the list carry a **new** badge.
   | Check (only listed once such an entity is watched) | WARNING | ERROR |
   |---|---|---|
   | Unavailable entities (30 min or longer) | ≥ 1 | ≥ 10 |
+  | Silent entities (no report for 3 × their usual gap, at least 1 h; learned over their first 7 days) | ≥ 1 | half or more of one integration's watched entities silent together |
   | Alarm panels | | triggered |
   | Safety sensors (smoke, water / moisture, gas, CO, heat, safety) | | detecting |
   | Tamper sensors | | tampered |
@@ -411,6 +412,14 @@ Alerting works like this:
   WARNING only after waiting 14 days (7 for OPNsense and RouterOS); the limit is editable per check.
 - **Events, not warnings:** a single DSL resync or device reboot is an event and a Grafana marker; a
   WARNING comes when it repeats (3 resyncs or 2 reboots in 24 h by default).
+- **Silent entities:** Home Assistant keeps showing the last value of an entity whose hub, bridge or
+  coordinator stopped. homeWatch learns how often each watched entity reports (from Home Assistant's
+  "last reported" time, over its first 7 days) and names the ones silent for 3 times their usual gap
+  (at least an hour); when half or more of one integration's entities go quiet together it is an ERROR.
+  Entities that report only when something happens (door contacts) have long usual gaps, so they are
+  noticed late; sensors that report every few minutes are noticed within the hour.
+- **No new reading:** a module tile on the Status page says so when its device hasn't been read for
+  3 of its read intervals (10 minutes at least), so old results don't look current.
 - **Flapping entities:** a Home Assistant entity that keeps going unavailable and coming back by itself
   (3 short spells in 7 days) is named but not counted, unless you untick that in the module's settings.
 - **Useful or noise:** mark problems on the History page; the weekly report lists the noisiest checks.

@@ -17,7 +17,7 @@ from fnmatch import fnmatchcase
 
 import httpx
 
-from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from .. import ERROR, OK, WARNING, CheckDef, CheckResult, Thresholds, level
 from ...metrics import lines, num
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Field, https_url
@@ -28,6 +28,11 @@ CHECKS = [
     CheckDef("core", "Core", "api", help="WARNING when Home Assistant is starting, stopping or in safe / recovery mode."),
     CheckDef("unavailable", "Unavailable entities", "api", warn=1, error=10, editable=("warn", "error"),
              help="Watched entities unavailable for 30 minutes or more."),
+    CheckDef("silent", "Silent entities", "api", warn=1, editable=("warn",),
+             help="Watched entities that stopped reporting: homeWatch learns how often each one reports (its first "
+                  "7 days) and names the ones silent for 3 times their usual gap, at least an hour. ERROR when half "
+                  "or more of an integration's watched entities go silent together (a hub, bridge or coordinator "
+                  "that stopped, while Home Assistant still shows their last values)."),
     CheckDef("alarm", "Alarm panels", "api",
              help="Watched alarm panels: ERROR when one is triggered."),
     CheckDef("safety", "Safety sensors", "api",
@@ -53,11 +58,15 @@ CHECKS = [
                   "WARNING when a number rule gets no number."),
 ]
 # checks with nothing to look at until a fitting entity is watched: hidden until then
-BY_ENTITY = ("unavailable", "alarm", "safety", "tamper", "batteries", "addons", "rules")
+BY_ENTITY = ("unavailable", "silent", "alarm", "safety", "tamper", "batteries", "addons", "rules")
 SETTLE = 30 * 60
 FLAP_SHORT = 2 * 3600  # s: unavailable for less than this, then back by itself, is one flap
 FLAP_COUNT = 3  # flaps in FLAP_DAYS that make an entity "keeps flapping"
 FLAP_DAYS = 7
+SILENT_FACTOR = 3  # silent: no report for this many times the entity's usual (95th percentile) gap…
+SILENT_MIN = 3600  # …and at least this long
+GROUP_FACTOR = 2  # an integration counts as silent sooner: half its entities quiet for twice their usual gap
+LEARN_DAYS, LEARN_GAPS, KEEP_GAPS = 7, 20, 50  # judged only after this long and this many gaps seen
 FULL_EVERY = 30  # minutes between full state reads, which find new entities and new updates
 FULL_MIN, FULL_MAX = 5, 1440
 NOT_READY = ("unavailable", "unknown")
@@ -109,6 +118,75 @@ def flaps(db, site: str, unavailable: set[str], now: float) -> set[str]:
         rows = t.all("SELECT entity_id FROM flaps WHERE site=? AND start>? AND end IS NOT NULL AND end-start<? "
                      "GROUP BY entity_id HAVING COUNT(*)>=?", (site, now - FLAP_DAYS * 86400, FLAP_SHORT, FLAP_COUNT))
     return {r["entity_id"] for r in rows}
+
+
+def learn(db, site: str, watched: list[dict], now: float) -> dict[str, dict]:
+    """Note each watched entity's last report and the gaps between its reports; return entity id ->
+    {age, usual (95th percentile gap), learned}. Entities no longer watched are forgotten."""
+    out = {}
+    with db.tx() as t:
+        rows = {r["entity_id"]: r for r in t.all("SELECT * FROM entity_seen WHERE site=?", (site,))}
+        for e in watched:
+            eid, lr = e["entity_id"], e.get("lr")
+            if lr is None:
+                continue
+            r = rows.pop(eid, None)
+            if r is None:
+                t.run("INSERT INTO entity_seen(site,entity_id,first,last) VALUES(?,?,?,?)", (site, eid, now, lr))
+                first, gaps, last = now, [], lr
+            else:
+                first, gaps, last = r["first"], json.loads(r["gaps"]), r["last"]
+                if lr > last:
+                    gaps = (gaps + [round(lr - last, 1)])[-KEEP_GAPS:]
+                    last = lr
+                    t.run("UPDATE entity_seen SET last=?, gaps=? WHERE site=? AND entity_id=?",
+                          (last, json.dumps(gaps), site, eid))
+            usual = sorted(gaps)[max(0, int(len(gaps) * 0.95) - 1)] if gaps else None
+            out[eid] = {"age": max(0.0, now - last), "usual": usual,
+                        "learned": len(gaps) >= LEARN_GAPS and now - first >= LEARN_DAYS * 86400}
+        for eid in rows:
+            t.run("DELETE FROM entity_seen WHERE site=? AND entity_id=?", (site, eid))
+    return out
+
+
+def _short(seconds: float) -> str:
+    if seconds < 5400:
+        return f"{seconds / 60:.0f} min"
+    if seconds < 172800:
+        return f"{seconds / 3600:.1f}".removesuffix(".0") + " h"
+    return f"{seconds / 86400:.0f} days"
+
+
+def silent_check(watched: list[dict], seen: dict[str, dict], t: Thresholds):
+    """(status, detail, value) for the Silent entities check."""
+    alive = [e for e in watched if e.get("state") not in NOT_READY and e["entity_id"] in seen]
+    learned = [e for e in alive if seen[e["entity_id"]]["learned"]]
+    if not learned:
+        return OK, (f"learning how often the watched entities report ({LEARN_DAYS} days, {LEARN_GAPS} reports each)"
+                    if alive else "no watched entity reports a time"), 0
+
+    def quiet(e, factor):
+        s = seen[e["entity_id"]]
+        return s["age"] > max(factor * (s["usual"] or 0), SILENT_MIN)
+
+    silent = [e for e in learned if quiet(e, SILENT_FACTOR)]
+    groups = {}
+    for e in learned:
+        if e.get("integ"):
+            groups.setdefault(e["integ"], []).append(e)
+    down = [(g, ents, [e for e in ents if quiet(e, GROUP_FACTOR)]) for g, ents in sorted(groups.items())]
+    down = [(g, ents, q) for g, ents, q in down if len(ents) >= 2 and 2 * len(q) >= len(ents)]
+    name = lambda e: e.get("name") or e["entity_id"]  # noqa: E731
+    if down:
+        parts = [f"{g}: {len(q)} of {len(ents)} watched entities silent, longest "
+                 f"{_short(max(seen[e['entity_id']]['age'] for e in q))}" for g, ents, q in down]
+        return ERROR, "; ".join(parts), len({e["entity_id"] for _, _, q in down for e in q} | {e["entity_id"] for e in silent})
+    if silent:
+        silent.sort(key=lambda e: -seen[e["entity_id"]]["age"])
+        what = ", ".join(f"{name(e)} ({_short(seen[e['entity_id']]['age'])}, usually within "
+                         f"{_short(seen[e['entity_id']]['usual'] or 0)})" for e in silent[:5])
+        return level(len(silent), t), f"{len(silent)} silent: {what}" + (" …" if len(silent) > 5 else ""), len(silent)
+    return OK, f"{len(learned)} of {len(alive)} watched entities learned, none silent", 0
 
 
 def _domain(eid: str) -> str:
@@ -356,6 +434,7 @@ class HomeAssistantModule(ApiModule):
         self._ids: list[str] | None = None  # entities read one by one between full reads
         self._flap_ts = None  # the reading the flaps were last counted for
         self._flappy: set[str] = set()
+        self._seen: dict[str, dict] = {}  # entity id -> how long since it reported, its usual gap
         self._updates: list[dict] = []
         self._total = 0
         self._found_ts = 0.0
@@ -486,7 +565,7 @@ class HomeAssistantModule(ApiModule):
             kinds = {e.get("kind", "") for e in self.snap.get("watched", [])}
         hidden = {KIND_CHECK[k] for k in KIND_CHECK if k not in kinds}
         if not watched:
-            hidden.add("unavailable")
+            hidden |= {"unavailable", "silent"}
         if not rule_lines(settings.get("entity_rules") or {}, watched):
             hidden.add("rules")
         return hidden
@@ -505,6 +584,7 @@ class HomeAssistantModule(ApiModule):
         if self.snap and self.snap_ts != self._flap_ts:
             self._flap_ts = self.snap_ts
             self._flappy = flaps(rt.db, rt.cfg.site, {e["entity_id"] for e in self.snap.get("unavailable", [])}, now)
+            self._seen = learn(rt.db, rt.cfg.site, self.snap.get("watched", []), now)
         return out
 
     def notice(self, settings):
@@ -573,7 +653,10 @@ class HomeAssistantModule(ApiModule):
             return {"entity_id": e["entity_id"], "state": e.get("state"), "name": a.get("friendly_name") or "",
                     "unit": a.get("unit_of_measurement") or "", "dc": a.get("device_class") or ""}
 
-        watched = [about(e) | {"kind": kind(e)} for e in states if e["entity_id"] in watch]
+        integ = {c["id"]: c.get("integration", "") for c in self._catalog}
+        watched = [about(e) | {"kind": kind(e), "integ": integ.get(e["entity_id"], ""),
+                               "lr": _ts(e.get("last_reported") or e.get("last_updated"))}
+                   for e in states if e["entity_id"] in watch]
         snap = {"config": {k: config.get(k) for k in ("version", "state", "safe_mode", "recovery_mode", "location_name")},
                 "unavailable": [{"entity_id": e["entity_id"], "name": e["name"],
                                  "last_changed": next((x.get("last_changed") for x in states if x["entity_id"] == e["entity_id"]), None)}
@@ -631,6 +714,8 @@ class HomeAssistantModule(ApiModule):
             add("unavailable", level(n, th["unavailable"]) if n else OK,
                 (f"{n} unavailable: " + ", ".join(e.get("name") or e["entity_id"] for e in gone) if n
                  else f"{len(watched)} watched, none unavailable") + note, n)
+            if th["silent"].enabled:
+                add("silent", *silent_check(watched, self._seen, th["silent"]))
         self._kinds(th, watched, add)
 
         ups = [u for u in snap["updates"] if not u.get("skipped_version") or u["skipped_version"] != u.get("latest_version")]

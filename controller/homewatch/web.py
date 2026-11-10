@@ -1518,7 +1518,12 @@ def _status_ctx(request: Request) -> dict:
     for m in MODULES.values():
         mine = [t["r"] for t in tiles if t["r"].key.startswith(m.id + ".")]
         if mine:
-            info[m.id] = {"observed": m.observed(mine), "last_good": m.reading_ts(rt) or rt.engine.last_observed(m.id)}
+            last = m.reading_ts(rt) or rt.engine.last_observed(m.id)
+            ms = m.load(rt)
+            every = 60 * float(ms.get("every_min") or ms.get("interval_min") or getattr(m, "every_min", 0) or 2)
+            # no new reading for 3 of its own intervals (10 minutes at least): the module's checks show old news
+            stale = last is not None and now - last > max(3 * every, 600)
+            info[m.id] = {"observed": m.observed(mine), "last_good": last, "stale": stale}
     switched_off = [m.name for m in MODULES.values() if m.is_set_up(rt) and not m.enabled(m.load(rt))]
     unknown = [m.name for m in MODULES.values() if m.id in info and not info[m.id]["observed"]]
     from . import grafana, todo
