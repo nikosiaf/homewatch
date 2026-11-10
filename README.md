@@ -8,9 +8,11 @@
 A small, self-hosted monitor for your home network, configured from a plain web page.
 homeWatch watches **your internet line**, **your provider's DSL modem**, **your Proxmox VE host**,
 **your OPNsense firewall**, **Home Assistant**, **your Synology NAS**, **your MikroTik switches**, **UniFi**, **Proxmox Backup Server**, **your UPS** and **your Docker hosts**. It tells you *what* broke ("router unreachable", "line down", "DNS failing", "DSL link
-down", "guest stopped", "backup failed") and sends alerts to Telegram, ntfy, email or a webhook.
-Optionally it adds **Grafana dashboards**, an Overview and one per module, behind your homeWatch login,
-with a year of history from every device, port and guest, and from the Home Assistant entities you choose.
+down", "guest stopped", "backup failed"), groups problems that start together into one incident with
+its likely cause, and sends alerts to Telegram, ntfy, email or a webhook. A **map** shows how your
+devices are connected and points out **new devices** on the network. Optionally it adds **Grafana
+dashboards** (an Overview, Health and one per module) behind your homeWatch login, with a year of
+history, and it can appear in **Home Assistant** over MQTT.
 
 - Runs as a Docker Compose stack on any Linux host (amd64 or arm64)
 - LAN / Tailscale only: it never needs a port open to the internet
@@ -39,7 +41,9 @@ with a year of history from every device, port and guest, and from the Home Assi
 - [Proxmox Backup Server](#proxmox-backup-server-module-optional): datastores and their deduplication factor, recent backups, verify/prune/garbage-collection jobs and updates
 - [UPS](#ups-module-optional): mains power, battery charge, runtime, load and UPS health from a NUT server
 - [Docker hosts](#docker-hosts-module-optional): containers running, restarts, health checks and removed containers, through a read-only socket proxy
-- [Alerts and notifications](#alerts-and-notifications): Telegram, ntfy, email, webhook and a healthchecks.io heartbeat
+- [Map](#map): how your devices are connected, new devices on the network, root causes
+- [Alerts and notifications](#alerts-and-notifications): incidents and likely causes, Telegram, ntfy, email, webhook and a healthchecks.io heartbeat
+- [Home Assistant (MQTT)](#home-assistant-mqtt): homeWatch as a device in Home Assistant
 - [API](#api): read-only JSON for scripts and other tools, with tokens
 - [Grafana dashboards](#grafana-dashboards-optional): an Overview, Health and one dashboard per module, incident and event markers, with your homeWatch login
 - [Update](#update) · [Back up](#back-up) · [Security notes](#security-notes) · [Development](#development)
@@ -102,6 +106,14 @@ mkdir certs && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -no
 docker compose up -d             # then open https://<host>:5443 (HW_HTTPS_PORT in .env)
 ```
 
+### Behind a reverse proxy
+
+If browsers reach homeWatch through a reverse proxy (HAProxy, nginx…), put the proxy's address in
+`HW_TRUSTED_PROXIES` in `.env`, for example `HW_TRUSTED_PROXIES=192.168.1.1`, and run
+`docker compose up -d`. The proxy must send `X-Forwarded-For`. Without this setting every visitor
+counts as the proxy's address, so one person's failed logins lock everyone out for 5 minutes.
+Don't list anything that isn't a proxy: whoever is listed can claim to be any address.
+
 ## What homeWatch does
 
 ### Internet line module
@@ -122,12 +134,12 @@ Every probe can be switched off, and every threshold changed, in the web page.
 | Latency (5-min median) | ≥ 200 ms | |
 | Jitter (10-min median) | ≥ 50 ms | ≥ 100 ms |
 | Gateway reachable | | 100 % loss |
-| DNS | ≥ 500 ms | lookups fail while ping works |
+| DNS (5-min median) | ≥ 1000 ms | lookups fail while ping works |
 | Line speed | < 50 % of contract on 2 tests in a row | optional level, e.g. < 30 % |
-| Speed test recent | no successful test for 7 h | |
-| Speed test latency | > 40 ms on 2 tests in a row | |
+| Speed test recent | no successful test for 14 h | |
+| Speed test latency (off by default; Ookla only) | > 40 ms on 2 tests in a row | |
 | Latency under load (off by default) | ≥ 200 ms more than idle on 2 tests in a row (grade D) | |
-| Probe data fresh | | no data for > 3 min |
+| Probe data fresh | | no data for 5 min |
 
 ### ISP modem module (optional)
 
@@ -156,14 +168,6 @@ Things to know before you add a modem:
   the first reading and logs in only to that one. If it changes, the check goes to ERROR and
   homeWatch stops logging in until you accept the new one on the module page. The first reading
   itself can't tell an impostor from the modem, so add the modem on a network you trust.
-
-### Behind a reverse proxy
-
-If browsers reach homeWatch through a reverse proxy (HAProxy, nginx…), put the proxy's address in
-`HW_TRUSTED_PROXIES` in `.env`, for example `HW_TRUSTED_PROXIES=192.168.1.1`, and run
-`docker compose up -d`. The proxy must send `X-Forwarded-For`. Without this setting every visitor
-counts as the proxy's address, so one person's failed logins lock everyone out for 5 minutes.
-Don't list anything that isn't a proxy: whoever is listed can claim to be any address.
 
 ### Proxmox VE module (optional)
 
@@ -261,15 +265,21 @@ you last saved the list carry a **new** badge.
 Values are stored only for ticked entities (either column). When you untick both boxes of an entity,
 homeWatch asks whether to keep or delete what it has stored so far.
 
+**Silent entities.** When a hub, bridge or coordinator stops, Home Assistant keeps showing its
+entities' last values. homeWatch learns how often each watched entity reports (its "last reported"
+time, over its first 7 days) and names the ones silent for 3 times their usual gap, at least an hour;
+half or more of one integration's watched entities silent together is an ERROR. Entities that report
+only when something happens (door contacts) have long gaps and are noticed late; sensors that report
+every few minutes are noticed within the hour.
+
+**Flapping entities.** An entity that went unavailable 3 times in 7 days and came back by itself within
+2 hours each time (phone and cloud sensors often do) is named under Unavailable entities but not
+counted. Untick "Leave out entities that keep flapping" in the module's settings to count every one.
+
 **Add-ons** (Home Assistant OS / Supervised): a non-admin user can't read the Supervisor, so homeWatch
 uses the add-ons' **Running** sensors. They are disabled by default: in Settings → Devices & services →
 Home Assistant Supervisor, open each add-on that must always run, enable its "Running" sensor, then
 tick Watch for it in homeWatch.
-
-Upgrading from 0.35 or older: the old lists (entities to watch, unavailable ones to ignore, entities
-to record, rules by pattern) are turned into ticks once, at the first reading. What was watched stays
-watched, what was recorded is shown in Grafana, and a pattern rule is copied to each entity it
-matched. The change is a configuration version, so it can be undone under System.
 
 ### Synology NAS module (optional)
 
@@ -407,7 +417,39 @@ readings agree, so expect an alert one to two read intervals after it starts.
 | Proxmox Backup Server | 15 min | backups run nightly |
 | ISP modem | 15 min | its own setting |
 
-### Alerts and notifications
+## Map
+
+The **Map** page shows how your devices are connected, drawn top down: the ISP modem and the Proxmox
+host with its WAN and LAN cards, the switches with their uplink, what is wired to each switch port, and
+the Wi-Fi clients of each access point. One thing opens at a time on each level. homeWatch finds it
+from what the modules already read:
+
+- **MikroTik:** each switch's MAC table; a device sits on the port with the fewest MACs (an uplink
+  carries many), and a switch on the port where another switch sees its MACs.
+- **UniFi:** Wi-Fi clients under their access point; clients not connected now stay in red under the
+  access point they last used (UniFi's client history, 30 days).
+- **Home Assistant:** device names and MACs, hubs and bridges with the devices that come through them
+  (Zigbee, alarm panels), and Bluetooth devices under the Bluetooth proxy.
+- **Proxmox:** the host on the switch port where its guests are seen, its network cards from its
+  bridges, its VMs and containers (stopped ones in red), and the UPS when its NUT server runs there.
+- **Addresses and names:** OPNsense's ARP table and DHCP leases (see the OPNsense module), UniFi, Home
+  Assistant, and the addresses the modules are set up with (the PBS, the NAS…).
+
+The map is rebuilt at every check run (Home Assistant's devices every 30 minutes, Proxmox's guests and
+network cards every 6 hours); **Scan now** reads them all at once. What can't be found is added under
+**Manually set dependencies** (an integration and the bridge it runs through, a device on a switch
+homeWatch doesn't read).
+
+- **Root cause:** a problem on a device behind something that has a problem, or that just restarted or
+  lost its link, names it. If that parent's problem was already sent, the device's own message is
+  left out and listed with the incident when it is over; "a switch or access point restarted and N
+  devices behind it went with it" is one of the likely causes.
+- **New on the network:** a device never seen before (a MAC on a switch port or access point, or a new
+  VM) is listed on the Status page, marked "new" on the Map and sent once as a WARNING, until you mark
+  it as **Known**. What was there the first time (and UniFi's client history) counts as known. Phones
+  with a private Wi-Fi address show up again now and then; they are labelled so.
+
+## Alerts and notifications
 
 Notification providers: **Telegram**, **ntfy** (one topic URL), **email** (any SMTP server; port
 465 = TLS, other ports STARTTLS, a password is never sent unencrypted), **webhook** and the
@@ -415,52 +457,34 @@ Notification providers: **Telegram**, **ntfy** (one topic URL), **email** (any S
 
 Alerting works like this:
 - **Confirmation:** a change must hold for 2 runs (about 4 minutes) before it's sent.
+- **Incidents and likely cause:** problems that start within 30 minutes of each other are one
+  incident; "back to OK" arrives as one message when the whole incident is over. The modules note what
+  their devices did, at the device's own time where it tells it (reboots, DSL resyncs, the UPS on
+  battery, ports and gateways going down, PPPoE drops), and when an incident ends homeWatch names the
+  likely cause: a power cut in the area or at home, a modem restart, a line or ISP problem, one of your
+  own devices. History lists incidents with their timeline.
+- **Events, not warnings:** a single DSL resync or device reboot is an event and a Grafana marker; a
+  WARNING comes when it repeats (3 resyncs or 2 reboots in 24 h by default).
 - **To do instead of problems:** updates and firmware (Home Assistant, PBS, DSM, UniFi, RouterOS and
   RouterBOOT, OPNsense) are listed under To do on the Status page and in the weekly report. They become a
   WARNING only after waiting 14 days (7 for OPNsense and RouterOS); the limit is editable per check.
-- **Events, not warnings:** a single DSL resync or device reboot is an event and a Grafana marker; a
-  WARNING comes when it repeats (3 resyncs or 2 reboots in 24 h by default).
-- **New on the network:** a device never seen before (a MAC on a switch port or access point, or a new
-  VM) is listed on the Status page, marked "new" on the Map and sent once as a WARNING, until you mark
-  it as **Known**. What was there when this started (and UniFi's client history) counts as known.
-- **Map and root cause:** homeWatch builds a map of what hangs off what (the Map page) from the
-  MikroTik switches' MAC tables, the UniFi clients, Home Assistant's devices and Proxmox; links it can't
-  find (an integration and the bridge it runs through) are added under **Manually set dependencies**.
-  The map is rebuilt at every check run (Home Assistant's devices every 30 minutes, Proxmox's guests
-  and network cards every 6 hours); **Scan now** reads them all at once. A problem behind something
-  that has a problem, or that just restarted or lost link, names it; if that parent's problem was
-  already sent, the child's message is left out and listed with the incident. When an incident ends,
-  "a switch / access point restarted and N devices behind it went with it" is one of the likely causes.
-- **Silent entities:** Home Assistant keeps showing the last value of an entity whose hub, bridge or
-  coordinator stopped. homeWatch learns how often each watched entity reports (from Home Assistant's
-  "last reported" time, over its first 7 days) and names the ones silent for 3 times their usual gap
-  (at least an hour); when half or more of one integration's entities go quiet together it is an ERROR.
-  Entities that report only when something happens (door contacts) have long usual gaps, so they are
-  noticed late; sensors that report every few minutes are noticed within the hour.
-- **No new reading:** a module tile on the Status page says so when its device hasn't been read for
-  3 of its read intervals (10 minutes at least), so old results don't look current.
-- **Flapping entities:** a Home Assistant entity that keeps going unavailable and coming back by itself
-  (3 short spells in 7 days) is named but not counted, unless you untick that in the module's settings.
-- **Useful or noise:** mark problems on the History page; the weekly report lists the noisiest checks.
+- **Reminders:** open problems are repeated every 12 h (not for acknowledged ones).
+- **Snooze and maintenance windows:** they hold notifications without losing the history.
+- **Quiet hours** per channel: warnings wait until they end, errors are always sent.
+- **Offline queue:** messages that can't be sent while the line is down go out when it's back, with the outage times.
 - **Buttons in ntfy:** Snooze 1 day, Acknowledge (no more reminders) and Open homeWatch, as one-time
   links valid for 24 h. They need homeWatch's address (System → Home) reachable from the phone (home
   network or VPN); homeWatch is never opened to the internet for them.
 - **What to do:** messages carry a line on what to check first; write your own per check under the
   module's **Checks and limits → What to do**.
-- **Reminders:** open problems are repeated every 12 h (not for acknowledged ones).
-- **Offline queue:** messages that can't be sent while the line is down go out when it's back, with the outage times.
-- **Snooze and maintenance windows:** they hold notifications without losing the history.
-- **Quiet hours** per channel: warnings wait until they end, errors are always sent.
+- **Useful or noise:** mark problems on the History page; the weekly report lists the noisiest checks.
 - **Weekly report:** optional; pick the day, the time and the channels. It has the week's uptime, line
   quality and speed, the longest issues, what is still to do and the checks with the most issues.
 - **healthchecks.io heartbeat:** optional. homeWatch pings it after every run, and healthchecks.io
   alerts you when the pings stop (host, power or internet down).
+- **Status page:** a module tile says "No new reading for …" when its device hasn't been read for 3 of
+  its read intervals, so old results don't look current.
 - **History** is a timeline of every problem and its return to OK.
-
-**Configuration versions** (System page): every saved change to modules, thresholds, timing, channels
-or maintenance windows is kept as a version (last 200), showing who changed what. Each can be viewed
-and restored; a restore is itself a version, so it can be undone. Passwords, tokens and users are
-never part of a version.
 
 ### Webhook
 
@@ -475,10 +499,6 @@ like a password (webhook URLs usually contain a token) and is never part of an e
 `text` makes it work as-is with Slack, Mattermost and Rocket.Chat incoming webhooks, `content` with
 Discord (cut to 2000 characters). For Home Assistant, Node-RED or n8n use `level` / `level_name`,
 `title` and `body`.
-
-There are two account roles: **admin**, who can change everything, and **viewer**, who can only see
-status and history.
-
 
 ## Home Assistant (MQTT)
 
@@ -585,6 +605,11 @@ Everything homeWatch knows lives in two Docker volumes:
 
 With Grafana, also `homewatch_grafana-data` (your own dashboards; the built-in ones are recreated).
 
+**Configuration versions** (System page): every saved change to modules, thresholds, timing, channels
+or maintenance windows is kept as a version (last 200), showing who changed what. Each can be viewed
+and restored; a restore is itself a version, so it can be undone. Passwords, tokens and users are
+never part of a version.
+
 **Settings export:** System → Export and import downloads all settings as one YAML file (modules,
 thresholds, timing, channels, maintenance windows; no passwords, tokens or users). homeWatch also
 writes one every night into the data volume (`exports/`, last 14 kept). Importing a file replaces
@@ -629,18 +654,25 @@ allow redistribution. **System → Health** shows the installed version.
 ## Security notes
 
 - **Exposure:** don't forward homeWatch to the internet. Use it on your LAN or over Tailscale.
+- **Accounts:** an **admin** can change everything; a **viewer** can only see status, history and help.
 - **Outbound:** besides the devices you add, homeWatch reaches only the internet servers you set it to
   use: the public servers the Internet module pings and asks for DNS lookups, the speed-test service,
-  your notification channels, GitHub for the daily release check (which you can turn off) and, if you
-  tick it, `upgrade.mikrotik.com` once a day for the newest RouterOS version.
+  your notification channels, the MQTT broker if you set one, GitHub for the daily release check (which
+  you can turn off) and, if you tick it, `upgrade.mikrotik.com` once a day for the newest RouterOS
+  version.
 - **Network:** only Caddy publishes ports: HTTPS on 5443 and HTTP on 5080, which only redirects to HTTPS
   (`HW_HTTPS_PORT` / `HW_HTTP_PORT` in `.env`). VictoriaMetrics, Telegraf, Grafana and
   the controller stay on internal Docker networks.
 - **Grafana:** reached only through Caddy, which asks homeWatch who you are first. Grafana trusts the
   user name homeWatch hands it only from the small private network it shares with Caddy, homeWatch and
   VictoriaMetrics; Caddy removes those headers from what browsers send.
-- **Secrets:** tokens and URLs are encrypted at rest (AES-GCM, key from `.env`) and never shown
-  again after saving.
+- **Secrets:** passwords, tokens and URLs (including the MQTT password) are encrypted at rest (AES-GCM,
+  key from `.env`) and never shown again after saving.
+- **API tokens** are stored only as hashes and can only read. **Buttons in notifications** are random
+  one-time links (stored as hashes, valid 24 hours) that can only snooze or acknowledge one check.
+- **Privileges:** each module uses a read-only account where the device has one. The exception is
+  OPNsense's DHCP leases for the Map: the only privilege that opens them (Services: Dnsmasq DNS/DHCP:
+  Settings) would also allow changing Dnsmasq's settings; homeWatch only reads the leases.
 - **Logins:** passwords are hashed with Argon2. Sessions use HttpOnly, Secure, SameSite=Strict
   cookies, and the database holds only hashes of session tokens. Every form is CSRF-protected, and
   logins lock for 5 minutes after 5 failures from one address or 20 on one account.
@@ -654,9 +686,10 @@ allow redistribution. **System → Health** shows the installed version.
 ## How it fits together
 
 ```
-browser ──HTTPS──▶ caddy ──▶ controller (FastAPI: UI, checks every 120 s, notifier, speed test)
+browser ──HTTPS──▶ caddy ──▶ controller (FastAPI: UI, checks every 120 s, map, notifier, speed test)
                                  │  ▲                        │
-                     SQLite ◀────┘  │ reads              Telegram / ntfy / healthchecks.io
+                     SQLite ◀────┘  │ reads              Telegram / ntfy / email / webhook /
+                                    │                     healthchecks.io / MQTT → Home Assistant
                                     │
 telegraf (ping, DNS) ──writes──▶ victoriametrics ◀──reads── grafana (optional, /grafana/ via caddy)
 ```

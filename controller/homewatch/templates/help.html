@@ -6,16 +6,17 @@
 <h2 id="about">About homeWatch</h2>
 <div class="card">
   <p>A self-hosted monitor for your home: internet line, servers, network, backups and UPS, with notifications when
-    something needs attention. It only reads from your devices and never changes them.</p>
+    something needs attention, a map of how your devices are connected and a warning when a new one joins. It only
+    reads from your devices and never changes them.</p>
   <table>
     <tr><td>Version</td><td>{{ version }}</td></tr>
     <tr><td>License</td><td>MIT</td></tr>
     <tr><td>Source</td><td><a href="https://github.com/nikosiaf/homewatch" target="_blank" rel="noopener">github.com/nikosiaf/homewatch</a></td></tr>
   </table>
   <p class="small" style="margin-bottom:0">On this page:
-    <a href="#install">Install</a> · <a href="#modules">Modules</a> · <a href="#alerts">Alerts</a> ·
+    <a href="#install">Install</a> · <a href="#modules">Modules</a> · <a href="#alerts">Alerts</a> · <a href="#pages">Pages and the Map</a> ·
     <a href="#channels">Notifications</a> · <a href="#config">Settings</a> · <a href="#update">Update and back up</a> ·
-    <a href="#grafana">Grafana</a> · <a href="#recovery">Backup and recovery</a> · <a href="#numbers">Reading the numbers</a> ·
+    <a href="#api">API</a> · <a href="#grafana">Grafana</a> · <a href="#recovery">Backup and recovery</a> · <a href="#numbers">Reading the numbers</a> ·
     <a href="#security">Security</a> · <a href="#trouble">Troubleshooting</a></p>
 </div>
 
@@ -34,7 +35,8 @@ less install.sh          # please read it first; it's short (q to quit)
 ./install.sh</pre>
   <p>The script writes <code>.env</code> with a new master key, creates a self-signed certificate, offers the updater
     (needs sudo once) and asks whether to add Grafana, then starts the containers. It prints the certificate's SHA-256
-    fingerprint: compare it when your browser warns about the certificate at <code>https://&lt;host&gt;</code>.</p>
+    fingerprint: compare it when your browser warns about the certificate at <code>https://&lt;host&gt;:5443</code>
+    (the port is <code>HW_HTTPS_PORT</code> in <code>.env</code>).</p>
   <p>Open homeWatch and create the admin account right away: until it exists, whoever opens the page first creates it.</p>
   <p style="margin-bottom:0">The setup wizard then asks for an admin account, your home's name and time zone, the internet checks and contracted
     speed, your equipment, a notification channel and an optional heartbeat. Under "Your equipment" you tick what you have;
@@ -73,66 +75,61 @@ less install.sh          # please read it first; it's short (q to quit)
     <li><b>Incidents:</b> problems that start together (a new one within 30 minutes of the first, while it is still open)
       are one incident. Each problem is still sent as it comes, but "back to OK" waits and arrives as one message when the
       whole incident is over, with every check's times. If part of it stays open, what is already back to OK is sent after
-      5 minutes anyway. History lists the incidents with their timeline.</li>
-    <li><b>New on the network:</b> a device homeWatch has never seen (a MAC on a switch port or access point, or a new
-      VM) is listed on the Status page, marked "new" on the Map, and sent once as a WARNING message, until you press
-      Known. Everything there when this started, and UniFi's client history, counts as known. Phones with a private
-      Wi-Fi address show up again now and then; they are labelled so.</li>
-    <li><b>Map:</b> what hangs off what (Map page), found from the MikroTik switches' MAC tables, the UniFi clients,
-      Home Assistant's devices and Proxmox, rebuilt at every check run (Home Assistant's devices are read every 30 minutes,
-      Proxmox's guests and network cards every 6 hours; Scan now on the Map reads them all at once); add what can't be
-      found under Manually set dependencies (e.g. Zigbee2MQTT depends on the Zigbee
-      bridge). A problem on a device behind something that has a problem, or that just restarted or lost link, says so;
-      when that parent's problem was already sent, the device's own message is left out and it is listed with the
-      incident when it is over.</li>
-    <li><b>Likely cause:</b> modules also note what their devices did, with the device's own time where it tells it:
-      reboots (from uptime), DSL line resyncs and modem reboots, the UPS going on battery (its status is asked every
-      10 seconds, so a power cut of half a minute is caught), MikroTik ports losing link,
-      OPNsense gateways going down. When an incident ends, homeWatch reads every device once more (about 30 seconds
-      later) and names the likely cause from these events, for example a power cut in the area (UPS on battery, the
-      modem stayed on, the DSL line re-synced), a modem restart, a line or ISP problem, or a restart of your own
-      equipment. The cause and the events behind it are in the "back to OK" message and on the History page.</li>
+      5 minutes anyway.</li>
+    <li><b>Likely cause:</b> modules note what their devices did, with the device's own time where it tells it: reboots,
+      DSL line resyncs and modem reboots, the UPS going on battery (its status is asked every 10 seconds, so a power cut
+      of half a minute is caught), MikroTik ports losing link, OPNsense gateways and PPPoE going down. When an incident
+      ends, homeWatch reads every device once more (about 30 seconds later) and names the likely cause, for example a
+      power cut in the area (UPS on battery, the modem stayed on, the DSL line re-synced), a modem restart, a line or ISP
+      problem, a switch or access point that restarted with the devices behind it (see the Map), or a restart of your own
+      equipment. The cause and the events behind it are in the "back to OK" message and on History.</li>
     <li><b>Times:</b> an internet outage starts and ends when the ping data shows it, not when the next check run
       saw it. When a check starts to recover, every device is read again and the recovery is confirmed in a quick
       extra run about 30 seconds later; problems keep the normal pace, so short blips still stay quiet.</li>
-    <li><b>Grafana:</b> every dashboard shows incidents (start and end, with the likely cause) and what the devices
-      did as markers. A marker sits within 2 minutes of its time; its text has the exact time.</li>
+    <li><b>Events, not warnings:</b> one DSL resync or one switch or access point reboot is an event and a Grafana marker.
+      A WARNING comes only when it repeats: 3 resyncs or 2 reboots in 24 hours by default.</li>
     <li><b>To do:</b> updates and firmware (Home Assistant, PBS, DSM, UniFi, RouterOS and RouterBOOT, OPNsense) are
       things to do, not problems. They are listed under To do on the Status page and in the weekly report, and become a
       WARNING only when they have waited too long: 14 days, 7 for OPNsense and RouterOS (change it under the module's
       Checks and limits; empty = never).</li>
-    <li><b>Events, not warnings:</b> one DSL resync or one switch, access point reboot is an event and a Grafana marker.
-      A WARNING comes only when it repeats: 3 resyncs or 2 reboots in 24 hours by default.</li>
-    <li><b>Silent entities:</b> when a hub, bridge or coordinator stops, Home Assistant keeps showing its entities'
-      last values. homeWatch learns how often each watched entity reports (its first 7 days) and names the ones silent
-      for 3 times their usual gap, at least an hour. Half or more of one integration's watched entities silent together
-      is an ERROR. Entities that report only when something happens (door contacts) have long gaps and are noticed late;
-      sensors reporting every few minutes are noticed within the hour.</li>
-    <li><b>Full in</b> (NAS, PBS, Proxmox): days until the first volume, datastore or storage is full at the rate it
-      filled over the last 7 days. WARNING under 30 days, ERROR under 7.</li>
-    <li><b>Latency under load</b> (Internet, off by default): how much slower the line answers while the speed test fills
-      it, with a grade from A+ to F. A bad grade means bufferbloat; smart queue management (fq_codel or CAKE) on the
-      router fixes it.</li>
-    <li><b>No new reading:</b> a module tile on Status says so when its device hasn't been read for 3 of its read
-      intervals (10 minutes at least).</li>
-    <li><b>Flapping entities:</b> a Home Assistant entity that went unavailable 3 times in 7 days and came back by itself
-      within 2 hours each time (phone and cloud sensors often do) is named under Unavailable entities but not counted.
-      Untick "Leave out entities that keep flapping" in the module's settings to count every one.</li>
-    <li><b>Useful or noise:</b> on History, mark a problem as worth telling you or as noise. The weekly report lists the
-      checks with the most issues and the ones marked as noise, so you know which limits to change.</li>
-    <li><b>Buttons in ntfy messages:</b> Snooze 1 day, Acknowledge (no more reminders while it stays open) and Open
-      homeWatch. They are one-time links valid for 24 hours, sent only when homeWatch's address is set (System → Home);
-      the phone must reach that address (home network or VPN). On the Status page, Ack does the same.</li>
+    <li><b>Reminders:</b> open problems are repeated every 12 hours, except acknowledged ones (Ack on the Status page or
+      in an ntfy message). Change this, the confirmation and how often checks run under Timing on the Notifications page.</li>
+    <li><b>Snooze:</b> holds one check's notifications for a while, from Maintenance or next to the problem on Status.
+      <b>Maintenance windows</b> hold them for chosen checks, once or every week. The history is still recorded.</li>
+    <li><b>Offline queue:</b> messages that can't be sent while the line is down go out when it's back, with the outage times.</li>
+    <li><b>Buttons in ntfy messages:</b> Snooze 1 day, Acknowledge and Open homeWatch. They are one-time links valid for
+      24 hours, sent only when homeWatch's address is set (System → Home); the phone must reach that address (home
+      network or VPN).</li>
     <li><b>What to do:</b> messages carry a line on what to look at first, for the checks where that is always the same;
       write your own for any check under its module's Checks and limits → What to do.</li>
-    <li><b>Home Assistant over MQTT</b> (System page): homeWatch appears as a device with its status, problems, to-dos, a
-      problem sensor per module, an Alerts event for automations and a Check now button.</li>
-    <li><b>Reminders:</b> open problems are repeated every 12 hours. Change this, the confirmation and how often checks run under Timing on the Notifications page.</li>
-    <li><b>Offline queue:</b> messages that can't be sent while the line is down go out when it's back, with the outage times.</li>
-    <li><b>Snooze:</b> holds one check's notifications for a while, from Maintenance or next to the problem on Status. The history is still recorded.</li>
-    <li><b>Maintenance windows:</b> hold notifications for chosen checks, once or every week.</li>
-    <li><b>Status page:</b> one tile per module, coloured by its worst check. Click one to see its checks. One stays open at a time, until you close it, open another or reload the page.</li>
-    <li><b>History:</b> a timeline of every problem and its return to OK, by module, level and period.</li>
+    <li><b>Useful or noise:</b> on History, mark a problem as worth telling you or as noise. The weekly report lists the
+      checks with the most issues and the ones marked as noise, so you know which limits to change.</li>
+  </ul>
+</div>
+
+<h2 id="pages">Pages and the Map</h2>
+<div class="card">
+  <ul style="margin:0">
+    <li><b>Status:</b> one tile per module, coloured by its worst check; click one to see its checks (one stays open at a
+      time). A tile says "No new reading for …" when its device hasn't been read for 3 of its read intervals. Above the
+      tiles: what needs attention (with Ack and Snooze), new devices on the network and the To do list.</li>
+    <li><b>History:</b> the incidents with their timeline and likely cause, and every problem and its return to OK, by
+      module, level and period.</li>
+    <li><b>Map:</b> how your devices are connected, drawn top down: the ISP modem and the Proxmox host with its WAN and LAN
+      cards, the switches with their uplink, what is wired to each switch port, and the Wi-Fi clients of each access point;
+      one thing opens at a time on each level. It comes from the MikroTik switches' MAC tables, the UniFi clients (and
+      their history: devices not connected now are red under their last access point), Home Assistant's devices, hubs
+      and Bluetooth proxies, Proxmox (its guests, stopped ones red, and the UPS of its NUT server) and the addresses
+      OPNsense, UniFi and the modules know. It is rebuilt at every check run (Home Assistant's devices every 30 minutes,
+      Proxmox's guests and network cards every 6 hours); Scan now reads them all at once. Add what can't be found under
+      Manually set dependencies.</li>
+    <li><b>Root cause:</b> a problem on a device behind something that has a problem, or that just restarted or lost link,
+      says so; when that parent's problem was already sent, the device's own message is left out and it is listed with
+      the incident when it is over.</li>
+    <li><b>New on the network:</b> a device homeWatch has never seen (a MAC on a switch port or access point, or a new
+      VM) is listed on the Status page, marked "new" on the Map, and sent once as a WARNING message, until you press
+      Known. Everything there the first time, and UniFi's client history, counts as known. Phones with a private
+      Wi-Fi address show up again now and then; they are labelled so.</li>
   </ul>
 </div>
 
@@ -147,7 +144,8 @@ less install.sh          # please read it first; it's short (q to quit)
     <li><b>healthchecks.io heartbeat:</b> homeWatch pings it after every run, and healthchecks.io alerts you when the pings
       stop, for example when the host, power or internet is down.</li>
     <li><b>Quiet hours</b> per channel: warnings wait until they end; errors are always sent.</li>
-    <li><b>Weekly report:</b> optional; pick the day, the time and the channels.</li>
+    <li><b>Weekly report:</b> optional; pick the day, the time and the channels. It has the week's uptime, line quality
+      and speed, the longest issues, what is still to do and the checks with the most issues.</li>
   </ul>
 </div>
 
@@ -161,14 +159,21 @@ less install.sh          # please read it first; it's short (q to quit)
       Importing replaces the settings; the previous ones stay under Configuration versions. Import and restore first show what would change
       and which credentials would be deleted, and ask for your password.</li>
     <li>Passwords, tokens and users are never part of a version or an export. Enter them again after importing elsewhere.</li>
+    <li><b>Home Assistant (MQTT)</b> on the System page: homeWatch appears in Home Assistant as a device with its status,
+      problems, to-dos, a problem sensor per module, an Alerts event for automations and a Check now button. Make a broker
+      user for it (e.g. in the Mosquitto add-on).</li>
+    <li><b>API tokens</b> on the System page: for the read-only JSON API below.</li>
   </ul>
 </div>
 
 <h2 id="update">Update and back up</h2>
 <div class="card">
-  <p>The Home box on the System page says when a newer release exists. If <code>install.sh</code> added the updater,
-    press Install there: homeWatch restarts with the new release within a minute or two. The updater runs on the host;
-    homeWatch only asks it, and it always installs the latest release from GitHub.</p>
+  <p>The System page says when a newer release exists. If <code>install.sh</code> added the updater, press
+    <b>Update to x.y.z</b> in its Health box: homeWatch restarts with the new release within a minute or two. The updater
+    runs on the host; homeWatch only asks it, and it always installs the latest release from GitHub. It doesn't change
+    <code>docker-compose.yml</code>, <code>Caddyfile</code> or <code>update.sh</code>: when a release changes them, its
+    notes say so; download them from the release, run <code>docker compose up -d</code> and, with the updater,
+    <code>sudo ./update.sh</code> once.</p>
   <p>Without the updater, set <code>HW_VERSION</code> in <code>.env</code> to the new release, then run:</p>
   <pre class="code">docker compose pull &amp;&amp; docker compose up -d</pre>
   <p>Database changes apply on start.</p>
@@ -226,10 +231,6 @@ less install.sh          # please read it first; it's short (q to quit)
       per 10 minutes.</li>
     <li><b>Data</b>: the data source <i>homewatch</i> is VictoriaMetrics (PromQL / MetricsQL). Metric names start with
       <code>hw_</code>; Explore (left menu) lists them.</li>
-    <li><b>Older installs</b>: Grafana needs this release's <code>docker-compose.yml</code>, <code>Caddyfile</code> and
-      <code>update.sh</code> next to <code>install.sh</code> (the updater only changes the version). Download them from
-      the release, then run <code>docker compose up -d</code> and, with the updater, <code>sudo ./update.sh</code> once
-      (it tells homeWatch that it can now turn Grafana on and off).</li>
   </ul>
   <p style="margin-bottom:0"><b>History length</b>: measurements are kept for a year by default. You can choose a
     shorter time under System → History: data older than that is deleted (VictoriaMetrics drops whole months, so
@@ -265,6 +266,10 @@ less install.sh          # please read it first; it's short (q to quit)
     <li>Secrets, including ntfy topic and healthchecks.io ping addresses, are encrypted at rest, never shown again after saving and
       left out of exports. Passwords are hashed with Argon2. Logins lock for 5 minutes after 5 failures from one address, or 20 on one account.</li>
     <li>Adding or removing a user and deleting data ask for your password again. Sessions are stored only as hashes, so a copy of the database can't be used to log in.</li>
+    <li>API tokens are stored only as hashes and can only read. The buttons in ntfy messages are one-time links (stored as
+      hashes, valid 24 hours) that can only snooze or acknowledge one check.</li>
+    <li>OPNsense's DHCP leases (names and addresses on the Map) open only with the privilege Services: Dnsmasq DNS/DHCP:
+      Settings, which would also allow changing Dnsmasq's settings; homeWatch only reads the leases.</li>
     <li>Behind a reverse proxy, name it in <code>HW_TRUSTED_PROXIES</code> in <code>.env</code>. Otherwise every visitor counts as the proxy's address for login lockouts.</li>
     <li>When an import or restore changes where a credential goes, or turns off HTTPS or certificate checks, homeWatch deletes that
       credential and switches the module or channel off until you enter it again.</li>
