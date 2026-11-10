@@ -97,6 +97,11 @@ less install.sh          # please read it first; it's short (q to quit)
       for 3 times their usual gap, at least an hour. Half or more of one integration's watched entities silent together
       is an ERROR. Entities that report only when something happens (door contacts) have long gaps and are noticed late;
       sensors reporting every few minutes are noticed within the hour.</li>
+    <li><b>Full in</b> (NAS, PBS, Proxmox): days until the first volume, datastore or storage is full at the rate it
+      filled over the last 7 days. WARNING under 30 days, ERROR under 7.</li>
+    <li><b>Latency under load</b> (Internet, off by default): how much slower the line answers while the speed test fills
+      it, with a grade from A+ to F. A bad grade means bufferbloat; smart queue management (fq_codel or CAKE) on the
+      router fixes it.</li>
     <li><b>No new reading:</b> a module tile on Status says so when its device hasn't been read for 3 of its read
       intervals (10 minutes at least).</li>
     <li><b>Flapping entities:</b> a Home Assistant entity that went unavailable 3 times in 7 days and came back by itself
@@ -155,6 +160,22 @@ less install.sh          # please read it first; it's short (q to quit)
     <code>homewatch_grafana-data</code> (your own dashboards; the built-in ones are recreated).</p>
 </div>
 
+<h2 id="api">API</h2>
+<div class="card">
+  <p>A read-only JSON API for scripts, Home Assistant and other tools. Make a token on the System page (API tokens),
+    shown once, and send it as <code>Authorization: Bearer &lt;token&gt;</code>. A token can only read; delete it when
+    the tool no longer needs it. Times are Unix seconds; levels are 0 OK, 1 WARNING, 2 ERROR.</p>
+  <ul style="margin-bottom:0">
+    <li><code>GET /api/v1/status</code>: overall level, counts, open issues, to-dos, and each module's level and last reading</li>
+    <li><code>GET /api/v1/checks</code>: every check now: level, detail, value, since, pending, snoozed or in maintenance</li>
+    <li><code>GET /api/v1/issues?days=7&amp;open=1&amp;module=internet</code>: problems and their return to OK</li>
+    <li><code>GET /api/v1/incidents?days=30</code>: incidents with their checks, likely cause and device events</li>
+    <li><code>GET /api/v1/events?days=7</code>: what the devices did (reboots, resyncs, power cuts…)</li>
+    <li><code>GET /api/v1/todos</code>: updates and firmware waiting</li>
+  </ul>
+  <pre class="code">curl -sk -H "Authorization: Bearer hw_…" https://homewatch.local/api/v1/status</pre>
+</div>
+
 <h2 id="grafana">Grafana dashboards</h2>
 <div class="card">
   <p>Grafana is optional. It shows everything homeWatch stores (every device, port, guest, disk and the Home Assistant
@@ -164,8 +185,18 @@ less install.sh          # please read it first; it's short (q to quit)
     <li><b>Turn it on or off</b> on the System page (Grafana and history). The first start downloads Grafana (about
       2 GB) and it uses about 150 MB of memory. Turning it off keeps its dashboards. Without the updater: set
       <code>COMPOSE_PROFILES=grafana</code> in <code>.env</code> (empty to turn it off) and run <code>docker compose up -d</code>.</li>
-    <li><b>Built-in dashboards</b> (folder homeWatch): an Overview and one per enabled module. They are rebuilt with
-      every update, so they can't be saved. Switching a module off removes its dashboard.</li>
+    <li><b>Built-in dashboards</b> (folder homeWatch): an Overview, Health and one per enabled module. They are rebuilt
+      with every update, so they can't be saved. Switching a module off removes its dashboard.</li>
+    <li><b>Health</b>: how reliable home has been. Each module's status over time, the share of the last 30 days its
+      device could be read (the internet: the line was up), how long problems took to recover, the noisiest checks, and
+      the lists of incidents and device events.</li>
+    <li><b>Markers</b>: incidents (a red band from start to end, with their checks and likely cause) and what the devices
+      did (orange) are written into Grafana's own annotations by homeWatch, as the Grafana user homewatch-markers, at
+      their exact time. The last 30 days are sent when Grafana first runs.</li>
+    <li><b>Internet</b>: also latency under load (bufferbloat) with its grade, the slowest moments of each hour, speed as
+      a share of the line's sync rate, ISP outages (PPPoE drops) and modem events.</li>
+    <li><b>Storage forecast</b> (Overview): days until NAS volumes, backup datastores and Proxmox storage are full, at the
+      rate they filled over the last 7 days.</li>
     <li><b>Your own dashboards</b>: open a built-in one, choose <b>Save as</b> and save it in <b>My dashboards</b>.
       Updates never touch that folder. homeWatch saves it every night next to the configuration exports (System →
       Grafana and history, last 14); to restore one, Dashboards → New → Import and paste its entry.</li>

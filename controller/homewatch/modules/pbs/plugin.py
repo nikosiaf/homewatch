@@ -6,7 +6,7 @@ import re
 
 import httpx
 
-from .. import ERROR, OK, WARNING, CheckDef, CheckResult, level
+from .. import ERROR, OK, WARNING, CheckDef, CheckResult, forecast_def, level
 from ...metrics import lines, num
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Choice, Field, Table, https_url
@@ -19,6 +19,7 @@ CHECKS = [
              help="Age of the newest backup of each VM, container or host you chose."),
     CheckDef("jobs", "Verify, prune, GC, sync", "api",
              help="ERROR when the latest run of a job type failed in the last 8 days; WARNING when it had warnings."),
+    forecast_def("datastore"),
     CheckDef("updates", "Updates", "api", unit="days", warn=14, editable=("warn",), todo=True,
              help="Package updates available on the PBS host. Listed under To do; WARNING once it has waited this many days."),
 ]
@@ -38,6 +39,7 @@ def dedup_factor(gc) -> float | None:
 class PBSModule(ApiModule):
     id = "pbs"
     name = "Proxmox Backup Server"
+    FORECAST = ("hw_pbs_store_used_bytes", "hw_pbs_store_total_bytes", "store")
     icon = "archive"
     headline = ("datastores", "fullest datastore")
     checks = CHECKS

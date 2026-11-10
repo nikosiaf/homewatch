@@ -337,25 +337,56 @@ def test_quick_run_when_a_check_starts_to_recover(cfg):
     assert len(fresh) == 1
 
 
-def test_incident_and_event_markers_for_grafana(cfg, monkeypatch):
-    from homewatch import runtime
+def test_incident_and_event_markers_for_grafana(cfg, respx_mock):
+    import asyncio
+    import json
+
+    import httpx
+
+    from homewatch import markers, runtime
     from homewatch.grafana import ANNOTATIONS, overview
-    from homewatch.modules import DevEvent
 
     rt = runtime.Runtime.create(cfg)
+    now = T0 + 600
+    base = rt.cfg.grafana_url
+    posted, patched = [], []
+
+    def post(request):
+        posted.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": len(posted)})
+
+    def patch(request):
+        patched.append((request.url.path, json.loads(request.content)))
+        return httpx.Response(200, json={})
+
+    respx_mock.post(f"{base}/api/annotations").mock(side_effect=post)
+    respx_mock.patch(url__regex=rf"{base}/api/annotations/\d+").mock(side_effect=patch)
+    respx_mock.post(url__regex=r".*/api/v1/admin/tsdb/delete_series").mock(return_value=httpx.Response(204))
     inc = rt.db.run("INSERT INTO incidents(site,started,worst) VALUES('home',?,2)", (T0,))
-    rt.db.run("INSERT INTO issues(site,check_key,level,worst,started,incident_id) VALUES('home','internet.reachable',2,2,?,?)",
-              (T0, inc))
-    lines, marked = rt.incident_markers()
-    assert len(lines) == 1 and "phase=start" in lines[0] and marked == [(inc, 1)]
-    rt.db.run("UPDATE incidents SET marked=1, ended=?, cause='Power cut in the area' WHERE id=?", (T0 + 420, inc))
+    rt.db.run("INSERT INTO issues(site,check_key,level,worst,started,incident_id,name) "
+              "VALUES('home','internet.reachable',2,2,?,?,'Internet reachable')", (T0, inc))
+    rt.db.run("INSERT INTO events(site,ts,module,device,kind,detail,exact,seen) VALUES('home',?,'ups','apc','on_battery',"
+              "'UPS on battery',0,?)", (T0 + 5, T0 + 5))
+    rt.db.run("INSERT INTO events(site,ts,module,device,kind,detail,exact,seen) VALUES('home',?,'ups','apc','on_battery',"
+              "'old',1,?)", (T0 - 40 * 86400, T0))
+    assert asyncio.run(markers.sync(rt, now)) == 2
+    ev, start = posted
+    assert ev["tags"] == ["homewatch", "event", "ups", "on_battery"] and ev["time"] == int((T0 + 5) * 1000)
+    assert ev["text"].startswith("apc: UPS on battery at ~")
+    assert start["tags"] == ["homewatch", "incident", "ERROR"] and "timeEnd" not in start
+    assert "Internet reachable" in start["text"]
+    assert rt.db.one("SELECT COUNT(*) n FROM events WHERE marked=0")["n"] == 0  # the old one is skipped, not sent
+    assert rt.db.get("markers.old_series_deleted")
+    # over, but its "back to OK" (and cause) isn't out yet: the band waits
+    rt.db.run("UPDATE incidents SET ended=?, cause='Power cut in the area' WHERE id=?", (T0 + 420, inc))
     rt.db.run("UPDATE issues SET resolved=?, ok_sent=0", (T0 + 420,))
-    assert rt.incident_markers() == ([], [])  # its "back to OK" (and cause) isn't out yet
+    assert asyncio.run(markers.sync(rt, now)) == 0 and not patched
     rt.db.run("UPDATE issues SET ok_sent=1")
-    (end,), marked = rt.incident_markers()
-    assert "phase=end" in end and "Likely\\ cause:\\ Power\\ cut" in end and marked == [(inc, 3)]
-    rt.queue_event_line("ups", DevEvent(T0 + 5, "on_battery", "apc", "UPS on battery", exact=False))
-    assert rt.metric_queue and rt.metric_queue[0].startswith("hw_event,") and "at=~" in rt.metric_queue[0]
+    assert asyncio.run(markers.sync(rt, now)) == 1
+    path, body = patched[0]
+    assert path.endswith("/api/annotations/2") and body["timeEnd"] == int((T0 + 420) * 1000)
+    assert "Likely cause: Power cut in the area" in body["text"]
+    assert asyncio.run(markers.sync(rt, now)) == 0  # nothing twice
     assert {a["name"] for a in ANNOTATIONS} == {"Incidents", "Device events"}
     assert overview(set())["annotations"]["list"] == ANNOTATIONS
 

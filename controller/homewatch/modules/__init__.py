@@ -129,6 +129,43 @@ def reboots(events, uptimes: list[tuple[float, str]], t: Thresholds, now: float,
     return OK, f"no {word}s in 24 h", 0
 
 
+def forecast_def(what: str) -> CheckDef:
+    return CheckDef("forecast", "Full in", "api", unit="days", warn=30, error=7, editable=("warn", "error"),
+                    lower_is_worse=True,
+                    help=f"Days until the first {what} is full, at the rate it filled over the last 7 days. "
+                         "OK when nothing is growing.")
+
+
+FORECAST_SPAN = "7d"
+FORECAST_MAX = 3650  # days: anything later is "not within 10 years"
+
+
+async def forecast(rt, used: str, total: str, label: str) -> dict[str, float] | None:
+    """{label value: days until full} for what grew over FORECAST_SPAN; None when the store can't be asked."""
+    sel = f'{{site="{rt.cfg.site}"}}'
+    # the latest size within 20 minutes: devices are read every few minutes, a plain "now" may find nothing
+    q = (f"(last_over_time({total}{sel}[20m]) - last_over_time({used}{sel}[20m])) "
+         f"/ (deriv({used}{sel}[{FORECAST_SPAN}]) > 0) / 86400")
+    try:
+        return {labels.get(label, "?"): max(0.0, v) for labels, _, v in await rt.metrics.query(q)}
+    except Exception:  # noqa: BLE001 - a forecast is extra; the module's own checks go on
+        return None
+
+
+def forecast_result(key: str, days: dict[str, float] | None, t: Thresholds) -> CheckResult:
+    if days is None:
+        return CheckResult(key, "Full in", OK, "no forecast (history store not readable)", None, "days", unknown=True)
+    if not days:
+        return CheckResult(key, "Full in", OK, f"nothing grew over the last {FORECAST_SPAN.removesuffix('d')} days", None,
+                           "days")
+    name, d = min(days.items(), key=lambda x: x[1])
+    lv = level(d, t, lower_is_worse=True)
+    when = f"in {d:.0f} days" if d < FORECAST_MAX else "not within 10 years"
+    others = len(days) - 1
+    return CheckResult(key, "Full in", lv, f"{name} full {when}" + (f" (the soonest of {len(days)})" if others else ""),
+                       round(min(d, FORECAST_MAX), 1), "days")
+
+
 class Module:
     """What the runtime and the web pages need from a module."""
 

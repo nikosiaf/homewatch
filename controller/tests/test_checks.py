@@ -47,7 +47,7 @@ def test_all_ok():
     res = by_id(evaluate(settings(), th(), readings()))
     assert {k: r.status for k, r in res.items()} == {k: OK for k in
                                                      ("fresh", "gateway", "reachable", "loss", "latency", "jitter", "speed_age", "speed_ping",
-                                                      "dns", "speed")}
+                                                      "dns", "speed", "bufferbloat")}
     assert "best target 1.1.1.1" in res["latency"].detail
 
 

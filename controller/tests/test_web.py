@@ -1315,7 +1315,7 @@ def test_status_has_no_charts_box_and_modules_show_icons(client):
     setup_admin(client)
     page = client.get("/").text
     assert 'class="card charts"' not in page and "uPlot" not in page
-    assert client.get("/api/series").status_code == 404
+    assert client.get("/api/series").status_code in (401, 404)  # the old chart data is gone; /api/ needs a token
     mods = client.get("/modules").text
     assert mods.count('<span class="mt-ico">') == 11 and '<b class="mt-name" title="UPS (NUT)">' in mods
     assert '<div class="module-grid">' in mods and 'Off · open to set it up' in mods  # the Status page's tiles

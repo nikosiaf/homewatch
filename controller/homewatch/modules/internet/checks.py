@@ -35,6 +35,10 @@ CHECKS: list[CheckDef] = [
              help="Download or upload below this share of the contract on 2 tests in a row."),
     CheckDef("speed_age", "Speed test recent", "speed", unit="h", warn=14, editable=("warn",),
              help="WARNING when no speed test succeeded for this many hours (keep it above twice the test interval)."),
+    CheckDef("bufferbloat", "Latency under load", "speed", unit="ms", warn=200, editable=("warn",), default_on=False,
+             help="How much slower the line answers while the speed test fills it (bufferbloat), on 2 tests in a "
+                  "row. Grades as the usual bufferbloat tests: A+ under 5 ms more, A 30, B 60, C 200, D 400, else F. "
+                  "Smart queue management (fq_codel / CAKE) on the router fixes a bad grade."),
     CheckDef("speed_ping", "Speed test latency", "speed", unit="ms", warn=40, editable=("warn",), default_on=False,
              help="Latency measured by the Ookla speed test, on 2 tests in a row. Cloudflare's test measures "
                   "over HTTP, which reads much higher, so it doesn't count."),
@@ -67,6 +71,19 @@ class Speed:
     ok: bool
     latency: float | None = None
     engine: str = ""
+    loaded_down: float | None = None
+    loaded_up: float | None = None
+
+    @property
+    def bloat(self) -> float | None:
+        """How much the latency grew under load (the worse direction), ms."""
+        loaded = [x for x in (self.loaded_down, self.loaded_up) if x is not None]
+        return max(0.0, max(loaded) - self.latency) if loaded and self.latency is not None else None
+
+
+def grade(bloat: float) -> str:
+    return next(g for g, limit in (("A+", 5), ("A", 30), ("B", 60), ("C", 200), ("D", 400), ("F", float("inf")))
+                if bloat < limit)
 
 
 @dataclass
@@ -244,6 +261,17 @@ def add_speed(s: dict, ths: dict[str, Thresholds], speeds: list[Speed], add, now
             f"{pings[0]:.0f} ms" + (" on 2 tests in a row" if slow else ""), pings[0])
     else:
         add("speed_ping", OK, "only measured by the Ookla engine")
+    bloats = [x for x in good if x.bloat is not None]
+    if bloats:
+        b, w = bloats[0], ths["bufferbloat"].warn
+        bad = len(bloats) >= 2 and w is not None and all(x.bloat >= w for x in bloats)
+        parts = [f"idle {b.latency:.0f}"] + [f"{what} {v:.0f}" for what, v in (("downloading", b.loaded_down),
+                                                                              ("uploading", b.loaded_up)) if v is not None]
+        add("bufferbloat", WARNING if bad else OK,
+            f"+{b.bloat:.0f} ms under load, grade {grade(b.bloat)} ({', '.join(parts)} ms)" + (" on 2 tests in a row" if bad else ""),
+            round(b.bloat, 1))
+    else:
+        add("bufferbloat", OK, "not measured yet")
     contract = f" of {c_down:g} / {c_up:g}" if c_down and c_up else ""
     detail = f"{last.down or 0:.1f} / {last.up or 0:.1f} Mbit/s"
     if not (c_down and c_up) or (t.warn is None and t.error is None):

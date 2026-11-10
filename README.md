@@ -40,7 +40,8 @@ with a year of history from every device, port and guest, and from the Home Assi
 - [UPS](#ups-module-optional): mains power, battery charge, runtime, load and UPS health from a NUT server
 - [Docker hosts](#docker-hosts-module-optional): containers running, restarts, health checks and removed containers, through a read-only socket proxy
 - [Alerts and notifications](#alerts-and-notifications): Telegram, ntfy, email, webhook and a healthchecks.io heartbeat
-- [Grafana dashboards](#grafana-dashboards-optional): an Overview and one dashboard per module, with your homeWatch login
+- [API](#api): read-only JSON for scripts and other tools, with tokens
+- [Grafana dashboards](#grafana-dashboards-optional): an Overview, Health and one dashboard per module, incident and event markers, with your homeWatch login
 - [Update](#update) · [Back up](#back-up) · [Security notes](#security-notes) · [Development](#development)
 
 ## Install
@@ -125,6 +126,7 @@ Every probe can be switched off, and every threshold changed, in the web page.
 | Line speed | < 50 % of contract on 2 tests in a row | optional level, e.g. < 30 % |
 | Speed test recent | no successful test for 7 h | |
 | Speed test latency | > 40 ms on 2 tests in a row | |
+| Latency under load (off by default) | ≥ 200 ms more than idle on 2 tests in a row (grade D) | |
 | Probe data fresh | | no data for > 3 min |
 
 ### ISP modem module (optional)
@@ -175,6 +177,7 @@ page shows the three commands to create it). homeWatch tests the token before sa
 | Node CPU / memory / root disk | ≥ 85 / 90 / 85 % | ≥ 95 % |
 | Guests running | | a guest you chose to watch is not running |
 | Storage | ≥ 85 % full | ≥ 95 % full, or a storage unavailable |
+| Full in (at the rate of the last 7 days) | < 30 days | < 7 days |
 | Disk health | SSD life left < 20 % | SMART not PASSED, or life left < 10 % |
 | Backups (watched guests in a backup job) | newest > 26 h old, or none yet | newest > 50 h old, or the last attempt failed |
 
@@ -277,6 +280,7 @@ shared folders or applications.
 | CPU / memory | ≥ 85 / 90 % | ≥ 95 % |
 | Disks | hottest ≥ 50 °C | ≥ 60 °C, a disk not normal, SMART failing or bad sectors |
 | Pools and volumes | fullest volume ≥ 85 %, or repairing / scrubbing | ≥ 95 %, degraded or crashed |
+| Full in (at the rate of the last 7 days) | < 30 days | < 7 days |
 | DSM updates (to do) | update available for 14 days | |
 | Fans and power (optional, SNMPv3) | SNMP can't be read | a fan, the power supply or the system failed |
 
@@ -341,6 +345,7 @@ shows the commands to create it).
 | Check | WARNING | ERROR |
 |---|---|---|
 | Datastores | fullest ≥ 85 % | ≥ 95 %, or a datastore error (e.g. not mounted) |
+| Full in (at the rate of the last 7 days) | < 30 days | < 7 days |
 | Backups (the groups you choose) | newest snapshot > 26 h old | > 50 h old, or no snapshots |
 | Verify, prune, garbage collection, sync | latest run had warnings | latest run failed (last 8 days) |
 | Updates (to do) | package updates available for 14 days | |
@@ -456,6 +461,26 @@ There are two account roles: **admin**, who can change everything, and **viewer*
 status and history.
 
 
+## API
+
+A read-only JSON API for scripts and other tools. Make a token under **System → API tokens** (it is
+shown once) and send it as `Authorization: Bearer <token>`. A token can only read.
+
+| Path | What |
+|---|---|
+| `GET /api/v1/status` | overall level, counts, open issues, to-dos, each module's level and last reading |
+| `GET /api/v1/checks` | every check now: level, detail, value, since, pending, silenced |
+| `GET /api/v1/issues?days=7&open=1&module=internet` | problems and their return to OK |
+| `GET /api/v1/incidents?days=30` | incidents with their checks, likely cause and device events |
+| `GET /api/v1/events?days=7` | what the devices did |
+| `GET /api/v1/todos` | updates and firmware waiting |
+
+Times are Unix seconds; levels are 0 OK, 1 WARNING, 2 ERROR (`level_word` has the name).
+
+```sh
+curl -sk -H "Authorization: Bearer hw_…" https://homewatch.local/api/v1/status
+```
+
 ## Grafana dashboards (optional)
 
 Grafana shows everything homeWatch stores (every device, port, guest, disk, and the Home Assistant
@@ -465,8 +490,19 @@ you in. homeWatch admins are Grafana admins, viewers can only look.
 - **On or off:** `install.sh` asks; later, **System → Grafana and history**. It needs about 2 GB of
   disk and 150 MB of memory. Turning it off keeps its dashboards. By hand: `COMPOSE_PROFILES=grafana`
   in `.env` (empty to turn it off), then `docker compose up -d`.
-- **Built-in dashboards** (folder *homeWatch*): an Overview and one per enabled module. homeWatch
-  rebuilds them with every update, so they can't be saved; switching a module off removes its dashboard.
+- **Built-in dashboards** (folder *homeWatch*): an Overview, **Health** and one per enabled module.
+  homeWatch rebuilds them with every update, so they can't be saved; switching a module off removes its
+  dashboard.
+- **Health:** each module's status over time, how much of the last 30 days each device could be read
+  (the internet: the line was up), time to recover per check, the noisiest checks, and the incidents
+  and device events as lists.
+- **Markers:** incidents (a red band from start to end, with their checks and likely cause) and device
+  events (reboots, resyncs, power cuts, gateway and PPPoE drops) are written to Grafana's own
+  annotations at their exact time, as the Grafana user `homewatch-markers`; every dashboard shows them.
+- **Internet quality:** latency under load (bufferbloat) and its grade, the slowest moment of each
+  hour, speed as a share of the line's sync rate, ISP outages and modem events.
+- **Storage forecast** (Overview): days until NAS volumes, backup datastores and Proxmox storage are
+  full, at the rate of the last 7 days.
 - **Your own dashboards:** open a built-in one, **Save as**, and keep the copy in **My dashboards**.
   Updates never touch that folder, and homeWatch saves it every night next to the configuration
   exports (System → Grafana and history, last 14).

@@ -132,6 +132,18 @@ MIGRATIONS: list[str] = [
         site TEXT NOT NULL, entity_id TEXT NOT NULL, first REAL NOT NULL, last REAL NOT NULL,
         gaps TEXT NOT NULL DEFAULT '[]', PRIMARY KEY (site, entity_id));
     """,
+    # 11: markers in Grafana's own annotations (sent once each; the incident's band gets its end later),
+    # read-only API tokens, how much the line slows down under load
+    """
+    ALTER TABLE events ADD COLUMN marked INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE incidents ADD COLUMN ann_id INTEGER;
+    ALTER TABLE incidents ADD COLUMN ann_end INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE api_tokens (
+        id INTEGER PRIMARY KEY, name TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created REAL NOT NULL,
+        created_by TEXT NOT NULL, last_used REAL);
+    ALTER TABLE speedtests ADD COLUMN loaded_down REAL;
+    ALTER TABLE speedtests ADD COLUMN loaded_up REAL;
+    """,
 ]
 
 

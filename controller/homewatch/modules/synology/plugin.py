@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .. import ERROR, OK, WARNING, CheckDef, CheckResult, DevEvent, booted, level
+from .. import ERROR, OK, WARNING, CheckDef, CheckResult, DevEvent, booted, forecast_def, level
 from ...metrics import lines, num
 from ..pinning import verify_for
 from ..apibase import SELF_SIGNED, why, ApiError, ApiModule, Field, Table, https_url
@@ -22,6 +22,7 @@ CHECKS = [
              help="Hottest disk; ERROR when a disk is not normal, SMART fails or bad sectors appear."),
     CheckDef("storage", "Pools and volumes", "api", unit="%", warn=85, error=95, editable=("warn", "error"),
              help="Fullest volume; ERROR when a pool or volume is degraded or crashed."),
+    forecast_def("volume"),
     CheckDef("updates", "DSM updates", "api", unit="days", warn=14, editable=("warn",), todo=True,
              help="A DSM update is available. Listed under To do; WARNING once it has waited this many days."),
     CheckDef("hardware", "Fans and power", "api",
@@ -39,6 +40,7 @@ BUSY = ("repairing", "expanding", "migrating", "data_scrubbing", "parity_checkin
 class SynologyModule(ApiModule):
     id = "synology"
     name = "Synology NAS"
+    FORECAST = ("hw_synology_volume_used_bytes", "hw_synology_volume_total_bytes", "volume")
     icon = "drive"
     headline = ("system", "system temperature")
     checks = CHECKS

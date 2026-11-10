@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .. import ERROR, OK, WARNING, CheckDef, CheckResult, Thresholds, level
+from .. import ERROR, OK, WARNING, CheckDef, CheckResult, Thresholds, forecast_def, level
 from .client import Snapshot
 
 MODULE = "proxmox"
@@ -26,6 +26,7 @@ CHECKS: list[CheckDef] = [
              help="ERROR when a guest you chose to watch is not running."),
     CheckDef("storage", "Storage", "api", unit="%", warn=85, error=95, editable=("warn", "error"),
              help="Fullest storage; ERROR also when an enabled storage is unavailable."),
+    forecast_def("storage"),
     CheckDef("disks", "Disk health", "api", unit="%", warn=20, error=10, editable=("warn", "error"),
              lower_is_worse=True,
              help="ERROR when SMART health is not PASSED; levels apply to the lowest remaining SSD life."),

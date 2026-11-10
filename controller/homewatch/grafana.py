@@ -38,7 +38,7 @@ def _targets(exprs):
 
 
 def ts(title, exprs, unit="short", w=12, h=8, stack=False, minimum=None, maximum=None, desc="", fill=10, lw=1,
-       calcs=()):
+       calcs=(), interval=None, bars=False):
     """A time series panel; exprs = [(PromQL/MetricsQL, legend)]; calcs = legend values (mean, max…)."""
     custom = {"lineWidth": lw, "fillOpacity": fill, "showPoints": "never", "spanNulls": 3 * 3600000,
               "stacking": {"mode": "normal" if stack else "none"}}
@@ -47,10 +47,38 @@ def ts(title, exprs, unit="short", w=12, h=8, stack=False, minimum=None, maximum
         defaults["min"] = minimum
     if maximum is not None:
         defaults["max"] = maximum
-    return {"type": "timeseries", "title": title, "description": desc, "datasource": DS, "_w": w, "_h": h,
-            "targets": _targets(exprs), "fieldConfig": {"defaults": defaults, "overrides": []},
-            "options": {"legend": {"displayMode": "list", "placement": "bottom", "calcs": list(calcs)},
-                        "tooltip": {"mode": "multi", "sort": "desc"}}}
+    if bars:
+        custom.update(drawStyle="bars", fillOpacity=70, lineWidth=0)
+    p = {"type": "timeseries", "title": title, "description": desc, "datasource": DS, "_w": w, "_h": h,
+         "targets": _targets(exprs), "fieldConfig": {"defaults": defaults, "overrides": []},
+         "options": {"legend": {"displayMode": "list", "placement": "bottom", "calcs": list(calcs)},
+                     "tooltip": {"mode": "multi", "sort": "desc"}}}
+    if interval:
+        p["interval"] = interval
+    return p
+
+
+def annolist(title, tags, w=12, h=8, desc="", limit=30):
+    """Grafana's list of markers with these tags (homeWatch's incidents and device events, see markers.py)."""
+    return {"type": "annolist", "title": title, "description": desc, "_w": w, "_h": h,
+            "options": {"onlyFromThisDashboard": False, "onlyInTimeRange": True, "tags": list(tags), "limit": limit,
+                        "showUser": False, "showTime": True, "showTags": False, "navigateToPanel": False,
+                        "navigateBefore": "15m", "navigateAfter": "15m"}}
+
+
+def bars(title, expr, unit="short", legend="", w=12, h=8, steps=None, desc="", minimum=0, maximum=None, decimals=None):
+    """Horizontal bars, one per series, coloured by steps [(value, colour)] from the lowest (None = base)."""
+    p = gauge(title, expr, unit, legend, w, h, maximum=maximum)
+    d = p["fieldConfig"]["defaults"]
+    d["min"] = minimum
+    if maximum is None:
+        d.pop("max", None)
+    if steps:
+        d["thresholds"]["steps"] = [{"value": v, "color": c} for v, c in steps]
+    if decimals is not None:
+        d["decimals"] = decimals
+    p["description"] = desc
+    return p
 
 
 def stat(title, expr, unit="short", legend="", w=6, h=4, steps=None, mappings=None, desc="", decimals=None,
@@ -163,16 +191,14 @@ def dashboard(uid, title, panels, desc="", tags=(), time="now-24h"):
             "panels": _layout(panels)}
 
 
-# markers on every dashboard: incidents and what the devices did (written by homeWatch with their own time).
-# A marker sits at the first query step after its time (at most MARK_STEP late); the text has the exact time.
-MARK_STEP = "2m"
+# markers on every dashboard, from Grafana's own annotations (homeWatch writes them, see markers.py): each
+# incident as a band from start to end, and what the devices did, at their exact time
+GRAFANA_DS = {"type": "datasource", "uid": "grafana"}
 ANNOTATIONS = [
-    {"name": "Incidents", "datasource": DS, "enable": True, "iconColor": "red", "step": MARK_STEP,
-     "expr": f'last_over_time(hw_incident_value{{site="$site"}}[{MARK_STEP}])',
-     "titleFormat": "Incident {{phase}} ({{worst}})", "textFormat": "{{text}}", "tagKeys": "phase"},
-    {"name": "Device events", "datasource": DS, "enable": True, "iconColor": "orange", "step": MARK_STEP,
-     "expr": f'last_over_time(hw_event_value{{site="$site"}}[{MARK_STEP}])',
-     "titleFormat": "{{device}}", "textFormat": "{{detail}} at {{at}}", "tagKeys": "kind,module"},
+    {"name": "Incidents", "datasource": GRAFANA_DS, "enable": True, "iconColor": "red",
+     "target": {"type": "tags", "tags": ["homewatch", "incident"], "matchAny": False, "limit": 500}},
+    {"name": "Device events", "datasource": GRAFANA_DS, "enable": True, "iconColor": "orange",
+     "target": {"type": "tags", "tags": ["homewatch", "event"], "matchAny": False, "limit": 1000}},
 ]
 
 
@@ -300,6 +326,15 @@ def overview(enabled: set[str], ha: list[dict] | None = None) -> dict:
                    steps=[(None, "green"), (50, "yellow"), (58, "red")]),
               ts("NAS network", [(f'sum(hw_synology_net_rx_bytes_per_second{{{S}}}) * 8', "in"),
                                  (f'-sum(hw_synology_net_tx_bytes_per_second{{{S}}}) * 8', "out")], "bps", w=6, h=5)]
+    fc = [(m, used, total, label) for m, used, total, label in FORECASTS if on(m)]
+    if fc:
+        p.append(row("Storage forecast"))
+        for m, used, total, label in fc:
+            p.append(bars(f"Days until full: {FORECAST_TITLES[m]}", days_until_full(used, total), "d", "{{" + label + "}}",
+                          w=24 // len(fc), h=6, steps=[(None, "red"), (7, "orange"), (30, "yellow"), (90, "green")],
+                          maximum=365, decimals=0,
+                          desc="At the rate it filled over the last 7 days; empty when nothing is growing. "
+                               "The module's Full in check warns under 30 days."))
     if on("homeassistant"):
         meta = sorted(unique_names(ha or []), key=lambda e: (e.get("name") or e["id"]).lower())
         doors, temps = _pick(meta, "binary_sensor", DOORS), _pick(meta, "sensor", "temperature")
@@ -326,6 +361,53 @@ def overview(enabled: set[str], ha: list[dict] | None = None) -> dict:
     return dashboard("hw-overview", "homeWatch Overview", p, "Every module at a glance.", time="now-24h")
 
 
+FORECASTS = [("synology", "hw_synology_volume_used_bytes", "hw_synology_volume_total_bytes", "volume"),
+             ("pbs", "hw_pbs_store_used_bytes", "hw_pbs_store_total_bytes", "store"),
+             ("proxmox", "hw_proxmox_storage_used_bytes", "hw_proxmox_storage_total_bytes", "storage")]
+FORECAST_TITLES = {"synology": "NAS volumes", "pbs": "backup datastores", "proxmox": "Proxmox storage"}
+
+
+def days_until_full(used: str, total: str) -> str:
+    return f"({total}{{{S}}} - {used}{{{S}}}) / (deriv({used}{{{S}}}[7d]) > 0) / 86400"
+
+
+# the check that says "the device can be read", per module: its uptime is what Health shows
+REACHABLE = {"internet": "internet.reachable"}
+
+
+def health(enabled: set[str]) -> dict:
+    from .modules.registry import MODULES
+
+    keys = [REACHABLE.get(m.id, f"{m.id}.{m.checks[0].id}") for m in MODULES.values() if m.id in enabled]
+    sel = f'{S},check=~"{"|".join(keys)}"' if keys else S
+    up = f"100 * (1 - avg_over_time((max by (module) (hw_check_status_value{{{sel}}}) >= bool 2)[30d:5m]))"
+    return dashboard("hw-health", "Health", [
+        row("Now"),
+        stat("Problems now", f"count(hw_check_status_value{{{S}}} > 0) or vector(0)", w=4, h=8,
+             steps=[(None, "green"), (1, "red")]),
+        timeline("Modules, worst check", [(f"max by (module) (hw_check_status_value{{{S}}})", "{{module}}")], w=20, h=8,
+                 mappings=STATUS_MAP),
+        row("Reliability"),
+        bars("Reachable, last 30 days", up, "percent", "{{module}}", w=8, h=8, maximum=100, decimals=2,
+             steps=[(None, "red"), (99, "orange"), (99.9, "green")],
+             desc="Share of the time each module's device could be read (the internet: the line was up), over what "
+                  "homeWatch watched. Fills in over 30 days."),
+        bars("Time to recover, median of 30 days", f"quantile_over_time(0.5, hw_issue_duration_seconds{{{S}}}[30d])", "s",
+             "{{check}}", w=8, h=8, steps=[(None, "green"), (1800, "yellow"), (14400, "red")],
+             desc="How long problems lasted, per check (since 0.42)."),
+        bars("Issues, last 30 days", f"count_over_time(hw_issue_duration_seconds{{{S}}}[30d])", "short", "{{check}}",
+             w=8, h=8, steps=[(None, "green"), (5, "yellow"), (15, "red")], decimals=0,
+             desc="The noisiest checks: change their limits, or mark their issues as noise on homeWatch's History page."),
+        row("What happened"),
+        annolist("Incidents", ["homewatch", "incident"], w=12, h=10,
+                 desc="Problems that started together, with their checks and likely cause; click one to jump there."),
+        annolist("Device events", ["homewatch", "event"], w=12, h=10,
+                 desc="Reboots, line resyncs, power cuts, gateway and PPPoE drops, at the device's own time."),
+        ts("Checks not OK", [(f"count by (module) (hw_check_status_value{{{S}}} > 0)", "{{module}}")], w=24, h=7,
+           stack=True, minimum=0, fill=60),
+    ], "How reliable home has been: status history, uptime, time to recover, incidents.", time="now-7d")
+
+
 def internet() -> dict:
     return dashboard("hw-internet", "Internet", [
         row("Ping"),
@@ -339,8 +421,31 @@ def internet() -> dict:
            minimum=0),
         ts("Upload vs line sync", [(f'hw_speedtest_upload_mbps{{{S}}}', "speed test {{engine}}"),
                                    (f'hw_dsl_sync_up_kbps{{{S}}} / 1000', "line sync (modem module)")], "Mbits", w=8, minimum=0),
-        ts("Latency under test", [(f'hw_speedtest_latency_ms{{{S}}}', "{{engine}}")], "ms", w=8, minimum=0),
-    ], "Ping, DNS and speed tests.", time="now-7d")
+        ts("Latency under load", [(f'hw_speedtest_latency_ms{{{S}}}', "idle {{engine}}"),
+                                  (f'hw_speedtest_loaded_down_ms{{{S}}}', "downloading"),
+                                  (f'hw_speedtest_loaded_up_ms{{{S}}}', "uploading")], "ms", w=8, minimum=0,
+           desc="The same request timed idle and while the speed test fills the line. A big rise is bufferbloat: "
+                "calls and games stutter while something uploads."),
+        row("Quality"),
+        stat("Bufferbloat grade", f"last_over_time((clamp_min(max(hw_speedtest_loaded_down_ms{{{S}}}, "
+                                  f"hw_speedtest_loaded_up_ms{{{S}}}) - hw_speedtest_latency_ms{{{S}}}, 0))[1d])", "ms", w=4, h=8,
+             mappings=[{"type": "range", "options": {"from": lo, "to": hi, "result": {"text": g, "color": c}}}
+                       for lo, hi, g, c in ((0, 5, "A+", "green"), (5, 30, "A", "green"), (30, 60, "B", "yellow"),
+                                            (60, 200, "C", "orange"), (200, 400, "D", "red"), (400, 1e9, "F", "red"))],
+             desc="How much slower the line answers under load, last speed test (A+ under 5 ms more … F 400 ms or more)."),
+        ts("Latency, 95th percentile per hour", [(f'quantile_over_time(0.95, ping_average_response_ms{{{S},role="public"}}[1h])',
+                                                  "{{url}}")], "ms", w=10, h=8, minimum=0, interval="1h",
+           desc="The slow moments of each hour: evening congestion or a busy line show here first."),
+        ts("Speed as share of line sync", [(f'100 * hw_speedtest_download_mbps{{{S}}} / on (site) group_left () '
+                                            f'(last_over_time(hw_dsl_sync_down_kbps{{{S}}}[6h]) / 1000)', "down {{engine}}"),
+                                           (f'100 * hw_speedtest_upload_mbps{{{S}}} / on (site) group_left () '
+                                            f'(last_over_time(hw_dsl_sync_up_kbps{{{S}}}[6h]) / 1000)', "up {{engine}}")],
+           "percent", w=10, h=8, minimum=0, desc="Needs the ISP modem module. Well under 90 % points at the home "
+                                                 "network or the test server, not the line."),
+        annolist("ISP outages (PPPoE session drops)", ["homewatch", "ppp_down"], w=12, h=8,
+                 desc="From the OPNsense module's logs; the incident bands on the graphs show how long each lasted."),
+        annolist("Modem: line resyncs, line drops, restarts", ["homewatch", "event", "speedport"], w=12, h=8),
+    ], "Ping, DNS, speed tests and line quality.", time="now-7d")
 
 
 def speedport() -> dict:
@@ -908,7 +1013,8 @@ def files(enabled: set[str], ha: list[dict] | None = None) -> dict[str, str]:
     out = {"datasources/homewatch.yaml": json.dumps(ds, indent=1),  # JSON is valid YAML
            "dashboards/homewatch.yaml": json.dumps(providers, indent=1),
            "dashboards/my/welcome.json": json.dumps(WELCOME, indent=1),
-           "dashboards/homewatch/overview.json": json.dumps(overview(enabled, ha), indent=1)}
+           "dashboards/homewatch/overview.json": json.dumps(overview(enabled, ha), indent=1),
+           "dashboards/homewatch/health.json": json.dumps(health(enabled), indent=1)}
     for mid in sorted(enabled):
         if mid == "homeassistant":
             out["dashboards/homewatch/homeassistant.json"] = json.dumps(homeassistant(ha), indent=1)

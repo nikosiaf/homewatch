@@ -14,7 +14,7 @@ from datetime import datetime
 
 import httpx
 
-from . import __version__, grafana, report, todo, versions
+from . import __version__, grafana, markers, report, todo, versions
 from .auth import audit, scrub_audit
 from .config import Config
 from .db import DB
@@ -66,7 +66,8 @@ class Runtime:
     grafana_on: bool = False  # Grafana answered at the last run: the pages then link to it
     check_now_at: float = 0  # when "Check now" last read every device fresh
     events_seen: dict = field(default_factory=dict)  # module id -> reading_ts whose device events are recorded
-    metric_queue: list = field(default_factory=list)  # lines to write with the next run's metrics (events, markers)
+    metric_queue: list = field(default_factory=list)  # lines to write with the next run's metrics (the UPS watcher)
+    new_tokens: dict = field(default_factory=dict)  # user id -> (API token, name, ts): shown once, then forgotten
     pending_seen: set = field(default_factory=set)  # checks waiting for confirmation at the end of the last run
     quick_at: float = 0  # when the last quick confirming run was asked for
 
@@ -153,7 +154,6 @@ class Runtime:
             for e in evs:
                 db.run("INSERT INTO events(site,ts,module,device,kind,detail,exact,seen) VALUES(?,?,?,?,?,?,?,?)",
                        (site, e.ts, m.id, e.device, e.kind, e.detail, int(e.exact), now))
-                self.queue_event_line(m.id, e)
             if evs:
                 db.run("DELETE FROM events WHERE site=? AND ts<?", (site, now - 400 * 86400))
 
@@ -173,41 +173,17 @@ class Runtime:
             e = make()
             db.run("INSERT INTO events(site,ts,module,device,kind,detail,exact,seen) VALUES(?,?,?,?,?,?,?,?)",
                    (site, e.ts, module, e.device, e.kind, e.detail, int(e.exact), now))
-        self.queue_event_line(module, e)
         return True
 
-    def queue_event_line(self, module: str, e) -> None:
-        """A device event as a Grafana marker (the dashboards draw hw_event as annotations)."""
-        at = datetime.fromtimestamp(e.ts, tz(self.db)).strftime("%H:%M:%S")
-        self.metric_queue.append(line("hw_event", {"site": self.cfg.site, "module": module, "device": e.device,
-                                                   "kind": e.kind, "detail": e.detail, "at": ("~" if not e.exact else "") + at},
-                                      {"value": 1}, e.ts))
-
-    def incident_markers(self) -> tuple[list[str], list[tuple[int, int]]]:
-        """Start and end of each incident as Grafana markers, once each: (lines, [(incident id, marked)]) — the
-        caller stores marked after the lines are written. The end waits for the incident's "back to OK" (and so
-        for its likely cause)."""
-        out, done, zone = [], [], tz(self.db)
-        for inc in self.db.all("SELECT * FROM incidents WHERE site=? AND marked<3", (self.cfg.site,)):
-            base = {"site": self.cfg.site, "incident": str(inc["id"]), "worst": LEVEL_WORD.get(inc["worst"], "")}
-            mark = inc["marked"]
-            if not mark & 1:
-                at = datetime.fromtimestamp(inc["started"], zone).strftime("%H:%M:%S")
-                out.append(line("hw_incident", base | {"phase": "start", "text": f"started {at}"},
-                                {"value": inc["worst"]}, inc["started"]))
-                mark |= 1
-            if inc["ended"] is not None and self.db.one(
-                    "SELECT 1 FROM issues WHERE incident_id=? AND ok_sent=0", (inc["id"],)) is None:
-                n = self.db.one("SELECT COUNT(*) n FROM issues WHERE incident_id=?", (inc["id"],))["n"]
-                at = datetime.fromtimestamp(inc["ended"], zone).strftime("%H:%M:%S")
-                mins = max(int((inc["ended"] - inc["started"]) // 60), 1)
-                text = f"over {at} after {mins} min, {n} check{'s' if n != 1 else ''}" + (
-                    f". Likely cause: {inc['cause']}" if inc["cause"] else "")
-                out.append(line("hw_incident", base | {"phase": "end", "text": text}, {"value": 0}, inc["ended"]))
-                mark |= 2
-            if mark != inc["marked"]:
-                done.append((inc["id"], mark))
-        return out, done
+    def recovery_lines(self, now: float) -> list[str]:
+        """Each issue that ended since the last look, with how long it lasted, for Grafana's "time to recover"."""
+        last = self.db.get("metrics.issues_seen", now - 600)
+        out = [line("hw_issue", {"site": self.cfg.site, "module": r["check_key"].split(".")[0], "check": r["check_key"],
+                                 "level": LEVEL_WORD.get(r["worst"], "")},
+                    {"duration_seconds": r["resolved"] - r["started"]}, r["resolved"])
+               for r in self.db.all("SELECT * FROM issues WHERE site=? AND resolved>? AND resolved<=? "
+                                    "AND resolved_detail!='check switched off'", (self.cfg.site, last, now))]
+        return out
 
     def quick_confirm(self, now: float) -> None:
         """A check that starts to recover is confirmed on fresh readings of every device in a quick extra run,
@@ -345,7 +321,7 @@ class Runtime:
         # takes back (a device rebooting) is not a problem there either
         confirmed = {r["check_key"]: r["status"] for r in self.db.all(
             "SELECT check_key, status FROM check_state WHERE site=?", (self.cfg.site,))}
-        markers, marked = self.incident_markers()
+        recovered = self.recovery_lines(now)
         try:
             await self.metrics.write([
                 line("hw_check_status", {"site": self.cfg.site, "module": r.key.split(".")[0], "check": r.key},
@@ -355,12 +331,13 @@ class Runtime:
                      {"value": float(r.value)}, now) for r in results
                 if isinstance(r.value, (int, float)) and not isinstance(r.value, bool) and math.isfinite(r.value)
             ] + [line("hw_run", {"site": self.cfg.site}, {"ok": 1, "duration_seconds": time.time() - now}, now)]
-                + series + self.metric_queue + markers)
+                + series + self.metric_queue + recovered)
             self.metric_queue = []
-            for inc_id, mark in marked:
-                self.db.run("UPDATE incidents SET marked=? WHERE id=?", (mark, inc_id))
+            self.db.set("metrics.issues_seen", now)
         except MetricsError as e:
             log.warning("%s", e)
+        if self.grafana_on:
+            await markers.sync(self, now)
         if not metrics_error:  # a store that can't be read is what the heartbeat must not hide
             await self.heartbeat()
         return results
@@ -590,13 +567,15 @@ class Runtime:
                     if not res.ok:
                         res.error = f"Cloudflare: {first}; Ookla: {res.error}"
             now = time.time()
-            self.db.run("INSERT INTO speedtests(site,ts,engine,down,up,latency,ok,error) VALUES(?,?,?,?,?,?,?,?)",
-                        (self.cfg.site, now, engine, res.down, res.up, res.latency, int(res.ok), res.error))
+            self.db.run("INSERT INTO speedtests(site,ts,engine,down,up,latency,ok,error,loaded_down,loaded_up) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?)", (self.cfg.site, now, engine, res.down, res.up, res.latency,
+                                                        int(res.ok), res.error, res.loaded_down, res.loaded_up))
             if res.ok:
                 try:
                     await self.metrics.write([line("hw_speedtest", {"site": self.cfg.site, "engine": engine},
                                                    {"download_mbps": res.down, "upload_mbps": res.up,
-                                                    "latency_ms": res.latency}, now)])
+                                                    "latency_ms": res.latency, "loaded_down_ms": res.loaded_down,
+                                                    "loaded_up_ms": res.loaded_up}, now)])
                 except MetricsError as e:
                     log.warning("%s", e)
             return res

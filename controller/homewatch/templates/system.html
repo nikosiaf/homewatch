@@ -121,6 +121,26 @@
     <div><button>Add user</button></div>
   </form>
 </div>
+<h2>API tokens</h2>
+<div class="card scroll" id="api">
+  <p class="quiet small">For scripts and other tools: the read-only JSON API at <code>/api/v1/</code> (status, checks, issues,
+    incidents, events, to-dos; see <a href="/help#api">Help</a>). Send the token as <code>Authorization: Bearer …</code>.
+    A token can only read; delete it when the tool no longer needs it.</p>
+  {% if new_token %}<div class="flash ok" role="status"><b>New token for {{ new_token[1] }}</b>, copy it now, it is not shown again:
+    <code style="user-select:all;word-break:break-all">{{ new_token[0] }}</code></div>{% endif %}
+  {% if tokens %}<table><tr><th>Name</th><th>Made</th><th>By</th><th>Last used</th><th></th></tr>
+  {% for t in tokens %}<tr><td>{{ t.name }}</td><td>{{ t.created | ts }}</td><td>{{ t.created_by }}</td>
+    <td>{{ t.last_used | ts if t.last_used else 'never' }}</td>
+    <td><form class="inline" method="post" action="/system/api-tokens/{{ t.id }}/delete">
+      <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="api">
+      <button class="danger icon" aria-label="Delete token {{ t.name }}" title="Delete token {{ t.name }}"><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button></form></td></tr>{% endfor %}
+  </table>{% endif %}
+  <form method="post" action="/system/api-tokens" class="row" style="margin-top:12px" data-ask-password="Make an API token?" data-ask-action="Make token">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_box" value="api"><input type="hidden" name="current">
+    <div><label for="tn">Name (what will use it)</label><input id="tn" type="text" name="name" maxlength="60" required placeholder="Home Assistant"></div>
+    <div><button>Make token</button></div>
+  </form>
+</div>
 <h2>Export and import</h2>
 <div class="grid2" id="backup">
   <div class="card col">

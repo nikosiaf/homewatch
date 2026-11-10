@@ -29,8 +29,10 @@ class Result:
     ok: bool
     down: float | None = None  # Mbit/s
     up: float | None = None
-    latency: float | None = None  # ms
+    latency: float | None = None  # ms, idle
     error: str = ""
+    loaded_down: float | None = None  # ms, the same latency while downloading
+    loaded_up: float | None = None  # ms, while uploading
 
 
 async def cloudflare(seconds: float = SECONDS, streams: int = STREAMS) -> Result:
@@ -42,14 +44,34 @@ async def cloudflare(seconds: float = SECONDS, streams: int = STREAMS) -> Result
                 t0 = time.perf_counter()
                 (await http.get(f"{CF}/__down", params={"bytes": 0})).raise_for_status()
                 lat.append((time.perf_counter() - t0) * 1000)
-            down = await _run(http, seconds, streams, upload=False)
-            up = await _run(http, seconds, streams, upload=True)
-            return Result(True, down, up, statistics.median(lat))
+            down, ld = await _run(http, seconds, streams, upload=False)
+            up, lu = await _run(http, seconds, streams, upload=True)
+            return Result(True, down, up, statistics.median(lat), loaded_down=ld, loaded_up=lu)
         except (httpx.HTTPError, OSError) as e:
             return Result(False, error=f"{type(e).__name__}: {e}"[:200])
 
 
-async def _run(http: httpx.AsyncClient, seconds: float, streams: int, upload: bool) -> float:
+PROBE_EVERY = 0.4  # s between latency probes while the line is busy
+
+
+async def _probe(deadline: float) -> float | None:
+    """The idle-latency request, repeated on its own connection while the test fills the line: how much
+    slower the line answers when it is busy (bufferbloat). Median in ms, None when nothing came back."""
+    lat = []
+    async with httpx.AsyncClient(timeout=5, headers={"User-Agent": "homewatch"}) as http:
+        await asyncio.sleep(1.0)  # let the transfer get up to speed first
+        while time.perf_counter() < deadline - 0.5:
+            t0 = time.perf_counter()
+            try:
+                (await http.get(f"{CF}/__down", params={"bytes": 0})).raise_for_status()
+                lat.append((time.perf_counter() - t0) * 1000)
+            except httpx.HTTPError:
+                pass
+            await asyncio.sleep(PROBE_EVERY)
+    return statistics.median(lat) if lat else None
+
+
+async def _run(http: httpx.AsyncClient, seconds: float, streams: int, upload: bool) -> tuple[float, float | None]:
     total = 0
     payload = b"0" * UP_CHUNK
     start = time.perf_counter()
@@ -69,9 +91,9 @@ async def _run(http: httpx.AsyncClient, seconds: float, streams: int, upload: bo
                         if time.perf_counter() >= deadline:
                             break
 
-    await asyncio.gather(*(worker() for _ in range(streams)))
+    *_, loaded = await asyncio.gather(*(worker() for _ in range(streams)), _probe(deadline))
     elapsed = time.perf_counter() - start
-    return total * 8 / elapsed / 1e6
+    return total * 8 / elapsed / 1e6, loaded
 
 
 OOKLA_VERSION = "1.2.0"
@@ -146,4 +168,6 @@ def parse_ookla(text: str) -> Result:
         down=d["download"]["bandwidth"] * 8 / 1e6,
         up=d["upload"]["bandwidth"] * 8 / 1e6,
         latency=d.get("ping", {}).get("latency"),
+        loaded_down=((d["download"].get("latency") or {}).get("iqm")),
+        loaded_up=((d["upload"].get("latency") or {}).get("iqm")),
     )

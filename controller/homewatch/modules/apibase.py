@@ -19,7 +19,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ..auth import audit
-from . import ERROR, OK, CheckDef, CheckResult, Module, Thresholds
+from . import ERROR, OK, CheckDef, CheckResult, Module, Thresholds, forecast, forecast_result
 from .pinning import CHANGED, PinnedTLS
 
 
@@ -89,6 +89,8 @@ def https_url(value: str, default_port: int | None = None, allow_http: bool = Fa
 
 
 class ApiModule(PinnedTLS, Module):
+    FORECAST: tuple[str, str, str] | None = None  # (used metric, total metric, label): the "Full in" check
+    forecast: dict | None = None
     fields: list[Field] = []
     secret_label = ""  # empty: no secret
     secret_placeholder = ""
@@ -280,6 +282,8 @@ class ApiModule(PinnedTLS, Module):
                 full = await self.pin_settings(rt, self.with_secret_fields(rt, settings))
                 self.snap = await self.fetch(full, rt.secrets.get(self.secret_key) or "", now)
                 self.snap_ts, self.error = now, ""
+                if self.FORECAST:
+                    self.forecast = await forecast(rt, *self.FORECAST)
                 await self.note_changes(rt, settings, " ".join(map(str, self.snap.get("errors", {}).values())))
             except ApiError as e:
                 self.snap, self.error = None, str(e)
@@ -305,6 +309,8 @@ class ApiModule(PinnedTLS, Module):
         else:
             out.append(result(first, OK, snap.get("_summary", "Read OK")))
             out += self.check(settings, th, snap, now)
+            if self.FORECAST and "forecast" in th:
+                out.append(forecast_result(f"{self.id}.forecast", self.forecast, th["forecast"]))
         return [r for r in out if th[r.key.split(".", 1)[1]].enabled]
 
     # ---- saving ----------------------------------------------------------------------------

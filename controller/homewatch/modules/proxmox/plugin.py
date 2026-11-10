@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from ...auth import audit
 from ...metrics import lines, num
 from ..pinning import PinnedTLS, host_port, verify_for
-from .. import DevEvent, Module, booted
+from .. import DevEvent, Module, booted, forecast, forecast_result
 from . import checks
 from .client import ApiError, Client, Snapshot
 
@@ -146,10 +146,18 @@ class ProxmoxModule(PinnedTLS, Module):
         if self.snap is None or self.stale or now - self.snap_ts >= self.every_s(settings):
             self.stale = False
             await self.read(rt, settings, now)
+            if self.snap is not None:
+                self.forecast = await forecast(rt, "hw_proxmox_storage_used_bytes", "hw_proxmox_storage_total_bytes",
+                                               "storage")
         return checks.State(now=now, snap=self.snap, error=self.error, watched=settings.get("watched", []))
 
+    forecast: dict | None = None
+
     def evaluate(self, settings, thresholds, readings):
-        return checks.evaluate(settings, thresholds, readings)
+        out = checks.evaluate(settings, thresholds, readings)
+        if readings.snap is not None and thresholds.get("forecast") and thresholds["forecast"].enabled:
+            out.append(forecast_result("proxmox.forecast", self.forecast, thresholds["forecast"]))
+        return out
 
     async def test(self, rt, url: str, token_id: str, secret: str, verify: bool) -> tuple[Snapshot | None, str]:
         s = await self.pin_settings(rt, {"url": url, "verify": verify})

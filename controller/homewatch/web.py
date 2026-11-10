@@ -318,6 +318,16 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return await call_next(request)
         if path in ("/login",):
             return await call_next(request)
+        if path.startswith("/api/"):  # the JSON API signs in with a token, never with the browser's session
+            from . import api
+            if request.method != "GET":
+                return JSONResponse({"error": "the API only reads (GET)"}, status_code=405)
+            if api.token_ok(rt_of(request).db, request.headers.get("authorization", "")) is None:
+                return JSONResponse({"error": "missing or wrong token: Authorization: Bearer <token from System → "
+                                              "API tokens>"}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+            resp = await call_next(request)
+            resp.headers["Cache-Control"] = "no-store"
+            return resp
         user = current(request)
         if path == "/auth/grafana":  # Caddy's forward_auth for /grafana/: who is this, and in which Grafana role
             if user is None:
@@ -334,6 +344,77 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         resp = await call_next(request)
         resp.headers["Cache-Control"] = "no-store"
         return resp
+
+    # -- read-only JSON API (token, see api.py) -------------------------------------------------
+    def _json(data):
+        from . import api
+        return Response(api.dumps(data), media_type="application/json")
+
+    @app.get("/api/v1/status")
+    async def api_status(request: Request):
+        from . import api
+        return _json(api.status(rt_of(request)))
+
+    @app.get("/api/v1/checks")
+    async def api_checks(request: Request):
+        from . import api
+        return _json(api.checks(rt_of(request)))
+
+    @app.get("/api/v1/issues")
+    async def api_issues(request: Request):
+        from . import api
+        return _json(api.issues(rt_of(request), dict(request.query_params)))
+
+    @app.get("/api/v1/incidents")
+    async def api_incidents(request: Request):
+        from . import api
+        return _json(api.incidents(rt_of(request), dict(request.query_params)))
+
+    @app.get("/api/v1/events")
+    async def api_events(request: Request):
+        from . import api
+        return _json(api.events(rt_of(request), dict(request.query_params)))
+
+    @app.get("/api/v1/todos")
+    async def api_todos(request: Request):
+        from . import api
+        return _json(api.todos(rt_of(request)))
+
+    @app.get("/api/{rest:path}")
+    async def api_unknown(request: Request, rest: str):
+        return JSONResponse({"error": "unknown API path; see /help#api"}, status_code=404)
+
+    @app.post("/system/api-tokens")
+    async def api_token_add(request: Request):
+        from . import api
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/system", err="Form expired")
+        problem = await password_problem(request, user, form)
+        if problem:
+            return back("/system", err=problem)
+        name = str(form.get("name", "")).strip()[:60]
+        if not name:
+            return back("/system", err="Give the token a name (what will use it)")
+        token = api.new_token(rt.db, name, user.username)
+        rt.new_tokens[user.id] = (token, name, time.time())  # shown once, on the next System page
+        audit(rt.db, user.username, "api.token.add", name)
+        return back("/system", msg="Token made: copy it now, it is shown only once")
+
+    @app.post("/system/api-tokens/{tid}/delete")
+    async def api_token_delete(request: Request, tid: int):
+        rt = rt_of(request)
+        user = request.state.user
+        form = await form_of(request, user)
+        if form is None:
+            return back("/system", err="Form expired")
+        row = rt.db.one("SELECT name FROM api_tokens WHERE id=?", (tid,))
+        if row:
+            rt.db.run("DELETE FROM api_tokens WHERE id=?", (tid,))
+            audit(rt.db, user.username, "api.token.delete", row["name"])
+        return back("/system", msg="Token deleted")
 
     @app.get("/healthz")
     async def healthz(request: Request):
@@ -1052,10 +1133,14 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         from . import updater
         rt = rt_of(request)
         users = rt.db.all("SELECT id, username, role, created FROM users ORDER BY username")
+        tokens = rt.db.all("SELECT id, name, created, created_by, last_used FROM api_tokens ORDER BY name")
+        fresh = rt.new_tokens.pop(request.state.user.id, None)
+        new_token = fresh if fresh and time.time() - fresh[2] < 120 else None
         log_rows = rt.db.all("SELECT * FROM audit ORDER BY id DESC LIMIT 100")
         version_rows = rt.db.all("SELECT id, ts, username, action, summary FROM config_versions ORDER BY id DESC LIMIT 200")
         vm_ok = await rt.metrics.healthy()
         return page(request, "system.html", request.state.user, users=users, log=log_rows, vm_ok=vm_ok,
+                    tokens=tokens, new_token=new_token,
                     **await _grafana_ctx(rt),
                     last_run=rt.last_run, last_error=rt.last_error, csrf=request.state.user.csrf,
                     updates=rt.db.get("updates.check", True), latest=rt.db.get("updates.latest", ""),
