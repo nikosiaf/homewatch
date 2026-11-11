@@ -40,7 +40,7 @@ history, and it can appear in **Home Assistant** over MQTT.
 - [UniFi](#unifi-module-optional): devices online, CPU, Wi-Fi, restarts and firmware updates, as a view-only user
 - [Proxmox Backup Server](#proxmox-backup-server-module-optional): datastores and their deduplication factor, recent backups, verify/prune/garbage-collection jobs and updates
 - [UPS](#ups-module-optional): mains power, battery charge, runtime, load and UPS health from a NUT server
-- [Docker hosts](#docker-hosts-module-optional): containers running, restarts, health checks and removed containers, through a read-only socket proxy
+- [Docker hosts](#docker-hosts-module-optional): containers running, restarts, health checks and removed containers, through a read-only socket proxy; optional OS updates via node_exporter
 - [Map](#map): how your devices are connected, new devices on the network, root causes
 - [Alerts and notifications](#alerts-and-notifications): incidents and likely causes, Telegram, ntfy, email, webhook and a healthchecks.io heartbeat
 - [Home Assistant (MQTT)](#home-assistant-mqtt): homeWatch as a device in Home Assistant
@@ -394,6 +394,12 @@ port 2375 from homeWatch only. The setup steps on the module page have the compo
 Containers with a restart policy (`always`, `unless-stopped`, `on-failure`) are watched; untick any
 under "Containers to watch" (grouped per host and compose project).
 
+Optional **host updates**: install node_exporter with its apt collector on each Debian / Ubuntu host
+(`sudo apt install prometheus-node-exporter prometheus-node-exporter-collectors`) and list the hosts
+under "node_exporter" (port 9100 when none is given). homeWatch reads `apt_upgrades_pending` and
+`node_reboot_required` from `/metrics`; pending updates and a needed reboot go to the To do list. node_exporter
+serves only metrics, but allow port 9100 from homeWatch only, like the proxy port.
+
 | Check | WARNING | ERROR |
 |---|---|---|
 | Hosts reachable / every host read | | a host can't be read |
@@ -401,6 +407,7 @@ under "Containers to watch" (grouped per host and compose project).
 | Restarts (watched containers, last hour) | ≥ 1 | ≥ 3 |
 | Health checks | a watched container is unhealthy | |
 | Containers removed (save the page to accept) | a watched container is gone | |
+| Host updates (node_exporter, To do) | waiting ≥ 14 days | |
 
 ### How often each module is read
 

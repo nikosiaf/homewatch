@@ -1,4 +1,5 @@
-"""Docker hosts: reads each host's Engine API through a read-only socket proxy (containers + info only)."""
+"""Docker hosts: reads each host's Engine API through a read-only socket proxy (containers + info only),
+and optionally each host's node_exporter for OS package updates and a pending reboot."""
 
 from __future__ import annotations
 
@@ -25,14 +26,44 @@ CHECKS = [
     CheckDef("removed", "Containers removed", "api",
              help="WARNING when a watched container disappears from its host (seen since homeWatch started). "
                   "Save the module's page to accept a removal."),
+    CheckDef("updates", "Host updates", "api", unit="days", warn=14, editable=("warn",), todo=True,
+             help="OS package updates, or a reboot needed to finish them, on the hosts listed under node_exporter. "
+                  "Listed under To do; WARNING once it has waited this many days."),
 ]
 PORT = 2375
+EXPORTER_PORT = 9100
 _HOST = re.compile(r"^[a-zA-Z0-9.-]+(:\d{1,5})?$")
 AUTO = ("always", "unless-stopped", "on-failure")
 
 
 def hosts(value: str) -> list[str]:
     return [h if ":" in h else f"{h}:{PORT}" for h in re.split(r"[\s,]+", value or "") if h]
+
+
+def exporters(value: str) -> list[str]:
+    return [h if ":" in h else f"{h}:{EXPORTER_PORT}" for h in re.split(r"[\s,]+", value or "") if h]
+
+
+def parse_apt(text: str) -> tuple[int | None, bool, str]:
+    """From node_exporter's /metrics: (pending upgrades, None without the apt collector; reboot needed; host name)."""
+    updates, reboot, name = None, False, ""
+    for line in text.splitlines():
+        if line.startswith("#") or not line.strip():
+            continue
+        metric, _, value = line.rpartition(" ")
+        bare = metric.split("{", 1)[0]
+        try:
+            v = float(value)
+        except ValueError:
+            continue
+        if bare == "apt_upgrades_pending":
+            updates = (updates or 0) + int(v)
+        elif bare == "node_reboot_required":
+            reboot = reboot or v > 0
+        elif bare == "node_uname_info":
+            m = re.search(r'nodename="([^"]*)"', metric)
+            name = m.group(1) if m else name
+    return updates, reboot, name
 
 
 def short_image(image: str) -> str:
@@ -77,10 +108,18 @@ class DockerModule(ApiModule):
                  "# nftables (Debian): in the input chain of /etc/nftables.conf, then: sudo systemctl reload nftables\n"
                  "tcp dport 2375 ip saddr != <homewatch ip> drop"),
         ("text", "Check from another machine that port 2375 is closed, then list the hosts below."),
+        ("text", "Optional, for OS updates and a pending reboot (Debian / Ubuntu hosts): install node_exporter with "
+                 "its apt collector on each host, then list the hosts under node_exporter below (port 9100). It only "
+                 "serves metrics, nothing secret; still, allow port 9100 from homewatch only, as above."),
+        ("code", "sudo apt install prometheus-node-exporter prometheus-node-exporter-collectors\n"
+                 "curl -s localhost:9100/metrics | grep -E '^(apt_upgrades_pending|node_reboot_required)'"),
     ]
     fields = [
         Field("hosts", "Docker hosts", "192.168.1.20, 192.168.1.21:2375",
               help=f"Addresses of the proxies, separated by commas; port {PORT} when none is given."),
+        Field("exporters", "node_exporter (host updates)", "192.168.1.20, 192.168.1.21:9100",
+              help=f"Optional: node_exporter addresses of the hosts, separated by commas; port {EXPORTER_PORT} when "
+                   "none is given. Empty = host updates are not checked."),
     ]
     more_title = "Additional configuration"
     more_help = "After connecting: the containers homeWatch watches."
@@ -100,7 +139,10 @@ class DockerModule(ApiModule):
         hs = [h for h in re.split(r"[\s,]+", out["hosts"]) if h]
         if not hs or not all(_HOST.match(h) for h in hs):
             return out, "Docker hosts: IP addresses or host names (optionally :port), separated by commas"
-        return out | {"hosts": ", ".join(hs)}, ""
+        es = [h for h in re.split(r"[\s,]+", out.get("exporters", "")) if h]
+        if not all(_HOST.match(h) for h in es):
+            return out, "node_exporter: IP addresses or host names (optionally :port), separated by commas"
+        return out | {"hosts": ", ".join(hs), "exporters": ", ".join(es)}, ""
 
     async def fetch(self, s, secret, now):
         out, errors = [], {}
@@ -112,8 +154,15 @@ class DockerModule(ApiModule):
                     errors[host] = str(e)
         if not out:
             raise ApiError("; ".join(f"{h}: {e}" for h, e in errors.items()) or "no hosts")
+        exps = []
+        async with httpx.AsyncClient(timeout=10) as http:
+            for addr in exporters(s.get("exporters", "")):
+                try:
+                    exps.append(await self._exporter(http, addr))
+                except ApiError as e:
+                    errors[f"{addr} (node_exporter)"] = str(e)
         n = sum(len(h["containers"]) for h in out)
-        return {"hosts": out, "errors": errors,
+        return {"hosts": out, "errors": errors, "exporters": exps,
                 "_summary": f"{len(out)} host(s), {n} containers: " + ", ".join(h["name"] for h in out)}
 
     async def _host(self, http, base: str, host: str) -> dict:
@@ -162,6 +211,19 @@ class DockerModule(ApiModule):
                 "containers": sorted(containers, key=lambda c: (c["project"], c["name"]))}
 
     @staticmethod
+    async def _exporter(http, addr: str) -> dict:
+        try:
+            r = await http.get(f"http://{addr}/metrics")
+        except httpx.HTTPError as e:
+            raise ApiError(f"can't reach node_exporter ({why(e)}); is it running and port open to homeWatch?") from None
+        if r.status_code >= 300:
+            raise ApiError(f"HTTP {r.status_code} for /metrics")
+        updates, reboot, name = parse_apt(r.text)
+        if updates is None:
+            raise ApiError("no apt metrics: install prometheus-node-exporter-collectors on the host")
+        return {"addr": addr, "name": name or addr.rsplit(":", 1)[0], "updates": updates, "reboot": reboot}
+
+    @staticmethod
     def _key(h, c):
         return f"{h['host']}/{c['name']}"
 
@@ -192,7 +254,9 @@ class DockerModule(ApiModule):
         snap = self.snap
         if not snap:
             return []
-        return lines("hw_docker_container", [
+        return lines("hw_docker_host", [({"site": site, "host": e["name"]},
+                                         {"updates": float(e["updates"]), "reboot_required": float(e["reboot"])})
+                                        for e in snap.get("exporters", [])], self.snap_ts) + lines("hw_docker_container", [
             ({"site": site, "host": h["name"], "project": c["project"], "container": c["name"], "image": c["image"]},
              {"running": float(c["state"] == "running"), "healthy": {"healthy": 1.0, "unhealthy": 0.0}.get(c["health"]),
               "restarts": float(c["restarts"])}) for h in snap["hosts"] for c in h["containers"]], self.snap_ts)
@@ -248,6 +312,20 @@ class DockerModule(ApiModule):
         all_keys = {self._key(h, c) for h in snap["hosts"] for c in h["containers"]}
         self.seen = {k: v for k, v in self.seen.items() if k not in all_keys} | now_keys
         add("removed", WARNING if gone else OK, "removed: " + ", ".join(gone) if gone else "none removed", len(gone))
+
+        exps = snap.get("exporters", [])
+        todo = ["{}: {}".format(e["name"], ", ".join(x for x in (
+                    f"{e['updates']} package update{'s' if e['updates'] != 1 else ''}" if e["updates"] else "",
+                    "reboot needed" if e["reboot"] else "") if x))
+                for e in exps if e["updates"] or e["reboot"]]
+        if not s.get("exporters"):
+            add("updates", OK, "not checked (no node_exporter hosts set)")
+        elif todo:
+            add("updates", WARNING, "; ".join(todo), sum(e["updates"] for e in exps))
+        elif exps:
+            add("updates", OK, f"{len(exps)} host{'s' if len(exps) != 1 else ''} up to date")
+        else:
+            add("updates", OK, "not readable")
         return out
 
     def save(self, rt, form, user):
@@ -261,7 +339,10 @@ class DockerModule(ApiModule):
                       [[c["name"], c["project"], c["state"], c["health"] or "-", c["policy"], c["restarts"],
                         "yes" if self._key(h, c) in watched else "no", short_image(c["image"])] for c in h["containers"]],
                       widths=["18%", "11%", "8%", "8%", "13%", "7%", "7%", "28%"], min_width=860)
-                for h in snap["hosts"]]
+                for h in snap["hosts"]] + ([Table("Host updates (node_exporter)",
+                                                  ["Host", "Address", "Package updates", "Reboot needed"],
+                                                  [[e["name"], e["addr"], e["updates"], "yes" if e["reboot"] else "no"]
+                                                   for e in snap["exporters"]])] if snap.get("exporters") else [])
 
 
 plugin = DockerModule()

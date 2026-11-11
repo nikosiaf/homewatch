@@ -178,3 +178,76 @@ def test_pinned_digest_is_shortened_in_the_table():
     assert short_image("docker.io/valkey/valkey:8@sha256:81db6d39e1bba3b3ff32bd3a1b19a6d69690f94a") == \
         "docker.io/valkey/valkey:8@sha256:81db6d39e1bb"
     assert short_image("caddy:2.11.7") == "caddy:2.11.7" and short_image("") == ""
+
+
+METRICS = """# HELP apt_upgrades_pending Apt packages pending updates by origin.
+# TYPE apt_upgrades_pending gauge
+apt_upgrades_pending{arch="amd64",origin="Ubuntu:24.04/noble-updates"} 25
+apt_upgrades_pending{arch="all",origin="Ubuntu:24.04/noble-security"} 4
+node_reboot_required 1
+node_uname_info{domainname="(none)",machine="x86_64",nodename="ubuntults",release="6.8.0-147-generic"} 1
+"""
+
+
+def fake_with_exporters(monkeypatch, metrics):
+    """metrics: exporter address -> /metrics text, or None = unreachable."""
+    calls = []
+
+    def handler(request):
+        host = f"{request.url.host}:{request.url.port}"
+        calls.append((host, request.method, request.url.path))
+        if host in metrics:
+            if metrics[host] is None:
+                raise httpx.ConnectError("refused")
+            return httpx.Response(200, text=metrics[host])
+        if request.url.path == "/info":
+            return httpx.Response(200, json={"Name": "dock", "ServerVersion": "29.0"})
+        return httpx.Response(200, json=[])
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: REAL(transport=httpx.MockTransport(handler), **kw))
+    return calls
+
+
+def test_parse_apt():
+    from homewatch.modules.docker.plugin import parse_apt
+    assert parse_apt(METRICS) == (29, True, "ubuntults")
+    assert parse_apt('apt_upgrades_pending{arch="",origin=""} 0\nnode_reboot_required 0\n') == (0, False, "")
+    assert parse_apt("node_load1 0.5\n") == (None, False, "")  # no apt collector
+
+
+def test_exporter_validation():
+    m = DockerModule()
+    out, err = m.validate({"hosts": "socket-proxy", "exporters": " 10.0.0.5  10.0.0.6:9200 "}, {})
+    assert not err and out["exporters"] == "10.0.0.5, 10.0.0.6:9200"
+    assert "node_exporter" in m.validate({"hosts": "socket-proxy", "exporters": "http://x"}, {})[1]
+    assert not m.validate({"hosts": "socket-proxy"}, {})[1]  # optional
+
+
+def test_host_updates_todo(monkeypatch):
+    calls = fake_with_exporters(monkeypatch, {"10.0.0.5:9100": METRICS,
+                                              "10.0.0.6:9100": 'apt_upgrades_pending{arch="",origin=""} 0\n'})
+    m = DockerModule()
+    s = {"enabled": True, "hosts": "10.0.0.5", "exporters": "10.0.0.5, 10.0.0.6"}
+    snap = asyncio.run(m.fetch(s, "", NOW))
+    assert all(method == "GET" for _, method, _ in calls)
+    res = evaluate(m, s, snap)
+    assert res["updates"].status == WARNING  # todo.apply turns this into a To do row
+    assert res["updates"].detail == "ubuntults: 29 package updates, reboot needed"
+    assert res["each"].status == OK
+    m.snap, m.snap_ts = snap, NOW
+    host = [x for x in m.series("home") if x.startswith("hw_docker_host,")]
+    assert len(host) == 2 and "host=ubuntults" in host[0] and "updates=29" in host[0] and "reboot_required=1" in host[0]
+    assert any(t.title.startswith("Host updates") for t in m.tables(snap, s))
+
+
+def test_host_updates_off_and_problems(monkeypatch):
+    fake_with_exporters(monkeypatch, {"10.0.0.5:9100": "node_load1 0.1\n", "10.0.0.6:9100": None})
+    m = DockerModule()
+    s = {"enabled": True, "hosts": "10.0.0.5"}
+    res = evaluate(m, s, asyncio.run(m.fetch(s, "", NOW)))
+    assert res["updates"].status == OK and "not checked" in res["updates"].detail
+    s = {"enabled": True, "hosts": "10.0.0.5", "exporters": "10.0.0.5, 10.0.0.6"}
+    res = evaluate(m, s, asyncio.run(m.fetch(s, "", NOW)))
+    assert res["each"].status == ERROR
+    assert "prometheus-node-exporter-collectors" in res["each"].detail and "can't reach node_exporter" in res["each"].detail
+    assert res["updates"].status == OK and res["updates"].detail == "not readable"

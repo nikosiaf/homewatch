@@ -50,7 +50,8 @@ def test_other_checks_are_left_alone(db):
 
 def test_update_checks_are_todos_with_their_defaults():
     want = {"homeassistant.updates": 14, "pbs.updates": 14, "synology.updates": 14, "unifi.firmware": 14,
-            "mikrotik.firmware": 14, "mikrotik.routeros": 7, "opnsense.firmware": 7}
+            "mikrotik.firmware": 14, "mikrotik.routeros": 7, "opnsense.firmware": 7,
+            "docker.updates": 14}
     got = {f"{m.id}.{c.id}": c.warn for m in MODULES.values() for c in m.checks if c.todo}
     assert got == want
 
