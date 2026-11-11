@@ -129,7 +129,10 @@ less install.sh          # please read it first; it's short (q to quit)
     <li><b>New on the network:</b> a device homeWatch has never seen (a MAC on a switch port or access point, or a new
       VM) is listed on the Status page, marked "new" on the Map, and sent once as a WARNING message, until you press
       Known. Everything there the first time, and UniFi's client history, counts as known. Phones with a private
-      Wi-Fi address show up again now and then; they are labelled so.</li>
+      Wi-Fi address show up again now and then; they are labelled so. A MAC that only a switch has seen (no IP
+      address, not a Wi-Fi client) must stay for 10 minutes over 3 readings first, so stray addresses don't warn;
+      one on an access point's switch port is left off the Map altogether.
+      Guests on a guest network count at once, labelled "waiting at the portal" or "passed the portal".</li>
   </ul>
 </div>
 

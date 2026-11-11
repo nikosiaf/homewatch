@@ -106,8 +106,11 @@ def build(mikrotik: list[dict] | None, unifi: dict | None, ha: list[dict] | None
         if not m:
             continue
         ap = mac(c.get("ap_mac"))
-        node(f"mac:{m}", c.get("name") or "", "device",
-             f"mac:{ap}" if ap and not c.get("wired") and ap in aps else None, "Wi-Fi" if ap else "")
+        n = node(f"mac:{m}", c.get("name") or "", "device",
+                 f"mac:{ap}" if ap and not c.get("wired") and ap in aps else None, "Wi-Fi" if ap else "")
+        if c.get("guest"):  # on a guest network: the captive portal lets it in after a voucher or login
+            a = c.get("authorized")  # only guest networks with a portal report it
+            n["guest_wifi"] = "passed the portal" if a else "waiting at the portal" if a is False else "no portal state"
 
     # UniFi's history: a client that isn't connected now stays under the access point it last used, in red, for
     # KEEP_SEEN (it may be off, asleep or broken; that's what the red tells)
@@ -276,10 +279,19 @@ def build(mikrotik: list[dict] | None, unifi: dict | None, ha: list[dict] | None
                 if x["parent"] == nid:
                     x["parent"] = same[0]
             del nodes[nid]
-    # a wired device nobody named takes its switch port's comment (NAS, Cam1…) until a lease names it
+    # what comes through an access point's switch port is the AP and its Wi-Fi clients, and UniFi lists those. A
+    # bare MAC there that UniFi doesn't know, with no address and no name, is a garbled or oddly bridged frame
+    # (a corrupted header read as an address, a range extender), not a device: it is left off the map
+    ap_ports = aps_ports(nodes)
+    kids = {x["parent"] for x in nodes.values()}
+    for nid in [i for i, x in nodes.items() if stray(i, x, ap_ports) and i not in kids]:
+        del nodes[nid]
+    # a wired device nobody named takes its switch port's comment (NAS, Cam1…) until a lease names it; not on an
+    # access point's port, where the comment names the AP
     unnamed: dict[str, list[str]] = {}
     for nid, n in nodes.items():
-        if nid.startswith("mac:") and n["name"] in ("", nid[4:]) and str(n["parent"]).startswith("port:"):
+        if (nid.startswith("mac:") and n["name"] in ("", nid[4:]) and str(n["parent"]).startswith("port:")
+                and n["parent"] not in ap_ports):
             unnamed.setdefault(n["parent"], []).append(nid)
     for port, ids in unnamed.items():
         sw, _, pname = port[5:].partition("/")
@@ -416,6 +428,17 @@ def roles(rt) -> dict[str, str]:
 KEEP_SEEN = 30 * 86400  # a device that went away stays on the map, in red, under where it was, this long
 
 
+def aps_ports(nodes: dict) -> set[str]:
+    """The switch ports an access point hangs off."""
+    return {x["parent"] for x in nodes.values() if x["kind"] == "ap" and str(x["parent"]).startswith("port:")}
+
+
+def stray(nid: str, n: dict, ap_ports: set[str]) -> bool:
+    """A bare MAC on an access point's switch port: not a Wi-Fi client, no address, no name, no role."""
+    return (nid.startswith("mac:") and n["kind"] == "device" and n["via"] == "wired" and n["parent"] in ap_ports
+            and not n.get("ip") and not n.get("role") and n["name"] in ("", nid[4:]))
+
+
 def remember(nodes: dict, seen: dict, now: float) -> dict:
     """Note where each device is now; one that isn't seen any more (Wi-Fi client gone, MAC aged out of the switch)
     is put back where it was last seen, marked offline with the time. seen is updated in place."""
@@ -423,9 +446,13 @@ def remember(nodes: dict, seen: dict, now: float) -> dict:
         if n["parent"] and n["kind"] in ("device", "proxy", "bluetooth"):
             seen[nid] = {"parent": n["parent"], "via": n["via"], "name": n["name"], "ip": n.get("ip", ""), "ts": now}
     taken = {n["ip"]: i for i, n in nodes.items() if n.get("ip")}
+    ap_ports = aps_ports(nodes)
     for nid, s in list(seen.items()):
         if now - s["ts"] > KEEP_SEEN or (s.get("ip") and taken.get(s["ip"], nid) != nid):
             del seen[nid]  # too long ago, or its address belongs to something on the map now (merged into it)
+            continue
+        if nid not in nodes and s["parent"] in ap_ports and s["via"] == "wired" and not s.get("ip"):
+            del seen[nid]  # a stray MAC remembered before 1.0.1 (see stray): it never was a device
             continue
         if s["ts"] == now or s["parent"] not in nodes:
             continue

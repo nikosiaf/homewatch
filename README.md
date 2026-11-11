@@ -447,7 +447,12 @@ homeWatch doesn't read).
 - **New on the network:** a device never seen before (a MAC on a switch port or access point, or a new
   VM) is listed on the Status page, marked "new" on the Map and sent once as a WARNING, until you mark
   it as **Known**. What was there the first time (and UniFi's client history) counts as known. Phones
-  with a private Wi-Fi address show up again now and then; they are labelled so.
+  with a private Wi-Fi address show up again now and then; they are labelled so. A MAC that only a switch
+  has seen (no IP address, not a Wi-Fi client) must stay for 10 minutes over 3 readings before it counts,
+  so stray addresses from a garbled frame don't warn; multicast and all-zero MACs never count. A bare MAC on
+  an access point's switch port (not a UniFi client, no IP address, no name) is not a device at all: it is
+  left off the Map and never warns. Guests on a
+  guest network count at once and are labelled "waiting at the portal" or "passed the portal".
 
 ## Alerts and notifications
 

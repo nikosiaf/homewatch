@@ -52,7 +52,8 @@
   <tr><th>Device</th><th>Address</th><th>Where</th><th>First seen</th>{% if user.is_admin %}<th></th>{% endif %}</tr>
   {% for d in new_devices %}<tr>
     <td><b>{{ d.name }}</b>{% if d.node.startswith('mac:') and d.node[5] in '26AE' and not d.node.startswith('mac:02:11:32') %}
-      <div class="quiet small">private Wi-Fi address (a phone or tablet)</div>{% endif %}</td>
+      <div class="quiet small">private Wi-Fi address (a phone or tablet)</div>{% endif %}{% if d.guest_wifi %}
+      <div class="quiet small">guest Wi-Fi{% if d.guest_wifi != 'no portal state' %}, {{ d.guest_wifi }}{% endif %}</div>{% endif %}</td>
     <td class="nw"><span class="nm-ip">{{ d.ip }}</span>{% if d.node.startswith('mac:') %}<div class="quiet small nm-ip">{{ d.node[4:] }}</div>{% endif %}</td>
     <td>{{ d.place }}</td><td class="nw">{{ d.first_seen | ts }}</td>
     {% if user.is_admin %}<td><form class="inline" method="post" action="/devices/known">

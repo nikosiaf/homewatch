@@ -121,7 +121,8 @@ class UniFiModule(ApiModule):
                            for h in health],
                 "clients": [{"mac": c.get("mac", ""), "name": c.get("name") or c.get("hostname") or "",
                              "ap_mac": c.get("ap_mac", ""), "wired": bool(c.get("is_wired")), "ip": c.get("ip") or "",
-                             "essid": c.get("essid") or ""} for c in stations],
+                             "essid": c.get("essid") or "", "guest": bool(c.get("is_guest")),
+                             "authorized": c.get("authorized")} for c in stations],
                 "history": [{"mac": c.get("mac", ""), "name": c.get("name") or c.get("hostname") or "",
                              "ap_mac": c.get("last_uplink_mac") or "", "ip": c.get("last_ip") or "",
                              "last_seen": c.get("last_seen") or 0, "wired": bool(c.get("is_wired"))}

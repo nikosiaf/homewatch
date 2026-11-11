@@ -442,3 +442,28 @@ def test_stopped_guests_are_red_and_last():
     assert not n["guest:pve/101"].get("offline")
     host = topology.layers(n)["host"]
     assert [k["name"] for k in host["kids"]] == ["homeassistant", "kali", "Win11"]  # running first
+
+
+# ---- 1.0.1: stray MACs on an access point's port ---------------------------------------------------------------
+def test_a_bare_mac_on_an_ap_port_is_left_off_the_map():
+    sw1 = SW1 | {"ports": [p | {"comment": "Hall AP"} if p["name"] == "ether4" else p for p in SW1["ports"]],
+                 "hosts": SW1["hosts"] + [("AA:AA:03:00:00:00", "ether4"), ("DE:AD:00:00:00:07", "ether4"),
+                                          ("DE:AD:00:00:00:08", "ether2")]}
+    sw2 = SW2 | {"hosts": SW2["hosts"] + [("AA:AA:03:00:00:00", "ether1"), ("DE:AD:00:00:00:07", "ether1"),
+                                          ("DE:AD:00:00:00:08", "ether1")]}  # the other switch: on its uplink
+    n = topology.build([sw1, sw2], UNIFI, HA, PVE, addresses=[{"mac": "de:ad:00:00:00:07", "ip": "192.168.2.70"}])
+    assert "mac:AA:AA:03:00:00:00" not in n  # no name, no address, not a Wi-Fi client: a garbled frame
+    assert n["mac:DE:AD:00:00:00:07"]["parent"] == "port:core/ether4"  # it has an address: a real device
+    assert n["mac:DE:AD:00:00:00:07"]["name"] != "Hall AP"  # the AP port's comment names the AP, not others
+    assert n["mac:DE:AD:00:00:00:08"]["parent"] == "port:core/ether2"  # other ports: unchanged
+    assert n["mac:CC:00:00:00:00:01"]["parent"] == "mac:BB:00:00:00:00:01"
+
+
+def test_stray_macs_remembered_before_are_forgotten():
+    n = built()
+    seen = {"mac:AA:AA:03:00:00:00": {"parent": "port:core/ether4", "via": "wired", "name": "Hall AP", "ip": "",
+                                      "ts": 900.0},
+            "mac:DE:AD:00:00:00:09": {"parent": "port:lan/ether2", "via": "wired", "name": "", "ip": "", "ts": 900.0}}
+    n = topology.remember(n, seen, 1000.0)
+    assert "mac:AA:AA:03:00:00:00" not in seen and "mac:AA:AA:03:00:00:00" not in n
+    assert n["mac:DE:AD:00:00:00:09"]["offline"]  # a wired device elsewhere stays, in red
