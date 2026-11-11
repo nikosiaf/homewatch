@@ -123,7 +123,7 @@ button.is-busy .spin { width: 12px; height: 12px; border-color: currentColor; bo
 .callout svg { flex: none; color: var(--warn); margin-top: 2px; }
 .callout ul { margin: 6px 0 0 18px; padding: 0; }
 .callout.filling > div { flex: 1; min-width: 0; }
-.module-grid > .callout.waiting { grid-column: 1 / -1; margin: 0; }
+.module-grid > .callout.waiting { flex: 1 1 100%; margin: 0; }
 .callout-x { margin: -4px -6px 0 auto; flex: none; }
 .callout-x .icon-btn { width: 28px; height: 28px; color: var(--ok); border-color: transparent; background: transparent; }
 .callout-x .icon-btn:hover { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
@@ -211,16 +211,17 @@ header .menu { order: 2; }
   .orb { width: 76px; height: 76px; } .orb svg { width: 34px; height: 34px; }
 }
 
-/* Status page: module tiles with an icon, the headline number and its 24 h line; problems first; an open one takes the full width */
-.module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; align-items: start; }
-.module-grid details.module, .module-grid a.module, .module-grid div.module { margin: 0; min-width: 0; position: relative; overflow: hidden; border: 1px solid var(--line);
+/* Status page: module tiles with an icon, the headline number and its 24 h line; problems first; an open one takes the full width.
+   Flex, not grid: the tiles of each row (the last one too, or a single tile) grow to fill the whole width, so no row ends in a gap */
+.module-grid { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.module-grid details.module, .module-grid a.module, .module-grid div.module { flex: 1 1 250px; margin: 0; min-width: 0; position: relative; overflow: hidden; border: 1px solid var(--line);
   border-radius: 14px; box-shadow: var(--shadow); --state: var(--ok); --state-glow: var(--ok-glow); transition: transform .18s, box-shadow .18s; }
 .module-grid .module::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--state); }
 .module-grid .module.s1 { --state: var(--warn); --state-glow: var(--warn-glow); box-shadow: var(--shadow), 0 0 0 1px var(--warn), 0 0 24px var(--warn-glow); }
 .module-grid .module.s2 { --state: var(--err); --state-glow: var(--err-glow); box-shadow: var(--shadow), 0 0 0 1px var(--err), 0 0 24px var(--err-glow); }
 .module-grid .module.unread, .module-grid .module.off { --state: var(--quiet); --state-glow: transparent; }
 .module-grid .module:not([open]):hover { transform: translateY(-2px); }
-.module-grid details.module[open] { grid-column: 1 / -1; background: color-mix(in srgb, var(--state) 8%, var(--card)); }
+.module-grid details.module[open] { flex-basis: 100%; background: color-mix(in srgb, var(--state) 8%, var(--card)); }
 .module-grid:has(details.module[open]) details.module:not([open]) { opacity: .6; transition: opacity .15s; }
 .module-grid:has(details.module[open]) details.module:not([open]):hover { opacity: 1; }
 .module-grid details.module > summary { display: block; padding: 14px 16px 12px; cursor: pointer; list-style: none; }
