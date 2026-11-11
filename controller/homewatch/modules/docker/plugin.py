@@ -45,7 +45,9 @@ def exporters(value: str) -> list[str]:
 
 
 def parse_apt(text: str) -> tuple[int | None, bool, str]:
-    """From node_exporter's /metrics: (pending upgrades, None without the apt collector; reboot needed; host name)."""
+    """From node_exporter's /metrics: (pending upgrades, None without the apt collector; reboot needed; host name).
+    The collector leaves apt_upgrades_pending out when nothing is pending, so any apt_* metric means 0; held-back
+    packages (apt_upgrades_held, e.g. Ubuntu's phased updates) can't be installed yet and are not counted."""
     updates, reboot, name = None, False, ""
     for line in text.splitlines():
         if line.startswith("#") or not line.strip():
@@ -58,6 +60,8 @@ def parse_apt(text: str) -> tuple[int | None, bool, str]:
             continue
         if bare == "apt_upgrades_pending":
             updates = (updates or 0) + int(v)
+        elif bare.startswith("apt_"):
+            updates = updates or 0
         elif bare == "node_reboot_required":
             reboot = reboot or v > 0
         elif bare == "node_uname_info":

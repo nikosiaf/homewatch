@@ -213,6 +213,10 @@ def test_parse_apt():
     assert parse_apt(METRICS) == (29, True, "ubuntults")
     assert parse_apt('apt_upgrades_pending{arch="",origin=""} 0\nnode_reboot_required 0\n') == (0, False, "")
     assert parse_apt("node_load1 0.5\n") == (None, False, "")  # no apt collector
+    # nothing pending: the collector writes no apt_upgrades_pending at all; held (phased) ones are not counted
+    held = ('apt_autoremove_pending 7\napt_upgrades_held{arch="all",origin="Ubuntu:noble/noble-updates"} 1\n'
+            'node_reboot_required 0\n')
+    assert parse_apt(held) == (0, False, "")
 
 
 def test_exporter_validation():
