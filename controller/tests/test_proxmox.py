@@ -41,6 +41,7 @@ def snap(**over):
         backups={100: {"ok": NOW - 5 * 3600, "failed": None, "error": ""},
                  104: {"ok": NOW - 6 * 3600, "failed": None, "error": ""}},
         not_covered={103},
+        updates={"pve": []},
     )
     for k, v in over.items():
         setattr(s, k, v)
@@ -109,6 +110,8 @@ def mock_api():
     respx.get(BASE + "/cluster/backup-info/not-backed-up").mock(
         return_value=httpx.Response(200, json={"data": [{"vmid": 103}]}))
     respx.get(BASE + "/nodes/pve/disks/list").mock(return_value=httpx.Response(200, json={"data": []}))
+    respx.get(BASE + "/nodes/pve/apt/update").mock(return_value=httpx.Response(200, json={"data": [
+        {"Package": "pve-manager", "OldVersion": "9.2.26", "Version": "9.2.28", "Title": "x"}]}))
     respx.get(url__startswith=BASE + "/nodes/pve/tasks?").mock(return_value=httpx.Response(200, json={"data": [
         {"upid": "UPID:pve:1:2:3:vzdump::root@pam:", "id": "", "status": "job errors", "endtime": NOW - 3600},
         {"upid": "UPID:pve:4:5:6:vzdump:104:root@pam:", "id": "104", "status": "OK", "endtime": NOW - 7200}]}))
@@ -128,6 +131,7 @@ async def test_client_snapshot_reads_each_log_once():
     # 104: its own task succeeded earlier, the newer job never finished it -> counts as failed
     assert s.backups[104] == {"ok": NOW - 7200, "failed": NOW - 3600, "error": "did not finish"}
     assert s.not_covered == {103}
+    assert s.updates == {"pve": [{"package": "pve-manager", "old": "9.2.26", "new": "9.2.28"}]}
     headers = respx.calls.last.request.headers
     assert headers["authorization"] == "PVEAPIToken=homewatch@pve!monitor=secret"
     await c.close()
@@ -146,3 +150,26 @@ def test_guest_without_any_backup_warns():
     res = by_id(evaluate({}, th(), State(NOW, snap(backups={100: {"ok": NOW - 3600, "failed": None, "error": ""}}),
                                          watched=[100, 104])))
     assert res["backups"].status == WARNING and "unifi: no backup in the last 8 days" in res["backups"].detail
+
+
+def test_updates_pending_and_up_to_date():
+    pkgs = [{"package": "pve-manager", "old": "9.2.26", "new": "9.2.28"}, {"package": "libc6", "old": "1", "new": "2"}]
+    res = by_id(evaluate({}, th(), State(NOW, snap(updates={"pve": pkgs}), watched=[])))
+    assert res["updates"].status == WARNING and res["updates"].value == 2
+    assert res["updates"].detail == "pve: 2 package updates (Proxmox VE 9.2.26 → 9.2.28)"
+    assert by_id(evaluate({}, th(), State(NOW, snap(), watched=[])))["updates"].detail == "up to date"
+
+
+def test_updates_not_readable_is_ok():
+    res = by_id(evaluate({}, th(), State(NOW, snap(updates={"pve": None}), watched=[])))
+    assert res["updates"].status == OK and "Sys.Modify" in res["updates"].detail
+
+
+@respx.mock
+async def test_updates_forbidden_does_not_fail_the_read():
+    mock_api()
+    respx.get(BASE + "/nodes/pve/apt/update").mock(return_value=httpx.Response(403))
+    c = Client("https://pve.test:8006", "homewatch@pve!monitor", "secret")
+    s = await c.snapshot(now=NOW)
+    assert s.updates == {"pve": None} and s.backups
+    await c.close()

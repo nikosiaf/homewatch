@@ -84,7 +84,7 @@ Grafana needs about 2 GB of disk and 150 MB of memory. Details: [docs/grafana.md
 |---|---|---|
 | [Internet line](docs/modules.md#internet-line-module) | reachability, packet loss, latency, jitter, DNS, speed vs. your contract | none |
 | [ISP modem](docs/modules.md#isp-modem-module-optional) | DSL link, sync rate, noise margin, resyncs, PPP session | the modem's login (Telekom Speedport Plus 2) |
-| [Proxmox VE](docs/modules.md#proxmox-ve-module-optional) | nodes, guests, storage, disk health, backups | API token with the PVEAuditor role |
+| [Proxmox VE](docs/modules.md#proxmox-ve-module-optional) | nodes, guests, storage, disk health, backups, updates | API token with the PVEAuditor role (+ Sys.Modify for updates, optional) |
 | [OPNsense](docs/modules.md#opnsense-module-optional) | gateways, CPU, services, HAProxy, certificates, firmware | API key limited to status pages |
 | [Home Assistant](docs/modules.md#home-assistant-module-optional) | core, updates, backups, host load, the entities you choose | token of a non-admin user |
 | [Synology NAS](docs/modules.md#synology-nas-module-optional) | system, disks, pools and volumes, DSM updates, fans (SNMPv3) | DSM user with no folder or app access |

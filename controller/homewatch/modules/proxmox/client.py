@@ -26,6 +26,9 @@ class Snapshot:
     disks: dict[str, list[dict]] = field(default_factory=dict)  # node -> disks
     backups: dict[int, dict] = field(default_factory=dict)  # vmid -> {"ok": ts|None, "failed": ts|None, "error": str}
     not_covered: set[int] = field(default_factory=set)  # guests no backup job includes
+    # node -> pending package updates [{"package", "old", "new"}]; None when the token can't read them
+    # (GET /nodes/{node}/apt/update needs Sys.Modify, which PVEAuditor lacks)
+    updates: dict[str, list[dict] | None] = field(default_factory=dict)
 
 
 _START = re.compile(r"Starting Backup of VM (\d+)")
@@ -54,13 +57,15 @@ class Client:
                                       headers={"Authorization": f"PVEAPIToken={token_id}={secret}"})
         self.log_cache: dict[str, dict[int, str]] = {}
 
-    async def get(self, path: str, **params):
+    async def get(self, path: str, optional: bool = False, **params):
         try:
             r = await self.http.get(self.base + path, params=params or None)
         except httpx.HTTPError as e:
             raise ApiError(f"can't reach Proxmox ({why(e)})") from None
         if r.status_code == 401:
             raise ApiError("Proxmox rejected the API token")
+        if r.status_code == 403 and optional:
+            return None
         if r.status_code == 403:
             raise ApiError(f"the token lacks permission for {path} (give it the PVEAuditor role on /)")
         if r.status_code >= 300:
@@ -68,6 +73,7 @@ class Client:
         return r.json().get("data")
 
     async def snapshot(self, with_disks: bool = True, now: float | None = None) -> Snapshot:
+        """with_disks also reads the pending package updates: both change slowly."""
         now = now or time.time()
         s = Snapshot()
         s.nodes = await self.get("/nodes") or []
@@ -85,8 +91,20 @@ class Client:
                     s.disks[n["node"]] = await self.get(f"/nodes/{n['node']}/disks/list") or []
                 except ApiError:
                     s.disks[n["node"]] = []
+                s.updates[n["node"]] = await self._updates(n["node"])
             await self._backups(n["node"], s, now)
         return s
+
+    async def _updates(self, node: str) -> list[dict] | None:
+        """Pending updates from the node's apt cache (Proxmox refreshes it daily); this starts no apt run."""
+        try:
+            pkgs = await self.get(f"/nodes/{node}/apt/update", optional=True)
+        except ApiError:
+            return None
+        if pkgs is None:
+            return None
+        return [{"package": x.get("Package", "?"), "old": x.get("OldVersion", ""), "new": x.get("Version", "")}
+                for x in pkgs]
 
     async def _backups(self, node: str, s: Snapshot, now: float) -> None:
         tasks = await self.get(f"/nodes/{node}/tasks", typefilter="vzdump", source="all", limit=100,

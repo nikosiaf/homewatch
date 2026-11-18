@@ -70,9 +70,21 @@ page shows the three commands to create it). homeWatch tests the token before sa
 | Full in (at the rate of the last 7 days) | < 30 days | < 7 days |
 | Disk health | SSD life left < 20 % | SMART not PASSED, or life left < 10 % |
 | Backups (watched guests in a backup job) | newest > 26 h old, or none yet | newest > 50 h old, or the last attempt failed |
+| Updates (To do) | package updates pending for 14 days | |
 
 Backup results come from Proxmox's backup task logs (a read-only token can't list backup contents);
 each log is read once.
+
+Proxmox lists pending package updates only to tokens with **Sys.Modify** on the node, which PVEAuditor
+lacks. Until you allow it, the Updates check shows "not readable" and never alarms. Sys.Modify can also
+change node settings, so it is an optional extra step (the module page shows both commands):
+
+```
+pveum role add HomewatchUpdates --privs Sys.Modify
+pveum acl modify /nodes --users homewatch@pve --roles HomewatchUpdates
+```
+
+homeWatch only reads the list (from the apt cache Proxmox refreshes daily); it never runs apt.
 
 ## OPNsense module (optional)
 

@@ -24,6 +24,10 @@ SETUP_COMMANDS = [
     "pveum acl modify / --users homewatch@pve --roles PVEAuditor",
     "pveum user token add homewatch@pve monitor --privsep 0",
 ]
+UPDATES_COMMANDS = [  # optional: Proxmox lists pending updates only to Sys.Modify
+    "pveum role add HomewatchUpdates --privs Sys.Modify",
+    "pveum acl modify /nodes --users homewatch@pve --roles HomewatchUpdates",
+]
 
 
 def normalize_url(url: str) -> str:
@@ -52,6 +56,10 @@ class ProxmoxModule(PinnedTLS, Module):
         ("code", "\n".join(SETUP_COMMANDS)),
         ("text", "The last command prints the token's secret once: paste it into the module. The token can only read "
                  "(role PVEAuditor). Then tick the guests to watch."),
+        ("text", "Optional, for the Updates check: Proxmox shows pending package updates only to tokens with "
+                 "Sys.Modify on the node. That privilege can also change node settings, so it's off by default; "
+                 "to allow it, run:"),
+        ("code", "\n".join(UPDATES_COMMANDS)),
     ]
     checks = checks.CHECKS
 
@@ -97,7 +105,7 @@ class ProxmoxModule(PinnedTLS, Module):
             if with_disks:
                 self.disks_ts = now
             elif self.snap:
-                snap.disks = self.snap.disks
+                snap.disks, snap.updates = self.snap.disks, self.snap.updates
             self.snap, self.snap_ts, self.error = snap, now, ""
             await self._guest_macs(rt, s, now)
         except ApiError as e:
@@ -159,7 +167,9 @@ class ProxmoxModule(PinnedTLS, Module):
              {"online": float(n.get("status") == "online"), "cpu_percent": pct(n.get("cpu")), "cpus": num(n.get("maxcpu")),
               "mem_used_bytes": num(n.get("mem")), "mem_total_bytes": num(n.get("maxmem")),
               "disk_used_bytes": num(n.get("disk")), "disk_total_bytes": num(n.get("maxdisk")),
-              "uptime_seconds": num(n.get("uptime"))}) for n in snap.nodes], ts)
+              "uptime_seconds": num(n.get("uptime")),
+              "updates": None if snap.updates.get(n.get("node")) is None else float(len(snap.updates[n["node"]]))})
+            for n in snap.nodes], ts)
         out += lines("hw_proxmox_guest", [
             ({"site": site, "node": g.get("node", ""), "vmid": str(g.get("vmid", "")), "name": g.get("name", ""),
               "type": g.get("type", "")},

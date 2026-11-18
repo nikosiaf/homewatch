@@ -33,6 +33,9 @@ CHECKS: list[CheckDef] = [
     CheckDef("backups", "Backups", "api", unit="h", warn=26, error=50, editable=("warn", "error"),
              help="Age of the newest successful backup of each watched guest that a backup job covers; "
                   "ERROR also when its last backup attempt failed."),
+    CheckDef("updates", "Updates", "api", unit="days", warn=14, editable=("warn",), todo=True,
+             help="Package updates pending on the nodes. Listed under To do; WARNING once it has waited this many "
+                  "days. Needs Sys.Modify on /nodes (optional setup step); without it the check shows not readable."),
 ]
 CHECK_BY_ID = {c.id: c for c in CHECKS}
 HEALTHY = {"PASSED", "OK"}
@@ -87,7 +90,7 @@ def evaluate(settings: dict, th: dict[str, Thresholds], st: State) -> list[Check
     else:
         add("node", OK, ", ".join(n["node"] for n in online) + " online")
     if not online:
-        for c in ("cpu", "mem", "rootfs", "guests", "storage", "disks", "backups"):
+        for c in ("cpu", "mem", "rootfs", "guests", "storage", "disks", "backups", "updates"):
             add(c, OK, "node offline", suppressed_by="node")
         return done()
 
@@ -173,4 +176,23 @@ def evaluate(settings: dict, th: dict[str, Thresholds], st: State) -> list[Check
                 oldest)
         else:
             add("backups", OK, f"{len(covered)} guests backed up, oldest {_ago(oldest)} ago", oldest)
+
+    _updates(s, [n["node"] for n in online], add)
     return done()
+
+
+def _updates(s: Snapshot, nodes: list[str], add) -> None:
+    read = {n: s.updates[n] for n in nodes if s.updates.get(n) is not None}
+    if not read:
+        add("updates", OK, "not readable (the token needs Sys.Modify on /nodes; see the module's setup)"
+            if any(n in s.updates for n in nodes) else "No reading yet")
+        return
+    parts = []
+    for node, pkgs in sorted(read.items()):
+        if not pkgs:
+            continue
+        pve = next((p for p in pkgs if p["package"] == "pve-manager"), None)
+        parts.append(f"{node}: {len(pkgs)} package updates"
+                     + (f" (Proxmox VE {pve['old']} → {pve['new']})" if pve else ""))
+    total = sum(len(p) for p in read.values())
+    add("updates", WARNING if total else OK, "; ".join(parts) if parts else "up to date", total)
