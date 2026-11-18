@@ -29,6 +29,28 @@ class Snapshot:
     # node -> pending package updates [{"package", "old", "new"}]; None when the token can't read them
     # (GET /nodes/{node}/apt/update needs Sys.Modify, which PVEAuditor lacks)
     updates: dict[str, list[dict] | None] = field(default_factory=dict)
+    # node -> {"running": "7.0.14-22", "newest": "7.0.14-29"} from apt/versions (PVEAuditor is enough); None unread
+    kernels: dict[str, dict | None] = field(default_factory=dict)
+
+
+_KERNEL_PKG = re.compile(r"^(?:proxmox|pve)-kernel-(\d+\.\d+\.\d+-\d+)-pve(?:-signed)?$")
+
+
+def kernel_key(v: str) -> tuple[int, ...]:
+    """'7.0.14-29' (or '7.0.14-29-pve') -> (7, 0, 14, 29), for comparing kernel versions."""
+    return tuple(int(x) for x in re.findall(r"\d+", v.removesuffix("-pve")))
+
+
+def parse_kernels(versions: list[dict]) -> dict | None:
+    """The running kernel and the newest installed one, from GET /nodes/{node}/apt/versions."""
+    running = next((x.get("RunningKernel") for x in versions if x.get("RunningKernel")), None)
+    if not running:
+        return None
+    running = running.removesuffix("-pve")
+    installed = [m.group(1) for x in versions if (m := _KERNEL_PKG.match(x.get("Package", "")))
+                 and x.get("CurrentState", "Installed") == "Installed"]
+    newest = max(installed, key=kernel_key, default=running)
+    return {"running": running, "newest": max(newest, running, key=kernel_key)}
 
 
 _START = re.compile(r"Starting Backup of VM (\d+)")
@@ -73,7 +95,7 @@ class Client:
         return r.json().get("data")
 
     async def snapshot(self, with_disks: bool = True, now: float | None = None) -> Snapshot:
-        """with_disks also reads the pending package updates: both change slowly."""
+        """with_disks also reads the pending package updates and kernels: they all change slowly."""
         now = now or time.time()
         s = Snapshot()
         s.nodes = await self.get("/nodes") or []
@@ -92,6 +114,11 @@ class Client:
                 except ApiError:
                     s.disks[n["node"]] = []
                 s.updates[n["node"]] = await self._updates(n["node"])
+                try:
+                    s.kernels[n["node"]] = parse_kernels(await self.get(f"/nodes/{n['node']}/apt/versions",
+                                                                        optional=True) or [])
+                except ApiError:
+                    s.kernels[n["node"]] = None
             await self._backups(n["node"], s, now)
         return s
 

@@ -34,8 +34,10 @@ CHECKS: list[CheckDef] = [
              help="Age of the newest successful backup of each watched guest that a backup job covers; "
                   "ERROR also when its last backup attempt failed."),
     CheckDef("updates", "Updates", "api", unit="days", warn=14, editable=("warn",), todo=True,
-             help="Package updates pending on the nodes. Listed under To do; WARNING once it has waited this many "
-                  "days. Needs Sys.Modify on /nodes (optional setup step); without it the check shows not readable."),
+             help="Package updates pending on the nodes, or a reboot to start a newer installed kernel. Listed under "
+                  "To do; WARNING once it has waited this many days. The package list needs Sys.Modify on /nodes "
+                  "(optional setup step); the kernel needs only PVEAuditor. A node pinned to an older kernel on "
+                  "purpose shows a reboot that never clears: raise the days or turn the check off."),
 ]
 CHECK_BY_ID = {c.id: c for c in CHECKS}
 HEALTHY = {"PASSED", "OK"}
@@ -183,16 +185,26 @@ def evaluate(settings: dict, th: dict[str, Thresholds], st: State) -> list[Check
 
 def _updates(s: Snapshot, nodes: list[str], add) -> None:
     read = {n: s.updates[n] for n in nodes if s.updates.get(n) is not None}
-    if not read:
+    kernels = {n: s.kernels[n] for n in nodes if s.kernels.get(n)}
+    if not read and not kernels:
         add("updates", OK, "not readable (the token needs Sys.Modify on /nodes; see the module's setup)"
             if any(n in s.updates for n in nodes) else "No reading yet")
         return
-    parts = []
-    for node, pkgs in sorted(read.items()):
-        if not pkgs:
-            continue
-        pve = next((p for p in pkgs if p["package"] == "pve-manager"), None)
-        parts.append(f"{node}: {len(pkgs)} package updates"
-                     + (f" (Proxmox VE {pve['old']} → {pve['new']})" if pve else ""))
-    total = sum(len(p) for p in read.values())
-    add("updates", WARNING if total else OK, "; ".join(parts) if parts else "up to date", total)
+    parts, total, reboots = [], 0, 0
+    for node in sorted(set(read) | set(kernels)):
+        what = []
+        pkgs = read.get(node) or []
+        if pkgs:
+            pve = next((p for p in pkgs if p["package"] == "pve-manager"), None)
+            what.append(f"{len(pkgs)} package updates" + (f" (Proxmox VE {pve['old']} → {pve['new']})" if pve else ""))
+            total += len(pkgs)
+        k = kernels.get(node)
+        if k and k["newest"] != k["running"]:
+            what.append(f"reboot needed (running kernel {k['running']}, installed {k['newest']})")
+            reboots += 1
+        if what:
+            parts.append(f"{node}: " + ", ".join(what))
+    detail = "; ".join(parts) if parts else "up to date"
+    if not read and not parts:
+        detail = "kernel current; package list not readable (needs Sys.Modify on /nodes)"
+    add("updates", WARNING if parts else OK, detail, total + reboots)

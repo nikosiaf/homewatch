@@ -70,7 +70,7 @@ page shows the three commands to create it). homeWatch tests the token before sa
 | Full in (at the rate of the last 7 days) | < 30 days | < 7 days |
 | Disk health | SSD life left < 20 % | SMART not PASSED, or life left < 10 % |
 | Backups (watched guests in a backup job) | newest > 26 h old, or none yet | newest > 50 h old, or the last attempt failed |
-| Updates (To do) | package updates pending for 14 days | |
+| Updates (To do) | package updates, or a reboot into a newer installed kernel, pending for 14 days | |
 
 Backup results come from Proxmox's backup task logs (a read-only token can't list backup contents);
 each log is read once.
@@ -89,6 +89,11 @@ roles inherited from `/`, it replaces them, so without it the token would lose S
 (it would then see no backup tasks).
 
 homeWatch only reads the list (from the apt cache Proxmox refreshes daily); it never runs apt.
+
+The same check reports **reboot needed** when a newer kernel is installed than the one running. That
+part needs only PVEAuditor, so it works without the optional step. A node you keep on an older kernel
+on purpose (`proxmox-boot-tool kernel pin`) shows a reboot that never clears: raise the check's days
+or turn it off.
 
 ## OPNsense module (optional)
 

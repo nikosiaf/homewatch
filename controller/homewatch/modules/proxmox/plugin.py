@@ -105,7 +105,7 @@ class ProxmoxModule(PinnedTLS, Module):
             if with_disks:
                 self.disks_ts = now
             elif self.snap:
-                snap.disks, snap.updates = self.snap.disks, self.snap.updates
+                snap.disks, snap.updates, snap.kernels = self.snap.disks, self.snap.updates, self.snap.kernels
             self.snap, self.snap_ts, self.error = snap, now, ""
             await self._guest_macs(rt, s, now)
         except ApiError as e:
@@ -168,7 +168,9 @@ class ProxmoxModule(PinnedTLS, Module):
               "mem_used_bytes": num(n.get("mem")), "mem_total_bytes": num(n.get("maxmem")),
               "disk_used_bytes": num(n.get("disk")), "disk_total_bytes": num(n.get("maxdisk")),
               "uptime_seconds": num(n.get("uptime")),
-              "updates": None if snap.updates.get(n.get("node")) is None else float(len(snap.updates[n["node"]]))})
+              "updates": None if snap.updates.get(n.get("node")) is None else float(len(snap.updates[n["node"]])),
+              "reboot_required": None if not snap.kernels.get(n.get("node")) else
+              float(snap.kernels[n["node"]]["newest"] != snap.kernels[n["node"]]["running"])})
             for n in snap.nodes], ts)
         out += lines("hw_proxmox_guest", [
             ({"site": site, "node": g.get("node", ""), "vmid": str(g.get("vmid", "")), "name": g.get("name", ""),
