@@ -227,9 +227,9 @@ class SynologyModule(ApiModule):
             add("system", ERROR, "DSM reports the system as crashed")
         elif t is not None:
             lvl = max(level(float(t), th["system"]), WARNING if i.get("temperature_warning") else OK)
-            add("system", lvl, f"{t} °C, up {i.get('up_time', '?')}", float(t))
+            add("system", lvl, f"{t} °C, up {up_text(i.get('up_time'))}", float(t))
         else:
-            add("system", OK, f"up {i.get('up_time', '?')}")
+            add("system", OK, f"up {up_text(i.get('up_time'))}")
 
         cpu = snap.get("cpu")
         if cpu:
@@ -319,3 +319,15 @@ def hms_s(text) -> float | None:
         return None
     h, m, sec = map(int, parts)
     return float(h * 3600 + m * 60 + sec)
+
+
+def up_text(text) -> str:
+    """DSM's up_time for people: "531:46:43" -> "22 d 3 h", "5:07:00" -> "5 h 7 min"."""
+    s = hms_s(text)
+    if s is None:
+        return str(text or "?")
+    m = int(s // 60)
+    if m < 60:
+        return f"{m} min"
+    h, m = divmod(m, 60)
+    return f"{h} h {m} min" if h < 48 else f"{h // 24} d {h % 24} h"

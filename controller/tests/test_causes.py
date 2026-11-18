@@ -245,6 +245,8 @@ def test_synology_uptime():
     from homewatch.modules.synology.plugin import hms_s
 
     assert hms_s("442:22:37") == 442 * 3600 + 22 * 60 + 37 and hms_s("") is None and hms_s("1 day") is None
+    from homewatch.modules.synology.plugin import up_text
+    assert up_text("531:46:43") == "22 d 3 h" and up_text("5:07:00") == "5 h 7 min" and up_text(None) == "?"
 
 
 def test_runtime_records_device_events_once_per_reading(cfg, monkeypatch):
