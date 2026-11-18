@@ -81,8 +81,12 @@ change node settings, so it is an optional extra step (the module page shows bot
 
 ```
 pveum role add HomewatchUpdates --privs Sys.Modify
-pveum acl modify /nodes --users homewatch@pve --roles HomewatchUpdates
+pveum acl modify /nodes --users homewatch@pve --roles PVEAuditor,HomewatchUpdates
 ```
+
+PVEAuditor is named again on `/nodes` on purpose: Proxmox doesn't add a role set on a path to the
+roles inherited from `/`, it replaces them, so without it the token would lose Sys.Audit on the nodes
+(it would then see no backup tasks).
 
 homeWatch only reads the list (from the apt cache Proxmox refreshes daily); it never runs apt.
 

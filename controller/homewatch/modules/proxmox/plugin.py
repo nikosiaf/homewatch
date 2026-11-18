@@ -26,7 +26,7 @@ SETUP_COMMANDS = [
 ]
 UPDATES_COMMANDS = [  # optional: Proxmox lists pending updates only to Sys.Modify
     "pveum role add HomewatchUpdates --privs Sys.Modify",
-    "pveum acl modify /nodes --users homewatch@pve --roles HomewatchUpdates",
+    "pveum acl modify /nodes --users homewatch@pve --roles PVEAuditor,HomewatchUpdates",
 ]
 
 
