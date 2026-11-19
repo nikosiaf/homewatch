@@ -20,11 +20,53 @@ log = logging.getLogger("homewatch.mqtt")
 
 SETTINGS = "mqtt"
 SECRET = "mqtt.password"
-DEFAULTS = {"enabled": False, "host": "", "port": 1883, "username": "", "tls": False, "prefix": "homeassistant"}
+PINS = "tls.mqtt"  # {"host:port": {"cert": pinned PEM, "new": PEM presented instead, if it changed}}
+DEFAULTS = {"enabled": False, "host": "", "port": 1883, "username": "", "tls": False, "verify": False,
+            "prefix": "homeassistant"}
 
 
 def load(db) -> dict:
     return DEFAULTS | (db.get(SETTINGS) or {})
+
+
+def host_port(s: dict) -> str:
+    return f"{s['host']}:{int(s['port'])}"
+
+
+def pins(db) -> dict:
+    return db.get(PINS) or {}
+
+
+def transport(db) -> tuple[str, bool] | None:
+    """How the connection to the broker is protected and whether that is good enough; None: no broker set."""
+    s = load(db)
+    if not s["enabled"] or not s["host"]:
+        return None
+    if not s["tls"]:
+        return "Plain MQTT: the broker password crosses the network unencrypted", False
+    if s["verify"]:
+        return "TLS, certificate checked", True
+    pin = pins(db).get(host_port(s))
+    if pin and pin.get("new"):
+        return "TLS, certificate changed: not connecting until it is trusted", False
+    if pin:
+        return "TLS, certificate pinned", True
+    return "TLS, certificate not pinned yet", False
+
+
+def trust_certificate(db, hp: str, fp: str, username: str) -> str:
+    """Accept the changed certificate the admin was shown, and no other."""
+    from .auth import audit
+    from .modules.pinning import fingerprint
+
+    p = pins(db)
+    new = p.get(hp, {}).get("new")
+    if not new or fingerprint(new) != fp:
+        return "The certificate changed again, check the new fingerprint"
+    p[hp] = {"cert": new}
+    db.set(PINS, p)
+    audit(db, username, "mqtt", f"trusting the new certificate of {hp}: {fp}")
+    return ""
 
 
 class Bridge:
@@ -101,8 +143,7 @@ class Bridge:
         if s["username"]:
             c.username_pw_set(s["username"], self.rt.secrets.get(SECRET) or "")
         if s["tls"]:
-            c.tls_set(cert_reqs=ssl.CERT_NONE)
-            c.tls_insecure_set(True)
+            c.tls_set_context(self.tls_context(s))
         c.will_set(f"{self.base}/availability", "offline", retain=True)
         c.on_connect = self._on_connect
         c.on_disconnect = self._on_disconnect
@@ -114,6 +155,51 @@ class Bridge:
             c.loop_start()
         except Exception as e:  # noqa: BLE001 - a wrong address: shown on the System page
             self.error = str(e)[:200]
+
+    def tls_context(self, s: dict) -> ssl.SSLContext:
+        """Never an unchecked connection: with verify, the system's CAs and the broker's name; else only the
+        certificate pinned at first sight. Checked in the handshake, before the broker user and password are sent."""
+        bridge, hp, verify = self, host_port(s), bool(s["verify"])
+
+        class Checked(ssl.SSLSocket):
+            def do_handshake(self, *args, **kwargs):
+                try:
+                    super().do_handshake(*args, **kwargs)
+                except ssl.SSLError as e:
+                    bridge.error = f"TLS: {e}"[:200]
+                    raise
+                if not verify:
+                    bridge.check_certificate(hp, self.getpeercert(binary_form=True))
+
+        if verify:
+            ctx = ssl.create_default_context()
+        else:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE  # the pin is checked in do_handshake above
+        ctx.sslsocket_class = Checked
+        return ctx
+
+    def check_certificate(self, hp: str, der: bytes | None) -> None:
+        """Pin the first certificate seen at this address; refuse any other (kept for the admin to compare)."""
+        from .auth import audit
+        from .modules.pinning import CHANGED, fingerprint
+
+        if not der:
+            raise ssl.SSLCertVerificationError("CERTIFICATE_VERIFY_FAILED: the broker sent no certificate")
+        with self.lock:
+            p, pem = pins(self.rt.db), ssl.DER_cert_to_PEM_cert(der)
+            if hp not in p:
+                self.rt.db.set(PINS, p | {hp: {"cert": pem}})
+                audit(self.rt.db, "homewatch", "mqtt", f"trusting the certificate of {hp}: {fingerprint(pem)}")
+                return
+            if ssl.PEM_cert_to_DER_cert(p[hp]["cert"]) == der:
+                return
+            if p[hp].get("new") != pem:
+                p[hp]["new"] = pem
+                self.rt.db.set(PINS, p)
+        self.error = f"{CHANGED}: the broker now presents {fingerprint(pem)}; compare it and accept it below"
+        raise ssl.SSLCertVerificationError(f"CERTIFICATE_VERIFY_FAILED: {CHANGED}")
 
     def stop(self) -> None:
         if self.client is not None:

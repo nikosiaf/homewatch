@@ -58,7 +58,7 @@ class CheckResult:
     unit: str = ""
     suppressed_by: str | None = None  # the check whose failure explains this one
     extra: dict = field(default_factory=dict)
-    unknown: bool = False  # OK only because nothing has been read yet
+    unknown: bool = False  # OK only because nothing has been read yet: an open issue stays open
     observed_at: float | None = None  # when the reading behind this result was taken, if it can be reused between runs
     since: float | None = None  # when the data shows this level began (earlier than the run that saw it), if known
 

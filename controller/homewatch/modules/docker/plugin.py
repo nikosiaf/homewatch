@@ -135,6 +135,7 @@ class DockerModule(ApiModule):
         super().__init__()
         self.restart_hist: dict[str, list[tuple[float, int]]] = {}  # per container: (time, restart count), last hour
         self.seen: dict[str, str] = {}  # watched containers seen since start: key -> label
+        self.kept: dict[str, dict] = {}  # host -> its last good read, for while it can't be read
 
     def validate(self, form, old):
         out, err = super().validate(form, old)
@@ -278,35 +279,49 @@ class DockerModule(ApiModule):
             add("each", OK, f"all {len(snap['hosts'])} read")
 
         watched = self._watched(s, snap)
-        multi = len(snap["hosts"]) > 1
+        # a host that can't be read now keeps its containers' last known state: not "running" just because unseen
+        read = {h["host"] for h in snap["hosts"]}
+        self.kept = {h["host"]: h for h in snap["hosts"]} | {k: h for k, h in self.kept.items()
+                                                            if k in snap["errors"] and k not in read}
+        unread = [h for k, h in self.kept.items() if k not in read]
+        held = self._watched(s, {"hosts": unread})
+        multi = len(snap["hosts"]) + len(unread) > 1
 
         def label(h, c):
             return f"{h['name']}/{c['name']}" if multi else c["name"]
 
-        down = [f"{label(h, c)} ({c['state']}" + (f", exit {c['exit']}" if c["state"] == "exited" else "") + ")"
-                for h, c in watched if c["state"] not in ("running", "restarting")]
-        add("stopped", ERROR if down else OK,
-            "not running: " + ", ".join(down) if down else f"{len(watched)} watched containers running", len(down))
+        down = [f"{label(h, c)} ({c['state']}" + (f", exit {c['exit']}" if c["state"] == "exited" else "")
+                + (", host not read now" if h["host"] not in read else "") + ")"
+                for h, c in watched + held if c["state"] not in ("running", "restarting")]
+        lost = [k for k in snap["errors"] if not k.endswith(" (node_exporter)") and k not in self.kept]
+        add("stopped", ERROR if down else OK, "not running: " + ", ".join(down) if down
+            else f"{len(watched) + len(held)} watched containers running"
+            + (f"; not read: {', '.join(lost)}" if lost else ""), len(down))
+        out[-1].unknown = not down and bool(lost)
 
         total, worst, worst_n = 0, "", 0
-        for h, c in watched:
+        for h, c in watched + held:
             hist = self.restart_hist.setdefault(self._key(h, c), [])
-            if hist and c["restarts"] < hist[-1][1]:
-                hist.clear()  # recreated container: count from here
-            hist.append((now, c["restarts"]))
+            if h["host"] in read:
+                if hist and c["restarts"] < hist[-1][1]:
+                    hist.clear()  # recreated container: count from here
+                hist.append((now, c["restarts"]))
             while len(hist) > 1 and hist[1][0] <= now - RESTART_WINDOW:
                 hist.pop(0)
-            n = c["restarts"] - hist[0][1]
+            n = hist[-1][1] - hist[0][1] if hist else 0
             total += n
             if n > worst_n:
                 worst, worst_n = label(h, c), n
         add("restarts", level(total, th["restarts"]) if total else OK,
             f"{total} restarts in the last hour, most by {worst}" if total else "no restarts in the last hour", total)
+        out[-1].unknown = not total and bool(lost or unread)
 
-        sick = [label(h, c) for h, c in watched if c["health"] == "unhealthy"]
-        checked = sum(1 for _, c in watched if c["health"])
+        sick = [label(h, c) + (" (host not read now)" if h["host"] not in read else "")
+                for h, c in watched + held if c["health"] == "unhealthy"]
+        checked = sum(1 for _, c in watched + held if c["health"])
         add("unhealthy", WARNING if sick else OK, "unhealthy: " + ", ".join(sick) if sick
             else f"{checked} health checks passing" if checked else "no watched container has a health check")
+        out[-1].unknown = not sick and bool(lost)
 
         read_hosts = {h["host"] for h in snap["hosts"]}
         now_keys = {self._key(h, c): label(h, c) for h, c in watched}
@@ -326,10 +341,14 @@ class DockerModule(ApiModule):
             add("updates", OK, "not checked (no node_exporter hosts set)")
         elif todo:
             add("updates", WARNING, "; ".join(todo), sum(e["updates"] for e in exps))
-        elif exps:
-            add("updates", OK, f"{len(exps)} host{'s' if len(exps) != 1 else ''} up to date")
-        else:
+        elif not exps:
             add("updates", OK, "not readable")
+            out[-1].unknown = True  # not "up to date": an open to-do stays open
+        elif missed := [k.removesuffix(" (node_exporter)") for k in snap["errors"] if k.endswith(" (node_exporter)")]:
+            add("updates", OK, f"{len(exps)} up to date; not readable: " + ", ".join(missed))
+            out[-1].unknown = True
+        else:
+            add("updates", OK, f"{len(exps)} host{'s' if len(exps) != 1 else ''} up to date")
         return out
 
     def save(self, rt, form, user):

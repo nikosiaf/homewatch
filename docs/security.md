@@ -25,8 +25,9 @@
   logins lock for 5 minutes after 5 failures from one address or 20 on one account.
 - **Device certificates:** with "Check the HTTPS certificate" unticked, homeWatch pins the certificate
   it sees first and logs in only to that one. That first connection can't tell an impostor from the
-  device, so compare the fingerprint on the module's page with the device. System lists how each
-  device connection is protected.
+  device, so compare the fingerprint on the module's page with the device. The MQTT broker over TLS
+  works the same way ("Check the broker's certificate"). System lists how each device connection,
+  and the MQTT broker's, is protected.
 - **Containers:** image versions are pinned, and the controller runs as a non-root user on a
   read-only filesystem.
 

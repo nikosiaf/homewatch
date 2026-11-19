@@ -60,8 +60,11 @@ async def collect(metrics: Metrics, db: DB, site: str, now: float | None = None)
             last_ts=max(v for _, _, v in last),
         )
 
-    rows = db.all("SELECT ts, down, up, ok, latency, engine, loaded_down, loaded_up FROM speedtests WHERE site=? "
-                  "ORDER BY ts DESC LIMIT 5", (site,))
+    cols = "SELECT id, ts, down, up, ok, latency, engine, loaded_down, loaded_up FROM speedtests WHERE site=? "
+    # the newest tests, and the last 2 successful ones however many failed since ("Speed test recent" reads those)
+    rows = {row["id"]: row for q in ("ORDER BY ts DESC LIMIT 5", "AND ok=1 ORDER BY ts DESC LIMIT 2")
+            for row in db.all(cols + q, (site,))}
+    rows = sorted(rows.values(), key=lambda row: row["ts"], reverse=True)
     r.speeds = [Speed(row["ts"], row["down"], row["up"], bool(row["ok"]), row["latency"], row["engine"],
                       row["loaded_down"], row["loaded_up"]) for row in rows]
     return r

@@ -27,9 +27,10 @@ class Snapshot:
     backups: dict[int, dict] = field(default_factory=dict)  # vmid -> {"ok": ts|None, "failed": ts|None, "error": str}
     not_covered: set[int] = field(default_factory=set)  # guests no backup job includes
     # node -> pending package updates [{"package", "old", "new"}]; None when the token can't read them
-    # (GET /nodes/{node}/apt/update needs Sys.Modify, which PVEAuditor lacks)
+    # (GET /nodes/{node}/apt/update needs Sys.Modify, which PVEAuditor lacks); a node is left out when the read failed
     updates: dict[str, list[dict] | None] = field(default_factory=dict)
-    # node -> {"running": "7.0.14-22", "newest": "7.0.14-29"} from apt/versions (PVEAuditor is enough); None unread
+    # node -> {"running": "7.0.14-22", "newest": "7.0.14-29"} from apt/versions (PVEAuditor is enough); None when
+    # refused or no running kernel is listed; a node is left out when the read failed
     kernels: dict[str, dict | None] = field(default_factory=dict)
 
 
@@ -113,21 +114,21 @@ class Client:
                     s.disks[n["node"]] = await self.get(f"/nodes/{n['node']}/disks/list") or []
                 except ApiError:
                     s.disks[n["node"]] = []
-                s.updates[n["node"]] = await self._updates(n["node"])
+                try:
+                    s.updates[n["node"]] = await self._updates(n["node"])
+                except ApiError:
+                    pass
                 try:
                     s.kernels[n["node"]] = parse_kernels(await self.get(f"/nodes/{n['node']}/apt/versions",
                                                                         optional=True) or [])
                 except ApiError:
-                    s.kernels[n["node"]] = None
+                    pass
             await self._backups(n["node"], s, now)
         return s
 
     async def _updates(self, node: str) -> list[dict] | None:
         """Pending updates from the node's apt cache (Proxmox refreshes it daily); this starts no apt run."""
-        try:
-            pkgs = await self.get(f"/nodes/{node}/apt/update", optional=True)
-        except ApiError:
-            return None
+        pkgs = await self.get(f"/nodes/{node}/apt/update", optional=True)
         if pkgs is None:
             return None
         return [{"package": x.get("Package", "?"), "old": x.get("OldVersion", ""), "new": x.get("Version", "")}

@@ -157,8 +157,18 @@
       placeholder="{{ 'kept; type to change' if mqtt_has_pw else '' }}"></div>
     <div><label for="mx">Discovery prefix</label><input id="mx" type="text" name="prefix" value="{{ mqtt.prefix }}"></div>
     <label class="check"><input type="checkbox" name="tls" {{ 'checked' if mqtt.tls }}> TLS (port 8883)</label>
+    <label class="check"><input type="checkbox" name="verify" {{ 'checked' if mqtt.verify }}> Check the broker's certificate
+      (signed by a known authority, for this name); unticked, the first one seen is pinned</label>
     <div><button>Save</button></div>
   </form>
+  {% if mqtt_cert %}<p class="small">Trusted certificate of {{ mqtt_cert.host }}: <code>{{ mqtt_cert.fp }}</code></p>
+  {% if mqtt_cert.new_fp %}<p class="small" style="color:var(--err)">Changed. It now shows <code>{{ mqtt_cert.new_fp }}</code>. homeWatch
+    has stopped connecting, because this could be another device posing as the broker. Trust it only if you replaced the broker
+    or renewed its certificate.</p>
+  <form method="post" action="/system/mqtt/trust-certificate"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="_box" value="mqtt">
+    <input type="hidden" name="host" value="{{ mqtt_cert.host }}"><input type="hidden" name="fingerprint" value="{{ mqtt_cert.new_fp }}">
+    <button class="secondary">Trust the new certificate</button></form>{% endif %}{% endif %}
 </div>
 <h2>Export and import</h2>
 <div class="grid2" id="backup">

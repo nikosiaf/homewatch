@@ -45,7 +45,7 @@ class Event:
     @property
     def route_level(self) -> int:
         """Which level a channel filter sees: back-to-OK follows the level that opened it."""
-        return self.worst if self.kind in ("resolve", "close", "partial") else self.level
+        return self.worst if self.kind in ("resolve", "close", "partial", "selfok") else self.level
 
 
 def timing(db: DB) -> dict:
@@ -120,6 +120,8 @@ class Engine:
                            (self.site, res.key, OK, now, res.detail, res.value))
                     st = db.one("SELECT * FROM check_state WHERE site=? AND check_key=?", (self.site, res.key))
                 status = st["status"]
+                if res.unknown and level == OK and status != OK:
+                    continue  # not read, so not a positive OK: the open issue stays as it is
                 if level == status:
                     db.run("UPDATE check_state SET pending=NULL,pending_count=0,pending_since=NULL,detail=?,value=? "
                            "WHERE site=? AND check_key=?", (res.detail, res.value, self.site, res.key))
@@ -272,18 +274,18 @@ class Engine:
         return out
 
     def reminders(self, names: dict[str, str], now: float) -> list[Event]:
+        """Open issues not reminded of for remind_h hours, each on its own timer (from its start, then its last reminder)."""
         hours = float(timing(self.db)["remind_h"])
-        last = self.db.get("engine.last_remind", 0)
-        if hours <= 0 or now - last < hours * 3600:
+        if hours <= 0:
             return []
         out = []
         why = self.silences(now)
         for i in self.open_issues():
-            if i["notified"] and not i["acked"] and now - i["started"] >= hours * 3600 and why(i["check_key"]) is None:
+            if i["notified"] and not i["acked"] and now - (i["reminded"] or i["started"]) >= hours * 3600 \
+                    and why(i["check_key"]) is None:
+                self.db.run("UPDATE issues SET reminded=? WHERE id=?", (now, i["id"]))
                 out.append(Event("remind", i["check_key"], names.get(i["check_key"], i["check_key"]),
                                  i["level"], i["worst"], i["detail"], i["started"]))
-        if out:
-            self.db.set("engine.last_remind", now)
         return out
 
     # ---- read failures ---------------------------------------------------------------------

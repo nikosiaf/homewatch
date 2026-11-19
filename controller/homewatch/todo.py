@@ -3,7 +3,7 @@
 A check marked todo=True reports "something to do" as a WARNING, as before. Here that becomes:
 - OK with "To do: …" on the Status page, and one row in the To do list (first seen, what it is)
 - a WARNING, a normal issue, only once it has waited "warn" days (the check's editable limit; empty = never)
-- done when the check is OK again
+- done when the check is OK again; a source that wasn't read (unknown) leaves it open
 """
 
 from __future__ import annotations
@@ -24,15 +24,21 @@ def apply(db: DB, site: str, module: Module, th: dict[str, Thresholds], results:
     defs = {f"{module.id}.{c.id}": c for c in module.checks if c.todo}
     for r in results:
         d = defs.get(r.key)
-        if d is None or r.unknown or r.suppressed_by:
+        if d is None or r.suppressed_by:
             continue
         row = db.one("SELECT * FROM todos WHERE site=? AND check_key=? AND done IS NULL", (site, r.key))
-        if r.status == OK:
+        if r.unknown:
+            # the source wasn't read: an open to-do is still waiting (its clock goes on), it isn't done
+            if row is None:
+                continue
+            r.detail = f"{row['item']} (not read now: {r.detail})"
+            first = row["first_seen"]
+        elif r.status == OK:
             if row:
                 db.run("UPDATE todos SET done=? WHERE id=?", (now, row["id"]))
             r.value = 0
             continue
-        if row is None:
+        elif row is None:
             db.run("INSERT INTO todos(site,check_key,name,item,first_seen,last_seen) VALUES(?,?,?,?,?,?)",
                    (site, r.key, r.name, r.detail, now, now))
             first = now

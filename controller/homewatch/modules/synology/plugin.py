@@ -283,6 +283,7 @@ class SynologyModule(ApiModule):
 
         if snap.get("update") is None:
             add("updates", OK, "not readable")
+            out[-1].unknown = True  # not "up to date": an open to-do stays open
         else:
             add("updates", WARNING if snap["update"] else OK,
                 f"update available {snap.get('update_version') or ''}".strip() if snap["update"]

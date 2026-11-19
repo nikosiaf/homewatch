@@ -229,6 +229,7 @@ class PBSModule(ApiModule):
 
         if snap["updates"] is None:
             add("updates", OK, "not readable")
+            out[-1].unknown = True  # not "up to date": an open to-do stays open
         else:
             add("updates", WARNING if snap["updates"] else OK,
                 f"{snap['updates']} package updates available" if snap["updates"] else "up to date")

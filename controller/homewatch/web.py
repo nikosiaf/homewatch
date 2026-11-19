@@ -30,7 +30,7 @@ from .engine import DEFAULT_TIMING, thresholds, timing, tz
 from .modules import CATALOG, LEVEL_WORD, OK
 from .modules.registry import MODULES
 from .notify import (COMING_SOON, KINDS, PROVIDERS, Message, channel_private, channel_secret, forget_channel, full_config,
-                     private_fields, split_config, store_private)
+                     private_fields, quiet_error, split_config, store_private)
 from .runtime import Runtime
 
 log = logging.getLogger("homewatch.web")
@@ -484,15 +484,31 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
             return back("/system", err="Discovery prefix: letters, digits, _ - /")
         old = mqtt.load(rt.db)
         new = {"enabled": enabled, "host": host, "port": port, "username": str(form.get("username", "")).strip()[:128],
-               "tls": form.get("tls") == "on", "prefix": prefix}
+               "tls": form.get("tls") == "on", "verify": form.get("verify") == "on", "prefix": prefix}
         if old.get("host") and old.get("host") != host:  # a new destination: the old password doesn't go there
             rt.secrets.delete(mqtt.SECRET)
+        if host:  # only the pin of the broker set now is kept
+            rt.db.set(mqtt.PINS, {k: v for k, v in mqtt.pins(rt.db).items() if k == mqtt.host_port(new)})
         if str(form.get("password", "")):
             rt.secrets.put(mqtt.SECRET, str(form.get("password")))
         rt.db.set(mqtt.SETTINGS, new)
         audit(rt.db, user.username, "mqtt", json.dumps({k: v for k, v in new.items()}))
         rt.mqtt.apply()
         return back("/system", msg="Saved; Home Assistant finds homeWatch under Settings → Devices" if enabled else "Saved")
+
+    @app.post("/system/mqtt/trust-certificate")
+    async def mqtt_trust_certificate(request: Request):
+        from . import mqtt
+        rt = rt_of(request)
+        form = await form_of(request, request.state.user)
+        if form is None:
+            return back("/system", err="Form expired")
+        err = mqtt.trust_certificate(rt.db, str(form.get("host", "")), str(form.get("fingerprint", "")),
+                                     request.state.user.username)
+        if err:
+            return back("/system", err=err)
+        rt.mqtt.apply()
+        return back("/system", msg="New certificate trusted")
 
     @app.post("/devices/known")
     async def devices_known(request: Request):
@@ -1275,8 +1291,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         config, private = split_config(ch["kind"], config)
         levels = [lv for lv in (1, 2) if form.get(f"level{lv}") == "on"]
         qs, qe = form.get("quiet_start", ""), form.get("quiet_end", "")
-        if bool(qs) != bool(qe):
-            return back("/notifications", err="Quiet hours need both a start and an end")
+        if err := quiet_error(qs, qe):
+            return back("/notifications", err=err)
         rt.db.run("UPDATE channels SET name=?, enabled=?, levels=?, quiet_start=?, quiet_end=?, config=? WHERE id=?",
                   (form.get("name", ch["name"])[:60] or ch["name"], int(form.get("enabled") == "on"),
                    json.dumps(levels), qs or None, qe or None, json.dumps(config), cid))
@@ -1339,8 +1355,16 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         version_rows = rt.db.all("SELECT id, ts, username, action, summary FROM config_versions ORDER BY id DESC LIMIT 200")
         vm_ok = await rt.metrics.healthy()
         from . import mqtt
+        from .modules.pinning import fingerprint
+        mqtt_s = mqtt.load(rt.db)
+        mqtt_pin = mqtt.pins(rt.db).get(mqtt.host_port(mqtt_s)) if mqtt_s["host"] and mqtt_s["tls"] and not mqtt_s["verify"] \
+            else None
+        mqtt_cert = {"host": mqtt.host_port(mqtt_s), "fp": fingerprint(mqtt_pin["cert"]),
+                     "new_fp": fingerprint(mqtt_pin["new"]) if mqtt_pin.get("new") else ""} if mqtt_pin else None
+        mqtt_link = mqtt.transport(rt.db)
         return page(request, "system.html", request.state.user, users=users, log=log_rows, vm_ok=vm_ok,
-                    tokens=tokens, new_token=new_token, mqtt=mqtt.load(rt.db), mqtt_has_pw=bool(rt.secrets.get(mqtt.SECRET)),
+                    tokens=tokens, new_token=new_token, mqtt=mqtt_s, mqtt_has_pw=bool(rt.secrets.get(mqtt.SECRET)),
+                    mqtt_cert=mqtt_cert,
                     mqtt_state=("connected" if rt.mqtt and rt.mqtt.connected else (rt.mqtt.error if rt.mqtt else "")),
                     **await _grafana_ctx(rt),
                     last_run=rt.last_run, last_error=rt.last_error, csrf=request.state.user.csrf,
@@ -1350,7 +1374,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
                     home_name=rt.db.get("home.name") or "Home", home_url=rt.db.get("home.url") or "",
                     probe_age=_probe_age(rt), probes_started=bool(rt.results), ookla=_ookla_version(rt), versions=version_rows,
                     exports=_exports(rt), connections=[(m.name, *t) for m in MODULES.values()
-                                                       if m.is_set_up(rt) and (t := m.transport(rt))])
+                                                       if m.is_set_up(rt) and (t := m.transport(rt))]
+                    + ([("MQTT broker", *mqtt_link)] if mqtt_link else []))
 
     @app.get("/system/export")
     async def config_export(request: Request):
