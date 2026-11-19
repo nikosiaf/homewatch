@@ -286,7 +286,7 @@ class UniFiModule(ApiModule):
             late, missing = watched_clients(entries, snap.get("clients", []), snap.get("history", []), now, t.warn)
             parts = [f"{e} not seen for {m:.0f} min" for e, m in late] + [f"not found: {e}" for e in missing]
             worst = max((m for _, m in late), default=0.0)
-            status = OK if not late else ERROR if t.error is not None and worst > t.error else WARNING
+            status = ERROR if late and t.error is not None and worst > t.error else WARNING if late or missing else OK
             add("watched", status, "; ".join(parts) if parts else f"{len(entries)} watched devices seen", worst)
         return out
 

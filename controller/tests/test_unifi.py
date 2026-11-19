@@ -104,7 +104,7 @@ def test_watched_30_minute_boundary():
 
 def test_watched_unknown_entry_and_empty():
     r = _watch("nosuch\n\n", history=[{"mac": "aa:bb:cc:00:00:01", "name": "cam", "last_seen": 10000}])
-    assert r.status == OK and r.detail == "not found: nosuch"
+    assert r.status == WARNING and r.detail == "not found: nosuch"
     r = _watch("")
     assert r.status == OK and r.detail == "no devices listed" and not r.unknown
 

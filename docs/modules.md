@@ -262,7 +262,7 @@ Reads the devices of a UniFi Network application (UniFi OS Server or a UniFi con
 one per line, by name or MAC address (any separator, any case), e.g. `Camera garden`. The check
 *Watched devices online* warns "Camera garden not seen for 47 min" when one hasn't been seen for more
 than 30 minutes, and sends the usual back-to-OK message when it returns. Devices not listed are ignored;
-a line matching no client UniFi knows is shown as "not found: …". The delay is the same for every
+a line matching no client UniFi knows also warns, as "not found: …". The delay is the same for every
 device. To make it an ERROR, set the check's ERROR limit (in minutes, above 30) under Checks and limits;
 the check is switched on or off there like any other check.
 Only clients UniFi sees — Wi-Fi devices on its access points; wired devices on other switches are not
