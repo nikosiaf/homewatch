@@ -1491,3 +1491,16 @@ def test_history_shows_incidents(client):
     r = client.get("/history")
     assert "Incidents" in r.text and "2 checks" in r.text and "WAN offline" in r.text
     assert "Incidents" not in client.get("/history?module=internet").text  # a module's view: its events only
+
+
+def test_unifi_must_online_list_saved_from_its_form(client):
+    # the "Must be online" box must submit what was typed: one control per field, not a textarea plus an
+    # empty one-line input of the same name (the last one would win and the list would be lost)
+    tok = setup_admin(client)
+    client.rt.db.set("module.unifi", {"url": "https://unifi.test:11443", "site": "default", "username": "homewatch",
+                                       "verify": False, "enabled": True})
+    form = client.get("/modules/unifi").text.split('id="more"')[1].split("</form>")[0]
+    assert form.count('name="must_online"') == 1
+    client.post("/modules/unifi", data={"csrf": tok, "_box": "more", "_part": "more", "secret": "pw",
+                                        "must_online": "Camera garden\naa:bb:cc:dd:ee:ff"})
+    assert MODULES["unifi"].load(client.rt)["must_online"] == "Camera garden\naa:bb:cc:dd:ee:ff"
