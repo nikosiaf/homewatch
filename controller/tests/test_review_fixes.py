@@ -116,6 +116,18 @@ def test_proxmox_updates_not_read_is_unknown():
     assert res["proxmox.updates"].detail == "No reading yet" and res["proxmox.updates"].unknown
 
 
+def test_proxmox_updates_partial_node_read_is_unknown():
+    node = {"status": "online", "cpu": 0.1, "mem": 1, "maxmem": 2, "disk": 1, "maxdisk": 2, "uptime": 1000}
+    s = Snapshot(nodes=[{"node": "pve1", **node}, {"node": "pve2", **node}],
+                 updates={"pve1": [], "pve2": None})
+    res = {r.key: r for r in pve_checks.evaluate({}, defaults(pve_checks.CHECKS), pve_checks.State(now=T0, snap=s))}
+    u = res["proxmox.updates"]
+    assert u.status == OK and u.unknown and "pve2" in u.detail and "pve1" not in u.detail
+    s.updates["pve2"] = []
+    res = {r.key: r for r in pve_checks.evaluate({}, defaults(pve_checks.CHECKS), pve_checks.State(now=T0, snap=s))}
+    assert res["proxmox.updates"].detail == "up to date" and not res["proxmox.updates"].unknown
+
+
 # ---- B2. To do: a source that wasn't read leaves the to-do open, and its waiting clock goes on ---------------------
 def test_todo_clock_keeps_running_through_an_unreadable_exporter_read(db):
     m = DockerModule()
