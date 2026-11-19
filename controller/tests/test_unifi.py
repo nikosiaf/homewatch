@@ -74,3 +74,82 @@ def test_device_cpu():
     th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in uni.checks}
     r = {x.key.split(".")[1]: x for x in uni.check({"chosen": ["aa"]}, th, snap, 0)}
     assert r["cpu"].status == WARNING and "AP1 93 %" in r["cpu"].detail
+
+
+def _watch(entries, clients=(), history=(), ok=True, now=10000.0):
+    snap = {"devices": [], "health": [], "clients": list(clients), "history": list(history), "clients_ok": ok}
+    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
+    r = {x.key.split(".")[1]: x for x in plugin.check({"must_online": entries}, th, snap, now)}
+    return r["watched"]
+
+
+def test_watched_matching_by_mac_and_name():
+    hist = [{"mac": "AA:BB:CC:00:00:01", "name": "Camera garden", "last_seen": 10000 - 47 * 60},
+            {"mac": "aa:bb:cc:00:00:02", "name": "Doorbell", "last_seen": 10000 - 60}]
+    r = _watch("camera GARDEN\nAA-BB-CC-00-00-02", history=hist)
+    assert r.status == WARNING and r.detail == "camera GARDEN not seen for 47 min"
+    r = _watch("aabb.cc00.0001", history=hist)
+    assert r.status == WARNING and "not seen for 47 min" in r.detail
+    # connected right now counts as seen, whatever the history says
+    r = _watch("Camera garden", clients=[{"mac": "aa:bb:cc:00:00:01", "name": ""}], history=hist)
+    assert r.status == OK and r.detail == "1 watched devices seen"
+
+
+def test_watched_30_minute_boundary():
+    hist = [{"mac": "aa:bb:cc:00:00:01", "name": "cam", "last_seen": 10000 - 30 * 60}]
+    assert _watch("cam", history=hist).status == OK
+    hist[0]["last_seen"] -= 1
+    assert _watch("cam", history=hist).status == WARNING
+
+
+def test_watched_unknown_entry_and_empty():
+    r = _watch("nosuch\n\n", history=[{"mac": "aa:bb:cc:00:00:01", "name": "cam", "last_seen": 10000}])
+    assert r.status == WARNING and r.detail == "not found: nosuch"
+    r = _watch("")
+    assert r.status == OK and r.detail == "no devices listed" and not r.unknown
+
+
+def test_watched_unreadable_clients():
+    r = _watch("cam", ok=False)
+    assert r.status == OK and r.unknown and "not readable" in r.detail
+
+
+@respx.mock
+async def test_watched_clients_read_fails_and_controller_down():
+    mock()
+    respx.get(BASE + "/proxy/network/api/s/default/stat/alluser").mock(return_value=httpx.Response(500))
+    snap = await plugin.fetch(S, "pw", NOW)
+    assert snap["clients_ok"] is False
+    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
+    s = S | {"must_online": "door"}
+    res = {r.key.split(".")[1]: r for r in plugin.evaluate(s, th, (s, None, "can't reach UniFi", NOW))}
+    assert res["watched"].status == OK and res["watched"].suppressed_by == "unifi.api"
+
+
+def test_watched_back_to_ok():
+    hist = [{"mac": "aa:bb:cc:00:00:01", "name": "cam", "last_seen": 0}]
+    assert _watch("cam", history=hist).status == WARNING
+    assert _watch("cam", clients=[{"mac": "aa:bb:cc:00:00:01", "name": "cam"}], history=hist).status == OK
+
+
+def test_watched_error_limit():
+    hist = [{"mac": "aa:bb:cc:00:00:01", "name": "cam", "last_seen": 10000 - 120 * 60}]
+    assert _watch("cam", history=hist).status == WARNING  # no ERROR limit by default: WARNING only
+    snap = {"devices": [], "health": [], "clients": [], "history": hist, "clients_ok": True}
+    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
+    th["watched"] = Thresholds(30, 60)
+    r = {x.key.split(".")[1]: x for x in plugin.check({"must_online": "cam"}, th, snap, 10000.0)}
+    assert r["watched"].status == ERROR and r["watched"].detail == "cam not seen for 120 min"
+    hist[0]["last_seen"] = 10000 - 45 * 60
+    r = {x.key.split(".")[1]: x for x in plugin.check({"must_online": "cam"}, th, snap, 10000.0)}
+    assert r["watched"].status == WARNING
+
+
+def test_watched_name_picks_newest_mac():
+    # an old, replaced camera and the current one share a name; the current one is online
+    hist = [{"mac": "aa:bb:cc:00:00:01", "name": "Camera garden", "last_seen": 1000},
+            {"mac": "aa:bb:cc:00:00:02", "name": "Camera garden", "last_seen": 10000 - 60}]
+    assert _watch("Camera garden", history=hist).status == OK
+    assert _watch("Camera garden", history=hist[::-1]).status == OK
+    r = _watch("Camera garden", clients=[{"mac": "aa:bb:cc:00:00:02", "name": "Camera garden"}], history=hist)
+    assert r.status == OK
