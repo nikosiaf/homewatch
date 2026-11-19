@@ -22,6 +22,9 @@ CHECKS = [
                   "a Grafana marker; WARNING at this many."),
     CheckDef("firmware", "Firmware", "api", unit="days", warn=14, editable=("warn",), todo=True,
              help="A device has a firmware update. Listed under To do; WARNING once it has waited this many days."),
+    CheckDef("watched", "Watched devices online", "api", unit="min", warn=30,
+             help="WARNING when a device listed under \"Must be online\" hasn't been seen by UniFi for more than "
+                  "30 minutes. Only clients UniFi sees (Wi-Fi through its access points)."),
 ]
 STATE = {0: "disconnected", 1: "connected", 2: "pending adoption", 4: "upgrading", 5: "provisioning",
          6: "heartbeat missed", 7: "adopting", 9: "adoption failed", 10: "isolated", 11: "isolated"}
@@ -33,6 +36,45 @@ def _num(v) -> float | None:
 
 
 _SITE = re.compile(r"^[a-zA-Z0-9_-]+$")
+_MAC = re.compile(r"^[0-9a-f]{12}$")
+
+
+def _mac(v: str) -> str:
+    """A MAC address as 12 lowercase hex digits, whatever the separators; "" when it isn't one."""
+    m = re.sub(r"[\s:.-]", "", str(v or "")).lower()
+    return m if _MAC.match(m) else ""
+
+
+def watch_list(text: str) -> list[str]:
+    return [x.strip() for x in str(text or "").splitlines() if x.strip()]
+
+
+def watched_clients(entries, clients, history, now, limit_min):
+    """(late, missing, count): entries not seen for more than limit_min minutes, entries matching no client."""
+    seen: dict[str, tuple[float, str]] = {}  # mac -> (last seen, name)
+    for c in history:
+        m = _mac(c.get("mac"))
+        if m:
+            seen[m] = (float(c.get("last_seen") or 0), c.get("name") or "")
+    for c in clients:  # connected right now
+        m = _mac(c.get("mac"))
+        if m:
+            seen[m] = (now, c.get("name") or seen.get(m, (0, ""))[1])
+    by_name = {}
+    for m, (_, name) in seen.items():
+        if name:
+            by_name.setdefault(name.casefold(), m)
+    late, missing = [], []
+    for e in entries:
+        m = _mac(e)
+        m = m if m in seen else by_name.get(e.casefold())
+        if not m:
+            missing.append(e)
+            continue
+        mins = (now - seen[m][0]) / 60
+        if mins > limit_min:
+            late.append((e, mins))
+    return late, missing
 
 
 class UniFiModule(ApiModule):
@@ -54,6 +96,10 @@ class UniFiModule(ApiModule):
         Field("username", "User name", "homewatch", default="homewatch"),
         Field("verify", "Check the HTTPS certificate", kind="check", default=True,
               help=SELF_SIGNED),
+        Field("must_online", "Must be online", "Camera garden\naa:bb:cc:dd:ee:ff", kind="lines", section="more",
+              own_line=True, help="One device per line, by name or MAC address. The check \"Watched devices online\" "
+                                  "warns when one hasn't been seen by UniFi for more than 30 minutes. Wi-Fi devices "
+                                  "only; devices not listed are ignored."),
     ]
     secret_label = "Password"
     choices_title = "Devices to watch"
@@ -92,14 +138,15 @@ class UniFiModule(ApiModule):
             try:
                 devices = await self._get(http, f"{base}/stat/device", headers)
                 health = await self._get(http, f"{base}/stat/health", headers)
+                clients_ok = True  # both client lists read (the "Must be online" check needs them)
                 try:  # the clients: which access point each one uses (for the map)
                     stations = await self._get(http, f"{base}/stat/sta", headers)
                 except ApiError:
-                    stations = []
+                    stations, clients_ok = [], False
                 try:  # every client UniFi knows, with its last access point, address and time (for the map)
                     known = await self._get(http, f"{base}/stat/alluser", headers)
                 except ApiError:
-                    known = []
+                    known, clients_ok = [], False
             finally:
                 try:
                     await http.post(f"{s['url']}/api/auth/logout", headers=headers)
@@ -126,7 +173,8 @@ class UniFiModule(ApiModule):
                 "history": [{"mac": c.get("mac", ""), "name": c.get("name") or c.get("hostname") or "",
                              "ap_mac": c.get("last_uplink_mac") or "", "ip": c.get("last_ip") or "",
                              "last_seen": c.get("last_seen") or 0, "wired": bool(c.get("is_wired"))}
-                            for c in known if c.get("mac") and c.get("last_seen")]}
+                            for c in known if c.get("mac") and c.get("last_seen")],
+                "clients_ok": clients_ok}
         wlan = next((h for h in snap["health"] if h["subsystem"] == "wlan"), {})
         snap["_summary"] = f"{len(snap['devices'])} devices, {wlan.get('users') or 0} Wi-Fi clients"
         return snap
@@ -224,6 +272,19 @@ class UniFiModule(ApiModule):
 
         upd = [f"{d['name']} {d['version']} → {d['upgrade_to'] or 'newer'}" for d in watched if d["upgradable"]]
         add("firmware", WARNING if upd else OK, "; ".join(upd) if upd else "all watched devices up to date")
+
+        entries = watch_list(s.get("must_online", ""))
+        limit = th["watched"].warn if "watched" in th and th["watched"].warn is not None else 30
+        if not entries:
+            add("watched", OK, "no devices listed")
+        elif not snap.get("clients_ok", "clients" in snap):  # UniFi's client lists couldn't be read
+            add("watched", OK, "UniFi clients not readable")
+            out[-1].unknown = True
+        else:
+            late, missing = watched_clients(entries, snap.get("clients", []), snap.get("history", []), now, limit)
+            parts = [f"{e} not seen for {m:.0f} min" for e, m in late] + [f"not found: {e}" for e in missing]
+            add("watched", WARNING if late else OK, "; ".join(parts) if parts else f"{len(entries)} watched devices seen",
+                max((m for _, m in late), default=0.0))
         return out
 
     def tables(self, snap, s):

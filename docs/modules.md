@@ -256,6 +256,16 @@ Reads the devices of a UniFi Network application (UniFi OS Server or a UniFi con
 | Wi-Fi | WLAN subsystem not OK | |
 | Restarts in 24 h (each one is a Grafana marker) | ≥ 2 | |
 | Firmware (to do) | update available for 14 days | |
+| Watched devices online (the ones under **Must be online**) | not seen by UniFi for more than 30 min | |
+
+**Must be online** (in the module's additional configuration): the clients that should never be away,
+one per line, by name or MAC address (any separator, any case), e.g. `Camera garden`. The check
+*Watched devices online* warns "Camera garden not seen for 47 min" when one hasn't been seen for more
+than 30 minutes, and sends the usual back-to-OK message when it returns. Devices not listed are ignored;
+a line matching no client UniFi knows is shown as "not found: …". The delay is the same for every
+device; the level (WARNING or ERROR) and on/off are set under Checks and limits like any other check.
+Only clients UniFi sees — Wi-Fi devices on its access points; wired devices on other switches are not
+covered. When UniFi's client lists can't be read the check shows no result rather than an alert.
 
 ## Proxmox Backup Server module (optional)
 
