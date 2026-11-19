@@ -1,11 +1,12 @@
 """Reports: uptime, outages and their likely causes, line quality and speed, for the weekly message and for
-any period on the report page (/history/report), its CSV files and /api/v1/report."""
+any period on the report page (/history/report) and its CSV files."""
 
 from __future__ import annotations
 
 import csv
 import io
 import json
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -61,7 +62,7 @@ def availability(db: DB, site: str, start: float, end: float, module: str = "int
 @dataclass
 class Outage:
     started: float
-    resolved: float | None  # None: still down at the end of the period
+    resolved: float | None  # None: still down; may be after the period's end
     down: float  # seconds of it seen down inside the period
     cause: str  # causes.explain's likely cause, '' when no rule fits
     side: str  # causes.ISP | HOME | UNKNOWN
@@ -85,9 +86,8 @@ def outages(db: DB, site: str, start: float, end: float, zone) -> list[Outage]:
             keys, nodes, a, b = [i["check_key"]], [], i["started"], i["resolved"]
         cause, side, _ = causes.classify(db, site, a, b, keys, zone, nodes)
         if not cause and inc and inc["cause"]:  # told when it ended; the events behind it are gone now
-            cause = inc["cause"]
-        out.append(Outage(i["started"], i["resolved"] if i["resolved"] and i["resolved"] <= end else None,
-                          down, cause, side))
+            cause, side = inc["cause"], causes.side_of(inc["cause"])
+        out.append(Outage(i["started"], i["resolved"], down, cause, side))
     return out
 
 
@@ -159,13 +159,15 @@ async def quality(metrics: Metrics, site: str, start: float, end: float) -> list
     """Latency, loss and jitter of the public ping: average and worst 5 minutes."""
     sel = f'{{site="{site}",role="public"}}'
     rng = f"[{max(300, int(end - start))}s]"
+    step = f"{max(300, math.ceil((end - start) / 50000))}s"
     out = []
     for label, metric, unit in (("Latency", "ping_average_response_ms", "ms"),
                                 ("Packet loss", "ping_percent_packet_loss", "%"),
                                 ("Jitter", "ping_standard_deviation_ms", "ms")):
         try:
             avg = await metrics.query(f"min(avg_over_time({metric}{sel}{rng}))", at=end)
-            worst = await metrics.query(f"min(max_over_time(avg_over_time({metric}{sel}[5m]){rng[:-1]}:5m]))", at=end)
+            worst = await metrics.query(
+                f"min(max_over_time(avg_over_time({metric}{sel}[5m]){rng[:-1]}:{step}]))", at=end)
         except MetricsError:
             continue
         if avg:
@@ -275,21 +277,16 @@ async def build(db: DB, metrics: Metrics, site: str, now: float | None = None) -
     return Message(OK, f"📊 {r.home}: weekly report {first}–{last}", body)
 
 
-# ---- the report page: any period, as a page to print, CSV files and JSON --------------------------------------
+# ---- the report page: any period, as a page to print and CSV files ------------------------------------------
 MAX_DAYS = 400
 
 
 def period(zone, frm: str, to: str, now: float) -> tuple[float, float]:
-    """From and to (local dates YYYY-MM-DD, both days included; or Unix seconds, to not included) as (start, end),
-    the end no later than now. ValueError with a message for the user when they don't make a period."""
+    """From and to (local dates YYYY-MM-DD, both days included) as (start, end), the end no later than now.
+    ValueError with a message for the user when they don't make a period."""
     def at(v: str, name: str, day_after: bool) -> float:
-        v = (v or "").strip()
         try:
-            return float(v)
-        except ValueError:
-            pass
-        try:
-            d = datetime.strptime(v, "%Y-%m-%d").replace(tzinfo=zone)
+            d = datetime.strptime((v or "").strip(), "%Y-%m-%d").replace(tzinfo=zone)
         except ValueError:
             raise ValueError(f"{name}: a date as YYYY-MM-DD") from None
         return (d + timedelta(days=1) if day_after else d).timestamp()
@@ -339,34 +336,6 @@ def csv_speedtests(r: Report, zone) -> str:
         w.writerow([_iso(t["ts"], zone), t["engine"]] + ["" if t[k] is None else f"{t[k]:.1f}"
                                                          for k in ("down", "up", "latency")])
     return out.getvalue()
-
-
-def as_json(r: Report) -> dict:
-    """The report for the read-only API; sections of modules that are off are left out."""
-    from .causes import SIDES
-
-    out: dict = {"home": r.home, "from": r.start, "to": r.end}
-    if r.internet:
-        a = r.availability
-        out["availability"] = {"percent": a.percent, "coverage_percent": a.coverage, "observed_s": a.observed,
-                               "down_s": a.down, "outages": a.outages}
-        out["outages"] = [{"started": o.started, "ended": o.resolved, "down_s": o.down, "side": o.side,
-                           "side_label": SIDES[o.side], "cause": o.cause} for o in r.outages]
-        out["outages_by_side"] = {k: {"outages": v["outages"], "down_s": v["down"]} for k, v in r.by_side().items()}
-        out["quality"] = r.quality
-        if r.speed:
-            sp = r.speed
-            out["speed"] = {"tests": len(sp.tests), "contract_down": sp.contract_down or None,
-                            "contract_up": sp.contract_up or None, "min_down": sp.min_down or None,
-                            "min_up": sp.min_up or None}
-            for k in ("down", "up"):
-                below = sp.below_minimum(k)
-                out["speed"][k] = {**(sp.stat(k) or {}), "percent_of_contract": sp.share_of_contract(k),
-                                   "below_minimum": below[0] if below else None,
-                                   "below_minimum_percent": below[1] if below else None}
-    if r.line is not None:
-        out["line"] = r.line
-    return out
 
 
 def due(db: DB, now: float) -> bool:

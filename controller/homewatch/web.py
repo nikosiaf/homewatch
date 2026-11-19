@@ -406,15 +406,6 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         from . import api
         return _json(api.events(rt_of(request), dict(request.query_params)))
 
-    @app.get("/api/v1/report")
-    async def api_report(request: Request):
-        from . import api
-        rt = rt_of(request)
-        try:
-            return _json(await api.report(rt, dict(request.query_params)))
-        except ValueError as e:
-            return JSONResponse({"error": str(e)}, status_code=400)
-
     @app.get("/api/v1/todos")
     async def api_todos(request: Request):
         from . import api

@@ -50,7 +50,7 @@
   {% for o in r.outages %}<tr>
     <td style="white-space:nowrap">{{ o.started | ts('%a %d %b %Y') }}</td>
     <td class="num" style="white-space:nowrap">{{ o.started | ts('%H:%M:%S') }}</td>
-    <td class="num" style="white-space:nowrap">{% if o.resolved %}{{ o.resolved | ts('%H:%M:%S') }}{% else %}still down{% endif %}</td>
+    <td class="num" style="white-space:nowrap">{% if o.resolved is none %}still down{% elif o.resolved > r.end %}{{ o.resolved | ts('%d %b %H:%M:%S') }} (after the period){% else %}{{ o.resolved | ts('%H:%M:%S') }}{% endif %}</td>
     <td class="num" style="white-space:nowrap">{{ o.down | dur }}</td>
     <td style="white-space:nowrap">{{ sides[o.side] }}</td>
     <td>{{ o.cause or '–' }}</td>

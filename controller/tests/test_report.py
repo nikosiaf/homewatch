@@ -1,5 +1,5 @@
 """The report for any period: the period itself, outages by likely cause, speed against the contract, the modem's
-line, the CSV files, the page and /api/v1/report."""
+line, the CSV files and the page."""
 
 import asyncio
 import csv
@@ -63,13 +63,14 @@ def test_period_takes_local_dates_both_included():
     assert start == datetime(2026, 10, 1, tzinfo=athens).timestamp()
     assert end == datetime(2026, 11, 1, tzinfo=athens).timestamp()  # the 31st is included
     assert report.period(UTC, "2026-11-10", "2026-12-31", NOW) == (datetime(2026, 11, 10, tzinfo=UTC).timestamp(), NOW)
-    assert report.period(UTC, str(D0), str(D0 + H), NOW) == (D0, D0 + H)  # Unix seconds, for scripts
 
 
 @pytest.mark.parametrize("frm,to,msg", [("2026-10-10", "2026-10-01", "To is before From"),
                                         ("2026-12-01", "2026-12-02", "future"),
                                         ("2025-01-01", "2026-10-01", "At most 400 days"),
-                                        ("1 Oct", "2026-10-02", "From: a date")])
+                                        ("1 Oct", "2026-10-02", "From: a date"),
+                                        ("nan", "2026-10-02", "From: a date"),
+                                        (str(D0), str(D0 + H), "From: a date")])
 def test_period_refuses_what_is_not_one(frm, to, msg):
     with pytest.raises(ValueError, match=msg):
         report.period(UTC, frm, to, NOW)
@@ -109,9 +110,23 @@ def test_outages_split_by_likely_cause(db):
 
 def test_outage_at_the_edge_counts_only_its_part_in_the_period(db):
     watched(db)
-    outage(db, D1 - 600, 30)  # 10 of its 30 minutes are in October
+    outage(db, D1 - 600, 30)  # 10 of its 30 minutes are in October; it ended on 1 November
     r = asyncio.run(report.gather(db, FakeMetrics(), "home", D0, D1))
-    assert len(r.outages) == 1 and r.outages[0].down == 600 and r.outages[0].resolved is None  # still down at the end
+    assert len(r.outages) == 1 and r.outages[0].down == 600 and r.outages[0].resolved == D1 + 1200
+    rows = list(csv.reader(io.StringIO(report.csv_outages(r, UTC))))
+    assert rows[1][1] == "2026-11-01T00:20:00+00:00"
+
+
+def test_report_page_says_still_down_only_for_outages_not_over(client):  # noqa: F811
+    logged_in(client)
+    db = client.rt.db
+    db.set("home.tz", "UTC")
+    watched(db)
+    outage(db, D1 - 600, 30)
+    page = client.get("/history/report?from=2026-10-01&to=2026-10-31").text
+    assert "01 Nov 00:20:00 (after the period)" in page and "still down" not in page
+    db.run("UPDATE issues SET resolved=NULL")
+    assert "still down" in client.get("/history/report?from=2026-10-01&to=2026-10-31").text
 
 
 def test_unwatched_outage_time_is_not_counted(db):
@@ -123,9 +138,34 @@ def test_unwatched_outage_time_is_not_counted(db):
 
 def test_cause_told_at_the_time_is_kept_when_the_events_are_gone(db):
     watched(db)
-    outage(db, D0 + 86400, 10, cause="The DSL line dropped and re-synced at 08:05 with no power cut at home")
+    outage(db, D0 + 86400, 10, cause="The DSL line dropped and re-synced at 08:05 with no power cut at home: "
+                                     "a line or ISP-side problem")
+    outage(db, D0 + 2 * 86400, 10, cause="Power cut: the UPS ran on battery from ~07:58 to 08:20")
+    outage(db, D0 + 3 * 86400, 10, cause="Something nobody wrote a rule for")
     r = asyncio.run(report.gather(db, FakeMetrics(), "home", D0, D1))
-    assert r.outages[0].cause.startswith("The DSL line dropped") and r.outages[0].side == causes.UNKNOWN
+    assert [(o.cause[:12], o.side) for o in r.outages] == [("The DSL line", causes.ISP), ("Power cut: t", causes.HOME),
+                                                         ("Something no", causes.UNKNOWN)]
+    sides = r.by_side()
+    assert (sides["isp"]["outages"], sides["home"]["outages"], sides["unknown"]["outages"]) == (1, 1, 1)
+
+
+def test_side_of_a_stored_cause_matches_the_rule_that_wrote_it(db):
+    t = D0 + 86400
+    told = []
+    for n, evs in enumerate([[("ups", "on_battery", "UPS on battery"), ("speedport", "reboot", "Modem restarted")],
+                             [("ups", "on_battery", "UPS on battery"), ("speedport", "line_resync", "Resync")],
+                             [("ups", "on_battery", "UPS on battery")],
+                             [("speedport", "reboot", "Modem restarted")],
+                             [("opnsense", "reboot", "OPNsense restarted")],
+                             [("speedport", "line_resync", "Resync")],
+                             [("unifi", "reboot", "AP restarted")],
+                             []]):
+        a = t + n * 86400
+        for module, kind, detail in evs:
+            ev(db, a + 60, module, kind, detail=detail, exact=n % 2)
+        told.append(causes.classify(db, "home", a, a + 600, ["internet.reachable"], UTC)[:2])
+    assert len({s for _, s in told}) == 3
+    assert [causes.side_of(c) for c, _ in told] == [s for _, s in told]
 
 
 def test_classify_names_the_side_of_each_rule(db):
@@ -276,30 +316,6 @@ def test_viewer_sees_the_report(client):  # noqa: F811
                                 "csrf": csrf(client.get("/login").text)})
     assert client.get("/history/report").status_code == 200
     assert client.get("/history/report.csv?what=speedtests&from=2026-10-01&to=2026-10-31").status_code == 200
-
-
-def test_api_report(client):  # noqa: F811
-    token = logged_in(client)
-    h = {"Authorization": f"Bearer {token}"}
-    db = client.rt.db
-    watched(db)
-    outage(db, D0 + 86400, 10)
-    ev(db, D0 + 86400 + 300, "speedport", "line_resync")
-    speedtests(db, [40], [10])
-    s = load_internet(db)
-    s["line"].update(contract_down=100, contract_up=10, min_down=50)
-    save_internet(db, s)
-    j = client.get("/api/v1/report?from=2026-10-01&to=2026-10-31", headers=h).json()
-    assert j["from"] == D0 and j["to"] == D1 and j["availability"]["outages"] == 1
-    assert j["outages"][0]["side"] == "isp" and j["outages"][0]["down_s"] == 600
-    assert j["outages_by_side"]["isp"] == {"outages": 1, "down_s": 600} and j["outages_by_side"]["home"]["outages"] == 0
-    assert j["speed"]["down"]["below_minimum"] == 1 and j["speed"]["down"]["percent_of_contract"] == 40
-    assert j["speed"]["up"]["below_minimum"] is None and j["speed"]["min_up"] is None
-    assert "line" not in j  # the modem module is off
-    r = client.get("/api/v1/report?from=2026-10-31&to=2026-10-01", headers=h)
-    assert r.status_code == 400 and r.json()["error"] == "To is before From"
-    assert client.get("/api/v1/report").status_code == 401
-    assert client.get("/api/v1/report", headers=h).status_code == 200
 
 
 def test_internet_settings_keep_the_guaranteed_minimum(client):  # noqa: F811

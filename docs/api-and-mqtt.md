@@ -27,7 +27,6 @@ shown once) and send it as `Authorization: Bearer <token>`. A token can only rea
 | `GET /api/v1/issues?days=7&open=1&module=internet` | problems and their return to OK |
 | `GET /api/v1/incidents?days=30` | incidents with their checks, likely cause and device events |
 | `GET /api/v1/events?days=7` | what the devices did |
-| `GET /api/v1/report?from=2026-10-01&to=2026-10-31` | the report of a period (local dates, both included, or Unix seconds; the last 30 days without them): availability, outages with their likely cause and side (`isp`, `home`, `unknown`), line quality, speed against the contract, the modem's line |
 | `GET /api/v1/todos` | updates and firmware waiting |
 
 Times are Unix seconds; levels are 0 OK, 1 WARNING, 2 ERROR (`level_word` has the name).

@@ -8,6 +8,7 @@ with the events that show it. No rule fits: no cause is given.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -49,6 +50,14 @@ ISP = "isp"  # the line or the provider's network
 HOME = "home"  # a power cut, or equipment at home
 UNKNOWN = "unknown"  # no rule fits
 SIDES = {ISP: "ISP or line", HOME: "Power cut or own equipment", UNKNOWN: "Unknown"}
+_SIDE_OF = ((ISP, re.compile(r"(a line or ISP-side problem|a problem in the ISP's network)$")),
+            (HOME, re.compile(r"^(Power cut|The modem restarted at )|(a local cause, your own equipment|went with it"
+                              r"| at ~?\d\d:\d\d)$")))
+
+
+def side_of(cause: str) -> str:
+    """The side of a likely cause classify gave earlier (as stored with an incident); UNKNOWN when none fits."""
+    return next((side for side, rx in _SIDE_OF if rx.search(cause or "")), UNKNOWN)
 
 
 def explain(db, site: str, start: float, end: float | None, keys: list[str], zone: ZoneInfo,
