@@ -53,7 +53,7 @@ def test_first_run_wizard(client):
     r = client.post("/setup/equipment", data={"csrf": tok, "skip": "1"})
     assert r.url.path == "/setup/notify"
     line = client.rt.internet_settings()["line"]
-    assert line == {"contract_down": 100, "contract_up": 10}
+    assert line == {"contract_down": 100, "contract_up": 10, "min_down": 0, "min_up": 0}
     conf = open(client.rt.cfg.telegraf_dir + "/telegraf.conf").read()
     assert '"9.9.9.9"' in conf and '"example.com"' in conf
     r = client.post("/setup/notify", data={"csrf": tok, "skip": "1"})

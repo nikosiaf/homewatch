@@ -126,6 +126,18 @@ def events(rt, q: dict) -> list[dict]:
                                (rt.cfg.site, since))]
 
 
+async def report(rt, q: dict) -> dict:
+    """The report of a period (from, to: local dates YYYY-MM-DD, or Unix seconds); the last 30 days by default.
+    ValueError when they don't make a period."""
+    from . import report as rep
+    from .engine import tz
+
+    now, zone = time.time(), tz(rt.db)
+    _, frm, to = rep.quick_picks(zone, now)[1]
+    start, end = rep.period(zone, q.get("from") or frm, q.get("to") or to, now)
+    return rep.as_json(await rep.gather(rt.db, rt.metrics, rt.cfg.site, start, end))
+
+
 def todos(rt) -> list[dict]:
     return [{"key": r["check_key"], "module": _module(r["check_key"]), "name": r["name"], "item": r["item"],
              "first_seen": r["first_seen"]}

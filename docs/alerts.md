@@ -34,6 +34,15 @@ Alerting works like this:
 - **Status page:** a module tile says "No new reading for …" when its device hasn't been read for 3 of
   its read intervals, so old results don't look current.
 - **History** is a timeline of every problem and its return to OK.
+- **Report** (History → Report for any period): the internet line over the days you pick (last 7 or 30
+  days, the previous month, or any dates up to 400 days), made when you open it. It has availability
+  with how much of the time was monitored, every outage with its likely cause and the totals split into
+  ISP or line, power cut or own equipment, and unknown, the line quality, the modem's sync rate, SNR
+  margin, resyncs and drops (with the ISP modem module on), and the speed tests against your contract.
+  Enter the contracted speed, and the guaranteed minimum if your contract has one, on the Internet line
+  module; without them the report shows the plain numbers. Print it or save it as a PDF from the
+  browser to send to your provider; the outages and the speed tests also download as CSV. Modules that
+  are off are left out.
 
 ## Webhook
 

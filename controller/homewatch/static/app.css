@@ -485,3 +485,20 @@ button.nm-box .nm-more::after { content: " ▸"; } button.nm-box[aria-expanded="
 .nm-meta { display: flex; flex-direction: column; } .nm-mac { font-family: var(--mono, monospace); }
 .nm-box.k-ups { border-left-color: #22c55e; } .nm-box.k-guest { border-left-color: #f59e0b; }
 .callout-warn { border-left: 4px solid var(--warn); }
+
+/* the report page: printed (or saved as PDF from the print dialog) it is a plain document, black on white */
+.print-only { display: none; }
+@media print {
+  :root, :root[data-theme="dark"], :root:not([data-theme="light"]) { --bg: #fff; --card: #fff; --ink: #000; --quiet: #444;
+    --line: #bbb; --muted-bg: #fff; --accent: #1d3f9a; --shadow: none; color-scheme: light; }
+  body { background: #fff; color: #000; }
+  header, .no-print, .flash, main > p.quiet.small:last-child { display: none !important; }
+  .print-only { display: block; }
+  .wrap { max-width: none; padding: 0; }
+  .report .card { border: 0; border-radius: 0; box-shadow: none; padding: 0; margin-bottom: 12px; }
+  .report .scroll { overflow: visible; }
+  .report h2 { break-after: avoid; margin-top: 18px; }
+  .report tr { break-inside: avoid; }
+  .report th, .report td { padding: 4px 6px; }
+  a { color: inherit; text-decoration: none; }
+}

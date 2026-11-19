@@ -156,7 +156,7 @@ def test_old_settings_move_the_contract_to_line(db):
     save(db, {"speed": {"enabled": False, "engine": "cloudflare", "interval_h": 3, "contract_down": 100,
                         "contract_up": 10}})
     s = load(db)
-    assert s["line"] == {"contract_down": 100, "contract_up": 10}
+    assert s["line"] == {"contract_down": 100, "contract_up": 10, "min_down": 0, "min_up": 0}
     assert "contract_down" not in s["speed"] and s["speed"]["enabled"] is False
 
 

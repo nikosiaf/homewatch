@@ -115,6 +115,13 @@ less install.sh          # please read it first; it's short (q to quit)
       tiles: what needs attention (with Ack and Snooze), new devices on the network and the To do list.</li>
     <li><b>History:</b> the incidents with their timeline and likely cause, and every problem and its return to OK, by
       module, level and period.</li>
+    <li><b>Report</b> (History → Report for any period): your internet line over the days you pick (last 7 or 30 days,
+      the previous month, or any dates up to 400 days): availability and how much of the time was monitored, every outage
+      with its likely cause and the totals for ISP or line, power cut or own equipment, and unknown, the line quality, the
+      modem's sync rate, SNR margin, resyncs and drops (when the ISP modem module is on), and the speed tests against your
+      contract (and its guaranteed minimum, if you entered one on the Internet line module). Print it or save it as a PDF
+      from the browser to send to your provider; the outages and speed tests also download as CSV. It shows only what
+      homeWatch stored and leaves out modules that are off.</li>
     <li><b>Map:</b> how your devices are connected, drawn top down: the ISP modem and the Proxmox host with its WAN and LAN
       cards, the switches with their uplink, what is wired to each switch port, and the Wi-Fi clients of each access point;
       one thing opens at a time on each level. It comes from the MikroTik switches' MAC tables, the UniFi clients (and
@@ -197,6 +204,9 @@ less install.sh          # please read it first; it's short (q to quit)
     <li><code>GET /api/v1/issues?days=7&amp;open=1&amp;module=internet</code>: problems and their return to OK</li>
     <li><code>GET /api/v1/incidents?days=30</code>: incidents with their checks, likely cause and device events</li>
     <li><code>GET /api/v1/events?days=7</code>: what the devices did (reboots, resyncs, power cuts…)</li>
+    <li><code>GET /api/v1/report?from=2026-10-01&amp;to=2026-10-31</code>: the report of a period (local dates, both
+      included, or Unix seconds; the last 30 days without them): availability, outages with their likely cause and side,
+      line quality, speed against the contract and the modem's line</li>
     <li><code>GET /api/v1/todos</code>: updates and firmware waiting</li>
   </ul>
   <pre class="code">curl -sk -H "Authorization: Bearer hw_…" https://homewatch.local/api/v1/status</pre>
