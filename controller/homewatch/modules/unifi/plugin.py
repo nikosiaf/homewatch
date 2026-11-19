@@ -22,9 +22,10 @@ CHECKS = [
                   "a Grafana marker; WARNING at this many."),
     CheckDef("firmware", "Firmware", "api", unit="days", warn=14, editable=("warn",), todo=True,
              help="A device has a firmware update. Listed under To do; WARNING once it has waited this many days."),
-    CheckDef("watched", "Watched devices online", "api", unit="min", warn=30,
+    CheckDef("watched", "Watched devices online", "api", unit="min", warn=30, editable=("error",),
              help="WARNING when a device listed under \"Must be online\" hasn't been seen by UniFi for more than "
-                  "30 minutes. Only clients UniFi sees (Wi-Fi through its access points)."),
+                  "30 minutes; ERROR once it has been away for more than the ERROR limit, if you set one. Only "
+                  "clients UniFi sees (Wi-Fi through its access points)."),
 ]
 STATE = {0: "disconnected", 1: "connected", 2: "pending adoption", 4: "upgrading", 5: "provisioning",
          6: "heartbeat missed", 7: "adopting", 9: "adoption failed", 10: "isolated", 11: "isolated"}
@@ -60,10 +61,11 @@ def watched_clients(entries, clients, history, now, limit_min):
         m = _mac(c.get("mac"))
         if m:
             seen[m] = (now, c.get("name") or seen.get(m, (0, ""))[1])
-    by_name = {}
-    for m, (_, name) in seen.items():
-        if name:
-            by_name.setdefault(name.casefold(), m)
+    by_name: dict[str, str] = {}  # name -> the MAC with that name seen last
+    for m, (ts, name) in seen.items():
+        k = name.casefold()
+        if name and (k not in by_name or ts > seen[by_name[k]][0]):
+            by_name[k] = m
     late, missing = [], []
     for e in entries:
         m = _mac(e)
@@ -274,17 +276,18 @@ class UniFiModule(ApiModule):
         add("firmware", WARNING if upd else OK, "; ".join(upd) if upd else "all watched devices up to date")
 
         entries = watch_list(s.get("must_online", ""))
-        limit = th["watched"].warn if "watched" in th and th["watched"].warn is not None else 30
+        t = th["watched"]
         if not entries:
             add("watched", OK, "no devices listed")
         elif not snap.get("clients_ok", "clients" in snap):  # UniFi's client lists couldn't be read
             add("watched", OK, "UniFi clients not readable")
             out[-1].unknown = True
         else:
-            late, missing = watched_clients(entries, snap.get("clients", []), snap.get("history", []), now, limit)
+            late, missing = watched_clients(entries, snap.get("clients", []), snap.get("history", []), now, t.warn)
             parts = [f"{e} not seen for {m:.0f} min" for e, m in late] + [f"not found: {e}" for e in missing]
-            add("watched", WARNING if late else OK, "; ".join(parts) if parts else f"{len(entries)} watched devices seen",
-                max((m for _, m in late), default=0.0))
+            worst = max((m for _, m in late), default=0.0)
+            status = OK if not late else ERROR if t.error is not None and worst > t.error else WARNING
+            add("watched", status, "; ".join(parts) if parts else f"{len(entries)} watched devices seen", worst)
         return out
 
     def tables(self, snap, s):

@@ -130,3 +130,26 @@ def test_watched_back_to_ok():
     hist = [{"mac": "aa:bb:cc:00:00:01", "name": "cam", "last_seen": 0}]
     assert _watch("cam", history=hist).status == WARNING
     assert _watch("cam", clients=[{"mac": "aa:bb:cc:00:00:01", "name": "cam"}], history=hist).status == OK
+
+
+def test_watched_error_limit():
+    hist = [{"mac": "aa:bb:cc:00:00:01", "name": "cam", "last_seen": 10000 - 120 * 60}]
+    assert _watch("cam", history=hist).status == WARNING  # no ERROR limit by default: WARNING only
+    snap = {"devices": [], "health": [], "clients": [], "history": hist, "clients_ok": True}
+    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in plugin.checks}
+    th["watched"] = Thresholds(30, 60)
+    r = {x.key.split(".")[1]: x for x in plugin.check({"must_online": "cam"}, th, snap, 10000.0)}
+    assert r["watched"].status == ERROR and r["watched"].detail == "cam not seen for 120 min"
+    hist[0]["last_seen"] = 10000 - 45 * 60
+    r = {x.key.split(".")[1]: x for x in plugin.check({"must_online": "cam"}, th, snap, 10000.0)}
+    assert r["watched"].status == WARNING
+
+
+def test_watched_name_picks_newest_mac():
+    # an old, replaced camera and the current one share a name; the current one is online
+    hist = [{"mac": "aa:bb:cc:00:00:01", "name": "Camera garden", "last_seen": 1000},
+            {"mac": "aa:bb:cc:00:00:02", "name": "Camera garden", "last_seen": 10000 - 60}]
+    assert _watch("Camera garden", history=hist).status == OK
+    assert _watch("Camera garden", history=hist[::-1]).status == OK
+    r = _watch("Camera garden", clients=[{"mac": "aa:bb:cc:00:00:02", "name": "Camera garden"}], history=hist)
+    assert r.status == OK
