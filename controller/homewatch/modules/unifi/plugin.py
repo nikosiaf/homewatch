@@ -100,8 +100,8 @@ class UniFiModule(ApiModule):
               help=SELF_SIGNED),
         Field("must_online", "Must be online", "Camera garden\naa:bb:cc:dd:ee:ff", kind="lines", section="more",
               help="One device per line, by name or MAC address. The check \"Watched devices online\" "
-                                  "warns when one hasn't been seen by UniFi for more than 30 minutes. Wi-Fi devices "
-                                  "only; devices not listed are ignored."),
+                   "warns when one hasn't been seen by UniFi for more than 30 minutes. Wi-Fi devices "
+                   "only; devices not listed are ignored."),
     ]
     secret_label = "Password"
     choices_title = "Devices to watch"

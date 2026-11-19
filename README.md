@@ -89,7 +89,7 @@ Grafana needs about 2 GB of disk and 150 MB of memory. Details: [docs/grafana.md
 | [Home Assistant](docs/modules.md#home-assistant-module-optional) | core, updates, backups, host load, the entities you choose | token of a non-admin user |
 | [Synology NAS](docs/modules.md#synology-nas-module-optional) | system, disks, pools and volumes, DSM updates, fans (SNMPv3) | DSM user with no folder or app access |
 | [MikroTik](docs/modules.md#mikrotik-module-optional) | ports, port errors, CPU, reboots, RouterOS, daily config copies | user in the `read` group |
-| [UniFi](docs/modules.md#unifi-module-optional) | devices online, CPU, Wi-Fi, restarts, firmware | view-only user |
+| [UniFi](docs/modules.md#unifi-module-optional) | devices online, CPU, Wi-Fi, restarts, firmware, must-be-online clients | view-only user |
 | [Proxmox Backup Server](docs/modules.md#proxmox-backup-server-module-optional) | datastores, backups, verify / prune / GC jobs, updates | API token with the Audit role |
 | [UPS](docs/modules.md#ups-module-optional) | mains power, battery, runtime, load | a NUT server on your network |
 | [Docker hosts](docs/modules.md#docker-hosts-module-optional) | containers, crash loops, health checks, OS updates | read-only socket proxy (node_exporter optional) |
