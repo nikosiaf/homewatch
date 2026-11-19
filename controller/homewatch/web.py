@@ -368,7 +368,8 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         if user is None:
             return RedirectResponse("/login", status_code=303)
         request.state.user = user
-        viewer_ok = path in ("/", "/history", "/help", "/partials/status", "/logout", "/password")
+        viewer_ok = path in ("/", "/history", "/history/report", "/history/report.csv", "/help", "/partials/status",
+                             "/logout", "/password")
         if not user.is_admin and not viewer_ok:
             return HTMLResponse("Admins only", status_code=403)
         resp = await call_next(request)
@@ -796,6 +797,44 @@ def _routes(app: FastAPI) -> None:  # noqa: C901 - one place for all pages keeps
         return page(request, "history.html", request.state.user, events=events, groups=groups, names=check_names,
                     incidents=incidents,
                     modules=[(m.id, m.name) for m in MODULES.values()], module=module, level=level, days=days, avail=avail, since=since, now=now, cut_off=cut_off, history_rows=HISTORY_ROWS)
+
+    @app.get("/history/report")
+    async def report_page(request: Request):
+        from . import report
+        from .causes import SIDES
+        rt = rt_of(request)
+        now, zone = time.time(), tz(rt.db)
+        picks = report.quick_picks(zone, now)
+        frm = request.query_params.get("from") or picks[1][1]  # last 30 days unless asked
+        to = request.query_params.get("to") or picks[1][2]
+        err, r = "", None
+        try:
+            start, end = report.period(zone, frm, to, now)
+        except ValueError as e:
+            err = str(e)
+        else:
+            r = await report.gather(rt.db, rt.metrics, rt.cfg.site, start, end)
+        return page(request, "report.html", request.state.user, r=r, error=err, frm=frm, to=to, picks=picks,
+                    sides=SIDES, now=now, query=urlencode({"from": frm, "to": to}))
+
+    @app.get("/history/report.csv")
+    async def report_csv(request: Request, what: str = "outages"):
+        from . import report
+        rt = rt_of(request)
+        now, zone = time.time(), tz(rt.db)
+        q = request.query_params
+        try:
+            start, end = report.period(zone, q.get("from", ""), q.get("to", ""), now)
+        except ValueError as e:
+            return PlainTextResponse(str(e), status_code=400)
+        if what not in ("outages", "speedtests"):
+            return PlainTextResponse("what: outages or speedtests", status_code=400)
+        r = await report.gather(rt.db, rt.metrics, rt.cfg.site, start, end, with_line=False)
+        body = report.csv_outages(r, zone) if what == "outages" else report.csv_speedtests(r, zone)
+        day = lambda ts: datetime.fromtimestamp(ts, zone).strftime("%Y-%m-%d")  # noqa: E731
+        name = f"homewatch-{what}-{day(start)}-to-{day(end - 1)}.csv"
+        return Response(body, media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     @app.get("/help")
     async def help_page(request: Request):

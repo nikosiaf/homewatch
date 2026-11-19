@@ -5,6 +5,11 @@
     <div><label for="cd">Contracted download (Mbit/s)</label><input class="num" id="cd" type="number" step="any" min="0" name="line.contract_down" value="{{ s.line.contract_down }}"></div>
     <div><label for="cu">Contracted upload (Mbit/s)</label><input class="num" id="cu" type="number" step="any" min="0" name="line.contract_up" value="{{ s.line.contract_up }}"></div>
   </div>
+  <p class="quiet small">The guaranteed minimum, if your contract states one (optional): the <a href="/history/report">report</a> counts the speed tests below it.</p>
+  <div class="row">
+    <div><label for="md">Guaranteed minimum download (Mbit/s)</label><input class="num" id="md" type="number" step="any" min="0" name="line.min_down" value="{{ s.line.min_down }}"></div>
+    <div><label for="mu">Guaranteed minimum upload (Mbit/s)</label><input class="num" id="mu" type="number" step="any" min="0" name="line.min_up" value="{{ s.line.min_up }}"></div>
+  </div>
 </fieldset>
 <fieldset>
   <legend><label class="check"><input type="checkbox" name="public.enabled" {{ 'checked' if s.public.enabled }}> Public ping</label></legend>

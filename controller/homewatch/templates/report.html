@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Report{% endblock %}
+{% block content %}
+<div class="no-print">
+<h1>Report</h1>
+<div class="card">
+  <p class="quiet small" style="margin-top:0">Your internet line over any period, from what homeWatch stored: availability, outages and their likely
+    cause, line quality, the modem's line and speed tests against your contract. Print it, or save it as a PDF from the
+    browser's print dialog, to send to your provider.</p>
+  <p class="row" style="gap:8px">{% for label, f, t in picks %}<a class="{{ 'button small' if f == frm and t == to else 'button secondary small' }}" href="/history/report?from={{ f }}&amp;to={{ t }}">{{ label }}</a>{% endfor %}</p>
+  <form class="row" method="get" action="/history/report">
+    <div><label for="rf">From</label><input id="rf" type="date" name="from" value="{{ frm }}" required></div>
+    <div><label for="rt">To (included)</label><input id="rt" type="date" name="to" value="{{ to }}" required></div>
+    <div style="align-self:flex-end"><button>Show</button></div>
+  </form>
+  {% if r %}<p class="row" style="gap:8px;margin-bottom:0"><button type="button" class="secondary" data-print>Print or save as PDF</button>
+    {% if r.internet %}<a class="button secondary" href="/history/report.csv?what=outages&amp;{{ query }}">Outages (CSV)</a>{% endif %}
+    {% if r.internet and r.speed %}<a class="button secondary" href="/history/report.csv?what=speedtests&amp;{{ query }}">Speed tests (CSV)</a>{% endif %}</p>{% endif %}
+</div>
+</div>
+{% if r %}
+<div class="report">
+<h1 class="print-only">Internet line report · {{ r.home }}</h1>
+<p><b>{{ r.start | ts('%d %b %Y') }} – {{ (r.end - 1) | ts('%d %b %Y') }}</b>{% if r.end >= now - 1 %} (up to now){% endif %}
+  <span class="quiet small">· made {{ now | ts('%d %b %Y %H:%M') }} · times in {{ zone }}</span></p>
+{% if not r.internet and not r.modem %}
+<div class="card quiet">The Internet line and ISP modem modules are off, so there is nothing to report.</div>
+{% endif %}
+{% if r.internet %}
+{% set a = r.availability %}
+<h2>Availability</h2>
+<div class="card">
+  {% if a.percent is none %}<p style="margin:0">Unknown: the line wasn't monitored in this period.</p>
+  {% else %}<p style="margin-top:0"><b class="num" style="font-size:22px">{{ '%.3f' | format(a.percent) }} %</b> up · {{ a.outages }} outage{{ 's' if a.outages != 1 }}{% if a.outages %}, {{ a.down | dur }} down in total{% endif %}</p>
+  <p class="quiet small" style="margin-bottom:0">Monitored {{ '%.1f' | format(a.coverage) }} % of the period ({{ a.observed | dur }} of {{ a.period | dur }}).
+    Time not monitored (before the install, or with homeWatch down) is unknown and not counted as up or down.</p>{% endif %}
+</div>
+{% if r.outages %}
+<h2>Outages by likely cause</h2>
+<div class="card scroll"><table>
+  <tr><th>Cause</th><th>Outages</th><th>Down</th></tr>
+  {% for k, v in r.by_side().items() %}<tr><td>{{ v.label }}</td><td class="num">{{ v.outages }}</td><td class="num">{{ v.down | dur if v.outages else '–' }}</td></tr>{% endfor %}
+</table>
+<p class="quiet small" style="margin-bottom:0">From what the devices did around each outage: a DSL resync with no power cut at home, or the
+  internet not answering while the modem kept its line, points at the line or the ISP; the UPS on battery or a restart of the modem,
+  firewall or host points at a power cut or equipment at home. No device event that fits: unknown.</p></div>
+<h2>Outages</h2>
+<div class="card scroll"><table>
+  <tr><th>Date</th><th>Start</th><th>End</th><th>Down</th><th>Cause</th><th>Likely cause</th></tr>
+  {% for o in r.outages %}<tr>
+    <td style="white-space:nowrap">{{ o.started | ts('%a %d %b %Y') }}</td>
+    <td class="num" style="white-space:nowrap">{{ o.started | ts('%H:%M:%S') }}</td>
+    <td class="num" style="white-space:nowrap">{% if o.resolved is none %}still down{% elif o.resolved > r.end %}{{ o.resolved | ts('%d %b %H:%M:%S') }} (after the period){% else %}{{ o.resolved | ts('%H:%M:%S') }}{% endif %}</td>
+    <td class="num" style="white-space:nowrap">{{ o.down | dur }}</td>
+    <td style="white-space:nowrap">{{ sides[o.side] }}</td>
+    <td>{{ o.cause or '–' }}</td>
+  </tr>{% endfor %}
+</table></div>
+{% endif %}
+{% if r.quality %}
+<h2>Line quality <span class="quiet small">public ping</span></h2>
+<div class="card scroll"><table>
+  <tr><th></th><th>Average</th><th>Worst 5 minutes</th></tr>
+  {% for q in r.quality %}<tr><td>{{ q.label }}</td><td class="num">{{ '%.1f' | format(q.avg) }} {{ q.unit }}</td>
+    <td class="num">{% if q.worst is not none %}{{ '%.1f' | format(q.worst) }} {{ q.unit }}{% else %}–{% endif %}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+{% if r.speed %}
+{% set sp = r.speed %}
+<h2>Speed tests <span class="quiet small">{{ sp.tests | length }} test{{ 's' if sp.tests | length != 1 }}</span></h2>
+<div class="card scroll">
+  {% if sp.contract_down or sp.contract_up %}<p style="margin-top:0">Contract: {{ sp.contract_down | num if sp.contract_down else '–' }} / {{ sp.contract_up | num if sp.contract_up else '–' }} Mbit/s
+    {%- if sp.min_down or sp.min_up %}, guaranteed minimum {{ sp.min_down | num if sp.min_down else '–' }} / {{ sp.min_up | num if sp.min_up else '–' }} Mbit/s{% endif %}</p>{% endif %}
+  {% if sp.tests %}<table>
+    <tr><th></th><th>Average</th><th>Lowest</th><th>Highest</th>{% if sp.contract_down or sp.contract_up %}<th>Average of contract</th>{% endif %}{% if sp.min_down or sp.min_up %}<th>Below the minimum</th>{% endif %}</tr>
+    {% for k, label in (('down', 'Download'), ('up', 'Upload')) %}{% set st = sp.stat(k) %}<tr><td>{{ label }}</td>
+      {% if st %}<td class="num">{{ '%.1f' | format(st.avg) }}</td><td class="num">{{ '%.1f' | format(st.min) }}</td><td class="num">{{ '%.1f' | format(st.max) }}</td>
+      {% else %}<td>–</td><td>–</td><td>–</td>{% endif %}
+      {% if sp.contract_down or sp.contract_up %}{% set c = sp.share_of_contract(k) %}<td class="num">{{ '%.0f %%' | format(c) if c is not none else '–' }}</td>{% endif %}
+      {% if sp.min_down or sp.min_up %}{% set b = sp.below_minimum(k) %}<td class="num">{% if b %}{{ b[0] }} of {{ sp.tests | length }} ({{ '%.0f' | format(b[1]) }} %){% else %}–{% endif %}</td>{% endif %}
+    </tr>{% endfor %}
+  </table>
+  <p class="quiet small" style="margin-bottom:0">Mbit/s. {% if not (sp.contract_down or sp.contract_up) %}No contracted speed is set (Modules → Internet line), so there is nothing to compare against.{% endif %}</p>
+  {% else %}<p class="quiet" style="margin:0">No speed tests in this period.</p>{% endif %}
+</div>
+{% endif %}
+{% endif %}
+{% if r.line is not none %}
+<h2>Modem line</h2>
+<div class="card scroll">
+  <p style="margin-top:0">{{ r.line.resyncs }} resync{{ 's' if r.line.resyncs != 1 }} · {{ r.line.drops }} line drop{{ 's' if r.line.drops != 1 }} · {{ r.line.restarts }} modem restart{{ 's' if r.line.restarts != 1 }}</p>
+  {% if r.line['values'] is none %}<p class="quiet" style="margin-bottom:0">Sync rate and SNR margin: not available (the history store couldn't be read).</p>
+  {% else %}<table>
+    <tr><th></th><th>Average</th><th>Worst</th></tr>
+    {% for v in r.line['values'] %}<tr><td>{{ v.label }}</td>
+      <td class="num">{% if v.avg is not none %}{{ '%.1f' | format(v.avg) }} {{ v.unit }}{% else %}–{% endif %}</td>
+      <td class="num">{% if v.worst is not none %}{{ '%.1f' | format(v.worst) }} {{ v.unit }}{% else %}–{% endif %}</td></tr>{% endfor %}
+  </table>{% endif %}
+</div>
+{% endif %}
+</div>
+{% endif %}
+{% endblock %}

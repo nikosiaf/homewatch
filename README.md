@@ -49,6 +49,7 @@ dashboards are already built and waiting. Everything runs on one small Docker ho
 - **Network map**: how your devices are connected, built from what the modules read, with root causes and newly seen devices highlighted.
 - **To do, not alarms**: updates and firmware waiting on your devices are listed, and only become a warning after 14 days.
 - **Alerts wherever you are**: Telegram, ntfy (with snooze and acknowledge buttons), email and webhooks, plus quiet hours, an offline queue, a weekly report and a healthchecks.io heartbeat.
+- **A report for your provider**: pick any period and get the line's availability, every outage with its likely cause (ISP or line vs. a power cut or your own equipment), the modem's line and the speed tests against your contract, to print or save as PDF, with CSV downloads.
 - **Home Assistant and API**: homeWatch appears as an MQTT device in Home Assistant, and offers a read-only JSON API with tokens.
 - **Managed from a web page**: a setup wizard, restorable configuration versions, export / import, and one-click updates (with the optional updater) that roll back on their own if the new release doesn't start.
 

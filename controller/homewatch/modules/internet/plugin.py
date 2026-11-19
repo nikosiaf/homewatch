@@ -86,8 +86,8 @@ class InternetModule(Module):
                     "domain": domain or "cloudflare.com"},
             "speed": {"enabled": form.get("speed.enabled") == "on", "engine": engine, "interval_h": interval,
                       "ookla_accepted": form.get("speed.ookla_accepted") == "on"},
-            "line": {"contract_down": max(_float(form.get("line.contract_down"), 0) or 0, 0),
-                     "contract_up": max(_float(form.get("line.contract_up"), 0) or 0, 0)},
+            "line": {k: max(_float(form.get(f"line.{k}"), 0) or 0, 0)
+                     for k in ("contract_down", "contract_up", "min_down", "min_up")},
         }
         save(rt.db, new)
         rt.sync_telegraf()

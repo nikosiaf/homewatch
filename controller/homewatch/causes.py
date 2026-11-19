@@ -8,6 +8,7 @@ with the events that show it. No rule fits: no cause is given.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -44,9 +45,31 @@ def _parent_event(db, site: str, evs, nodes: list[str]):
     return None
 
 
+# which side a likely cause puts the fault on (the outage report totals by it)
+ISP = "isp"  # the line or the provider's network
+HOME = "home"  # a power cut, or equipment at home
+UNKNOWN = "unknown"  # no rule fits
+SIDES = {ISP: "ISP or line", HOME: "Power cut or own equipment", UNKNOWN: "Unknown"}
+_SIDE_OF = ((ISP, re.compile(r"(a line or ISP-side problem|a problem in the ISP's network)$")),
+            (HOME, re.compile(r"^(Power cut|The modem restarted at )|(a local cause, your own equipment|went with it"
+                              r"| at ~?\d\d:\d\d)$")))
+
+
+def side_of(cause: str) -> str:
+    """The side of a likely cause classify gave earlier (as stored with an incident); UNKNOWN when none fits."""
+    return next((side for side, rx in _SIDE_OF if rx.search(cause or "")), UNKNOWN)
+
+
 def explain(db, site: str, start: float, end: float | None, keys: list[str], zone: ZoneInfo,
             nodes: list[str] | None = None) -> tuple[str, list]:
     """(likely cause or '', evidence [(ts, module, device, detail, exact)]) for an incident."""
+    cause, _side, evidence = classify(db, site, start, end, keys, zone, nodes)
+    return cause, evidence
+
+
+def classify(db, site: str, start: float, end: float | None, keys: list[str], zone: ZoneInfo,
+             nodes: list[str] | None = None) -> tuple[str, str, list]:
+    """explain, plus which side the cause puts the fault on: ISP, HOME or UNKNOWN."""
     lo, hi = window(start, end)
     evs = db.all("SELECT * FROM events WHERE site=? AND ts BETWEEN ? AND ? ORDER BY ts, id", (site, lo, hi))
     evidence = [(e["ts"], e["module"], e["device"], e["detail"], bool(e["exact"])) for e in evs]
@@ -66,29 +89,33 @@ def explain(db, site: str, start: float, end: float | None, keys: list[str], zon
         if modem:
             cause = (f"Power cut at home: the UPS ran on battery {span}, and the modem restarted at {t(modem)} "
                      "(is the modem on the UPS?)")
+            side = HOME
         elif internet and line:
             cause = (f"Power cut in the area: the UPS ran on battery {span}; the modem stayed on, but the DSL line "
                      f"dropped and re-synced at {t(line)}, so the street cabinet most likely lost power too")
+            side = HOME  # a power cut, not a fault of the line
         else:
-            cause = f"Power cut: the UPS ran on battery {span}"
+            cause, side = f"Power cut: the UPS ran on battery {span}", HOME
     elif modem:
-        cause = f"The modem restarted at {t(modem)} (no power cut at home)"
+        cause, side = f"The modem restarted at {t(modem)} (no power cut at home)", HOME
     elif firewall or host:
         e = min((x for x in (firewall, host) if x), key=lambda x: x["ts"])
-        cause = f"{e['detail']} at {t(e)}: a local cause, your own equipment"
+        cause, side = f"{e['detail']} at {t(e)}: a local cause, your own equipment", HOME
     elif internet and line:
         cause = f"The DSL line dropped and re-synced at {t(line)} with no power cut at home: a line or ISP-side problem"
+        side = ISP
     elif internet and _line_watched(db, site, start, end):
-        cause = "The internet stopped answering while the DSL line stayed up: a problem in the ISP's network"
+        cause, side = "The internet stopped answering while the DSL line stayed up: a problem in the ISP's network", ISP
     elif (parent := _parent_event(db, site, evs, nodes)):
         e, name, n = parent
         cause = (f"{name}: {e['detail'].lower()} at {t(e)}, and {n} device{'s' if n != 1 else ''} behind it "
                  "went with it")
+        side = HOME
     elif (other := first("reboot")):
-        cause = f"{other['detail']} at {t(other)}"
+        cause, side = f"{other['detail']} at {t(other)}", HOME
     else:
-        cause = ""
-    return cause, evidence
+        cause, side = "", UNKNOWN
+    return cause, side, evidence
 
 
 def _line_watched(db, site: str, start: float, end: float | None) -> bool:

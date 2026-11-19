@@ -692,3 +692,8 @@ document.addEventListener("click", function (e) {
     b.setAttribute("aria-expanded", "true");
   }
 });
+
+// The report page's "Print or save as PDF" button.
+document.addEventListener("click", function (e) {
+  if (e.target.closest("[data-print]")) window.print();
+});
