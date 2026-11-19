@@ -119,13 +119,27 @@ def test_proxmox_updates_not_read_is_unknown():
 def test_proxmox_updates_partial_node_read_is_unknown():
     node = {"status": "online", "cpu": 0.1, "mem": 1, "maxmem": 2, "disk": 1, "maxdisk": 2, "uptime": 1000}
     s = Snapshot(nodes=[{"node": "pve1", **node}, {"node": "pve2", **node}],
-                 updates={"pve1": [], "pve2": None})
+                 updates={"pve1": []})  # pve2's apt/update read failed
     res = {r.key: r for r in pve_checks.evaluate({}, defaults(pve_checks.CHECKS), pve_checks.State(now=T0, snap=s))}
     u = res["proxmox.updates"]
     assert u.status == OK and u.unknown and "pve2" in u.detail and "pve1" not in u.detail
     s.updates["pve2"] = []
     res = {r.key: r for r in pve_checks.evaluate({}, defaults(pve_checks.CHECKS), pve_checks.State(now=T0, snap=s))}
     assert res["proxmox.updates"].detail == "up to date" and not res["proxmox.updates"].unknown
+
+
+def test_proxmox_failed_package_list_with_current_kernel_is_unknown_but_refused_is_ok():
+    node = {"node": "pve", "status": "online", "cpu": 0.1, "mem": 1, "maxmem": 2, "disk": 1, "maxdisk": 2,
+            "uptime": 1000}
+    k = {"pve": {"running": "7.0.14-29", "newest": "7.0.14-29"}}
+
+    def updates(s):
+        return {r.key: r for r in pve_checks.evaluate({}, defaults(pve_checks.CHECKS),
+                                                      pve_checks.State(now=T0, snap=s))}["proxmox.updates"]
+    failed = updates(Snapshot(nodes=[node], kernels=k))
+    assert failed.status == OK and failed.unknown and "not read: pve" in failed.detail
+    refused = updates(Snapshot(nodes=[node], kernels=k, updates={"pve": None}))
+    assert refused.status == OK and not refused.unknown and "Sys.Modify" in refused.detail
 
 
 # ---- B2. To do: a source that wasn't read leaves the to-do open, and its waiting clock goes on ---------------------
