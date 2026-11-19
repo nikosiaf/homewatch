@@ -528,12 +528,15 @@ def test_docker_restarts_on_an_unreadable_host_keep_their_issue_open(db):
     for i in range(4, 7):
         assert run(m, [a], {"b:2375": "unreachable"}, T0 + 120 * i).status == WARNING
     assert _open(db, "docker.restarts")
+    for i in range(3):  # still not read after the hour has passed: not a positive OK
+        assert run(m, [a], {"b:2375": "unreachable"}, T0 + 2 * 3600 + 120 * i).unknown
+    assert _open(db, "docker.restarts")
     m = DockerModule()  # the controller restarted: no restart history for host b
     for i in range(7, 10):
-        assert run(m, [a], {"b:2375": "unreachable"}, T0 + 120 * i).unknown
+        assert run(m, [a], {"b:2375": "unreachable"}, T0 + 3 * 3600 + 120 * i).unknown
     assert _open(db, "docker.restarts")
     for i in range(10, 13):  # read again, no new restarts: a positive OK closes it
-        run(m, [a, b], {}, T0 + 120 * i)
+        run(m, [a, b], {}, T0 + 3 * 3600 + 120 * i)
     assert _open(db, "docker.restarts") is None
 
 
@@ -558,12 +561,15 @@ def test_mikrotik_port_errors_on_an_unreadable_switch_keep_their_issue_open(db):
     for i in range(4, 7):
         assert run(m, [dev("sw1")], {"sw2": "timeout"}, NOW + 120 * i).status == WARNING
     assert _open(db, "mikrotik.errors")
+    for i in range(3):  # still not read after the hour has passed: not a positive OK
+        assert run(m, [dev("sw1")], {"sw2": "timeout"}, NOW + 2 * 3600 + 120 * i).unknown
+    assert _open(db, "mikrotik.errors")
     m = MikroTikModule()  # the controller restarted: no error history for sw2
     for i in range(7, 10):
-        assert run(m, [dev("sw1")], {"sw2": "timeout"}, NOW + 120 * i).unknown
+        assert run(m, [dev("sw1")], {"sw2": "timeout"}, NOW + 3 * 3600 + 120 * i).unknown
     assert _open(db, "mikrotik.errors")
     for i in range(10, 13):  # read again, no new errors: a positive OK closes it
-        run(m, [dev("sw1"), bad], {}, NOW + 120 * i)
+        run(m, [dev("sw1"), bad], {}, NOW + 3 * 3600 + 120 * i)
     assert _open(db, "mikrotik.errors") is None
 
 

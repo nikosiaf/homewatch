@@ -314,7 +314,7 @@ class DockerModule(ApiModule):
                 worst, worst_n = label(h, c), n
         add("restarts", level(total, th["restarts"]) if total else OK,
             f"{total} restarts in the last hour, most by {worst}" if total else "no restarts in the last hour", total)
-        out[-1].unknown = not total and bool(lost)
+        out[-1].unknown = not total and bool(lost or unread)
 
         sick = [label(h, c) + (" (host not read now)" if h["host"] not in read else "")
                 for h, c in watched + held if c["health"] == "unhealthy"]

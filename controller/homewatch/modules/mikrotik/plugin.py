@@ -458,7 +458,7 @@ class MikroTikModule(ApiModule):
         add("errors", level(new_errors, th["errors"]) if new_errors else OK,
             f"{new_errors} errors in the last hour, most on {worst_port}" if new_errors else "no errors in the last hour",
             new_errors)
-        out[-1].unknown = not new_errors and bool(lost)
+        out[-1].unknown = not new_errors and bool(lost or len(known) > len(devs))
 
         add("reboots", *reboots(self.events_24h, [(d["uptime"], d["name"]) for d in devs if d["uptime"]],
                                 th["reboots"], now))
