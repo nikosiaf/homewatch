@@ -473,6 +473,100 @@ def test_mikrotik_restart_while_a_switch_is_unreadable_keeps_its_port_issue_open
     assert _open(db, "mikrotik.ports") is None
 
 
+def test_docker_unhealthy_container_on_an_unreadable_host_keeps_its_issue_open(db):
+    eng = Engine(db, "home")
+    s = {"enabled": True, "hosts": "a, b"}
+    ctr = {"name": "nvr", "project": "", "image": "x", "state": "running", "health": "unhealthy", "exit": 0,
+           "policy": "unless-stopped", "restarts": 0, "since": ""}
+    a = {"host": "a:2375", "name": "a", "version": "29", "containers": []}
+    b = {"host": "b:2375", "name": "b", "version": "29", "containers": [ctr]}
+    m = DockerModule()
+    th = defaults(m.checks)
+
+    def run(m, hosts, errors, t):
+        res = m.evaluate(s, th, (s, {"hosts": hosts, "errors": errors}, "", t))
+        eng.apply("docker", res, t)
+        return next(r for r in res if r.key == "docker.unhealthy")
+
+    for i in range(3):
+        run(m, [a, b], {}, T0 + 120 * i)
+    assert _open(db, "docker.unhealthy")
+    for i in range(3, 6):  # b times out; its last known health is kept
+        sick = run(m, [a], {"b:2375": "unreachable"}, T0 + 120 * i)
+        assert sick.status == WARNING and "b/nvr (host not read now)" in sick.detail
+    assert _open(db, "docker.unhealthy")
+    m = DockerModule()  # the controller restarted: nothing kept for host b
+    for i in range(6, 9):
+        assert run(m, [a], {"b:2375": "unreachable"}, T0 + 120 * i).unknown
+    assert _open(db, "docker.unhealthy")
+    b["containers"] = [ctr | {"health": "healthy"}]
+    for i in range(9, 12):
+        run(m, [a, b], {}, T0 + 120 * i)
+    assert _open(db, "docker.unhealthy") is None
+
+
+def test_docker_restarts_on_an_unreadable_host_keep_their_issue_open(db):
+    eng = Engine(db, "home")
+    s = {"enabled": True, "hosts": "a, b"}
+    ctr = {"name": "nvr", "project": "", "image": "x", "state": "running", "health": "", "exit": 0,
+           "policy": "unless-stopped", "restarts": 0, "since": ""}
+    a = {"host": "a:2375", "name": "a", "version": "29", "containers": []}
+    b = {"host": "b:2375", "name": "b", "version": "29", "containers": [ctr]}
+    m = DockerModule()
+    th = defaults(m.checks)
+
+    def run(m, hosts, errors, t):
+        res = m.evaluate(s, th, (s, {"hosts": hosts, "errors": errors}, "", t))
+        eng.apply("docker", res, t)
+        return next(r for r in res if r.key == "docker.restarts")
+
+    run(m, [a, b], {}, T0)
+    b["containers"] = [ctr | {"restarts": 2}]  # two restarts within the hour: over warn=1
+    for i in range(1, 4):
+        assert run(m, [a, b], {}, T0 + 120 * i).status == WARNING
+    assert _open(db, "docker.restarts")
+    for i in range(4, 7):
+        assert run(m, [a], {"b:2375": "unreachable"}, T0 + 120 * i).status == WARNING
+    assert _open(db, "docker.restarts")
+    m = DockerModule()  # the controller restarted: no restart history for host b
+    for i in range(7, 10):
+        assert run(m, [a], {"b:2375": "unreachable"}, T0 + 120 * i).unknown
+    assert _open(db, "docker.restarts")
+    for i in range(10, 13):  # read again, no new restarts: a positive OK closes it
+        run(m, [a, b], {}, T0 + 120 * i)
+    assert _open(db, "docker.restarts") is None
+
+
+def test_mikrotik_port_errors_on_an_unreadable_switch_keep_their_issue_open(db):
+    from .test_mikrotik import NOW, dev
+    eng = Engine(db, "home")
+    s = {"enabled": True, "chosen": []}
+    m = MikroTikModule()
+    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in m.checks}
+
+    def run(m, devices, errors, t):
+        res = m.evaluate(s, th, (s, {"devices": devices, "errors": errors}, "", t))
+        eng.apply("mikrotik", res, t)
+        return next(r for r in res if r.key == "mikrotik.errors")
+
+    run(m, [dev("sw1"), dev("sw2")], {}, NOW)
+    bad = dev("sw2")
+    bad["ports"][0]["errors"] = 50  # 50 new errors within the hour: over warn=10
+    for i in range(1, 4):
+        assert run(m, [dev("sw1"), bad], {}, NOW + 120 * i).status == WARNING
+    assert _open(db, "mikrotik.errors")
+    for i in range(4, 7):
+        assert run(m, [dev("sw1")], {"sw2": "timeout"}, NOW + 120 * i).status == WARNING
+    assert _open(db, "mikrotik.errors")
+    m = MikroTikModule()  # the controller restarted: no error history for sw2
+    for i in range(7, 10):
+        assert run(m, [dev("sw1")], {"sw2": "timeout"}, NOW + 120 * i).unknown
+    assert _open(db, "mikrotik.errors")
+    for i in range(10, 13):  # read again, no new errors: a positive OK closes it
+        run(m, [dev("sw1"), bad], {}, NOW + 120 * i)
+    assert _open(db, "mikrotik.errors") is None
+
+
 # ---- B9. Reminders: each issue on its own timer ----------------------------------------------------------------
 def test_each_issue_is_reminded_on_its_own_timer(db):
     eng = Engine(db, "home")

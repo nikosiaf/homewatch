@@ -300,24 +300,28 @@ class DockerModule(ApiModule):
         out[-1].unknown = not down and bool(lost)
 
         total, worst, worst_n = 0, "", 0
-        for h, c in watched:
+        for h, c in watched + held:
             hist = self.restart_hist.setdefault(self._key(h, c), [])
-            if hist and c["restarts"] < hist[-1][1]:
-                hist.clear()  # recreated container: count from here
-            hist.append((now, c["restarts"]))
+            if h["host"] in read:
+                if hist and c["restarts"] < hist[-1][1]:
+                    hist.clear()  # recreated container: count from here
+                hist.append((now, c["restarts"]))
             while len(hist) > 1 and hist[1][0] <= now - RESTART_WINDOW:
                 hist.pop(0)
-            n = c["restarts"] - hist[0][1]
+            n = hist[-1][1] - hist[0][1] if hist else 0
             total += n
             if n > worst_n:
                 worst, worst_n = label(h, c), n
         add("restarts", level(total, th["restarts"]) if total else OK,
             f"{total} restarts in the last hour, most by {worst}" if total else "no restarts in the last hour", total)
+        out[-1].unknown = not total and bool(lost)
 
-        sick = [label(h, c) for h, c in watched if c["health"] == "unhealthy"]
-        checked = sum(1 for _, c in watched if c["health"])
+        sick = [label(h, c) + (" (host not read now)" if h["host"] not in read else "")
+                for h, c in watched + held if c["health"] == "unhealthy"]
+        checked = sum(1 for _, c in watched + held if c["health"])
         add("unhealthy", WARNING if sick else OK, "unhealthy: " + ", ".join(sick) if sick
             else f"{checked} health checks passing" if checked else "no watched container has a health check")
+        out[-1].unknown = not sick and bool(lost)
 
         read_hosts = {h["host"] for h in snap["hosts"]}
         now_keys = {self._key(h, c): label(h, c) for h, c in watched}

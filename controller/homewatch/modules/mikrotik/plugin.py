@@ -442,21 +442,23 @@ class MikroTikModule(ApiModule):
                                   if self._key(d, p) in chosen and not p["running"]]
 
         new_errors, worst_port, worst_n = 0, "", 0
-        for d in devs:
+        for d in known:
             for p in d["ports"]:
                 hist = self.err_hist.setdefault(self._key(d, p), [])
-                if hist and p["errors"] < hist[-1][1]:
-                    hist.clear()  # the counter restarted (reboot): count from here
-                hist.append((now, p["errors"]))
+                if d["host"] in read:
+                    if hist and p["errors"] < hist[-1][1]:
+                        hist.clear()  # the counter restarted (reboot): count from here
+                    hist.append((now, p["errors"]))
                 while len(hist) > 1 and hist[1][0] <= now - ERROR_WINDOW:
                     hist.pop(0)  # keep one sample at or before the start of the window as the baseline
-                n = p["errors"] - hist[0][1]
+                n = hist[-1][1] - hist[0][1] if hist else 0
                 new_errors += n
                 if n > worst_n:
                     worst_port, worst_n = f"{d['name']} {p['name']}", n
         add("errors", level(new_errors, th["errors"]) if new_errors else OK,
             f"{new_errors} errors in the last hour, most on {worst_port}" if new_errors else "no errors in the last hour",
             new_errors)
+        out[-1].unknown = not new_errors and bool(lost)
 
         add("reboots", *reboots(self.events_24h, [(d["uptime"], d["name"]) for d in devs if d["uptime"]],
                                 th["reboots"], now))
