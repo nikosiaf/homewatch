@@ -293,8 +293,11 @@ class DockerModule(ApiModule):
         down = [f"{label(h, c)} ({c['state']}" + (f", exit {c['exit']}" if c["state"] == "exited" else "")
                 + (", host not read now" if h["host"] not in read else "") + ")"
                 for h, c in watched + held if c["state"] not in ("running", "restarting")]
+        lost = [k for k in snap["errors"] if not k.endswith(" (node_exporter)") and k not in self.kept]
         add("stopped", ERROR if down else OK, "not running: " + ", ".join(down) if down
-            else f"{len(watched) + len(held)} watched containers running", len(down))
+            else f"{len(watched) + len(held)} watched containers running"
+            + (f"; not read: {', '.join(lost)}" if lost else ""), len(down))
+        out[-1].unknown = not down and bool(lost)
 
         total, worst, worst_n = 0, "", 0
         for h, c in watched:

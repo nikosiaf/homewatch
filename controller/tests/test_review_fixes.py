@@ -419,6 +419,60 @@ def test_unreadable_switch_keeps_its_down_port():
     assert res["ports"].extra["nodes"] == ["port:sw2/ether2"]
 
 
+def _open(db, key):
+    return db.one("SELECT * FROM issues WHERE site='home' AND check_key=? AND resolved IS NULL", (key,))
+
+
+def test_docker_restart_while_a_host_is_unreadable_keeps_its_issue_open(db):
+    eng = Engine(db, "home")
+    s = {"enabled": True, "hosts": "a, b"}
+    ctr = {"name": "nvr", "project": "", "image": "x", "state": "exited", "health": "", "exit": 1,
+           "policy": "unless-stopped", "restarts": 0, "since": ""}
+    a = {"host": "a:2375", "name": "a", "version": "29", "containers": []}
+    b = {"host": "b:2375", "name": "b", "version": "29", "containers": [ctr]}
+    m = DockerModule()
+    th = defaults(m.checks)
+    for i in range(3):
+        eng.apply("docker", m.evaluate(s, th, (s, {"hosts": [a, b], "errors": {}}, "", T0 + i)), T0 + i)
+    assert _open(db, "docker.stopped")
+    m = DockerModule()  # the controller restarted: nothing kept for host b, which can't be read
+    for i in range(3, 8):
+        res = m.evaluate(s, th, (s, {"hosts": [a], "errors": {"b:2375": "unreachable"}}, "", T0 + 120 * i))
+        stopped = next(r for r in res if r.key == "docker.stopped")
+        assert stopped.unknown and "not read: b:2375" in stopped.detail
+        eng.apply("docker", res, T0 + 120 * i)
+    assert _open(db, "docker.stopped")
+    b["containers"] = [ctr | {"state": "running"}]  # read again, running: a positive OK closes it
+    for i in range(8, 11):
+        eng.apply("docker", m.evaluate(s, th, (s, {"hosts": [a, b], "errors": {}}, "", T0 + 120 * i)), T0 + 120 * i)
+    assert _open(db, "docker.stopped") is None
+
+
+def test_mikrotik_restart_while_a_switch_is_unreadable_keeps_its_port_issue_open(db):
+    from .test_mikrotik import NOW, dev
+    eng = Engine(db, "home")
+    s = {"enabled": True, "chosen": ["sw2/ether2"]}
+    m = MikroTikModule()
+    th = {d.id: Thresholds(d.warn, d.error, d.default_on) for d in m.checks}
+    for i in range(3):
+        eng.apply("mikrotik", m.evaluate(s, th, (s, {"devices": [dev("sw1"), dev("sw2")], "errors": {}}, "", NOW)),
+                  NOW + i)
+    assert _open(db, "mikrotik.ports")
+    m = MikroTikModule()  # the controller restarted: nothing kept for sw2, which can't be read
+    for i in range(3, 8):
+        res = m.evaluate(s, th, (s, {"devices": [dev("sw1")], "errors": {"sw2": "timeout"}}, "", NOW))
+        ports = next(r for r in res if r.key == "mikrotik.ports")
+        assert ports.unknown and "not read: sw2" in ports.detail
+        eng.apply("mikrotik", res, NOW + 120 * i)
+    assert _open(db, "mikrotik.ports")
+    up = dev("sw2")
+    up["ports"][1]["running"] = True
+    for i in range(8, 11):
+        eng.apply("mikrotik", m.evaluate(s, th, (s, {"devices": [dev("sw1"), up], "errors": {}}, "", NOW)),
+                  NOW + 120 * i)
+    assert _open(db, "mikrotik.ports") is None
+
+
 # ---- B9. Reminders: each issue on its own timer ----------------------------------------------------------------
 def test_each_issue_is_reminded_on_its_own_timer(db):
     eng = Engine(db, "home")
@@ -497,6 +551,15 @@ def test_mqtt_tls_pins_the_first_certificate_and_refuses_another(db, tmp_path):
     assert mqtt.trust_certificate(db, f"127.0.0.1:{impostor.port}", fingerprint(CERT_B), "admin")  # not what was shown
     assert mqtt.trust_certificate(db, f"127.0.0.1:{impostor.port}", fingerprint(pin["new"]), "admin") == ""
     assert mqtt.pins(db)[f"127.0.0.1:{impostor.port}"] == {"cert": pin["new"]}
+
+
+def test_mqtt_transport_is_not_good_while_a_changed_certificate_waits(db):
+    db.set(mqtt.SETTINGS, mqtt.DEFAULTS | {"enabled": True, "host": "broker", "port": 8883, "tls": True})
+    db.set(mqtt.PINS, {"broker:8883": {"cert": CERT_A}})
+    assert mqtt.transport(db) == ("TLS, certificate pinned", True)
+    db.set(mqtt.PINS, {"broker:8883": {"cert": CERT_A, "new": CERT_B}})
+    text, good = mqtt.transport(db)
+    assert not good and "changed" in text
 
 
 def test_mqtt_tls_with_verify_uses_the_system_cas(db, tmp_path):

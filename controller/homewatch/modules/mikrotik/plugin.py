@@ -434,7 +434,10 @@ class MikroTikModule(ApiModule):
         down = [f"{d['name']} {p['name']}" + (f" ({p['comment']})" if p["comment"] else "")
                 + (" (device not read now)" if d["host"] not in read else "")
                 for d in known for p in d["ports"] if self._key(d, p) in chosen and not p["running"]]
-        add("ports", ERROR if down else OK, f"Down: {', '.join(down)}" if down else f"{len(chosen)} chosen ports up")
+        lost = [h for h in snap["errors"] if h not in self.kept]
+        add("ports", ERROR if down else OK, f"Down: {', '.join(down)}" if down else f"{len(chosen)} chosen ports up"
+            + (f"; not read: {', '.join(lost)}" if lost else ""))
+        out[-1].unknown = not down and bool(lost)
         out[-1].extra["nodes"] = [f"port:{d['name']}/{p['name']}" for d in known for p in d["ports"]
                                   if self._key(d, p) in chosen and not p["running"]]
 

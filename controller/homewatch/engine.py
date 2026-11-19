@@ -120,6 +120,8 @@ class Engine:
                            (self.site, res.key, OK, now, res.detail, res.value))
                     st = db.one("SELECT * FROM check_state WHERE site=? AND check_key=?", (self.site, res.key))
                 status = st["status"]
+                if res.unknown and level == OK and status != OK:
+                    continue  # not read, so not a positive OK: the open issue stays as it is
                 if level == status:
                     db.run("UPDATE check_state SET pending=NULL,pending_count=0,pending_since=NULL,detail=?,value=? "
                            "WHERE site=? AND check_key=?", (res.detail, res.value, self.site, res.key))

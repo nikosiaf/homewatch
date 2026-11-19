@@ -46,7 +46,10 @@ def transport(db) -> tuple[str, bool] | None:
         return "Plain MQTT: the broker password crosses the network unencrypted", False
     if s["verify"]:
         return "TLS, certificate checked", True
-    if host_port(s) in pins(db):
+    pin = pins(db).get(host_port(s))
+    if pin and pin.get("new"):
+        return "TLS, certificate changed: not connecting until it is trusted", False
+    if pin:
         return "TLS, certificate pinned", True
     return "TLS, certificate not pinned yet", False
 
