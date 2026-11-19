@@ -287,9 +287,9 @@ def period(zone, frm: str, to: str, now: float) -> tuple[float, float]:
     def at(v: str, name: str, day_after: bool) -> float:
         try:
             d = datetime.strptime((v or "").strip(), "%Y-%m-%d").replace(tzinfo=zone)
-        except ValueError:
+            return (d + timedelta(days=1) if day_after else d).timestamp()
+        except (ValueError, OverflowError):
             raise ValueError(f"{name}: a date as YYYY-MM-DD") from None
-        return (d + timedelta(days=1) if day_after else d).timestamp()
 
     start, end = at(frm, "From", False), min(at(to, "To", True), now)
     if start >= now:

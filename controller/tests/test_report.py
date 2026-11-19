@@ -70,6 +70,7 @@ def test_period_takes_local_dates_both_included():
                                         ("2025-01-01", "2026-10-01", "At most 400 days"),
                                         ("1 Oct", "2026-10-02", "From: a date"),
                                         ("nan", "2026-10-02", "From: a date"),
+                                        ("2026-10-01", "9999-12-31", "To: a date"),
                                         (str(D0), str(D0 + H), "From: a date")])
 def test_period_refuses_what_is_not_one(frm, to, msg):
     with pytest.raises(ValueError, match=msg):
