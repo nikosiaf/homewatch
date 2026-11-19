@@ -197,6 +197,16 @@ async def test_updates_read_failure_leaves_the_node_out():
     await c.close()
 
 
+@respx.mock
+async def test_kernel_read_failure_leaves_the_node_out():
+    mock_api()
+    respx.get(BASE + "/nodes/pve/apt/versions").mock(return_value=httpx.Response(500))
+    c = Client("https://pve.test:8006", "homewatch@pve!monitor", "secret")
+    s = await c.snapshot(now=NOW)
+    assert s.kernels == {} and "pve" in s.updates and s.backups
+    await c.close()
+
+
 def test_parse_kernels():
     # numeric, not text order (-9 < -22 < -29); removed packages (ConfigFiles) don't count
     assert parse_kernels(VERSIONS) == {"running": "7.0.14-22", "newest": "7.0.14-29"}

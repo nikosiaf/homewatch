@@ -29,7 +29,8 @@ class Snapshot:
     # node -> pending package updates [{"package", "old", "new"}]; None when the token can't read them
     # (GET /nodes/{node}/apt/update needs Sys.Modify, which PVEAuditor lacks); a node is left out when the read failed
     updates: dict[str, list[dict] | None] = field(default_factory=dict)
-    # node -> {"running": "7.0.14-22", "newest": "7.0.14-29"} from apt/versions (PVEAuditor is enough); None unread
+    # node -> {"running": "7.0.14-22", "newest": "7.0.14-29"} from apt/versions (PVEAuditor is enough); None when
+    # refused or no running kernel is listed; a node is left out when the read failed
     kernels: dict[str, dict | None] = field(default_factory=dict)
 
 
@@ -121,7 +122,7 @@ class Client:
                     s.kernels[n["node"]] = parse_kernels(await self.get(f"/nodes/{n['node']}/apt/versions",
                                                                         optional=True) or [])
                 except ApiError:
-                    s.kernels[n["node"]] = None
+                    pass
             await self._backups(n["node"], s, now)
         return s
 

@@ -208,9 +208,10 @@ def _updates(s: Snapshot, nodes: list[str], add) -> None:
             parts.append(f"{node}: " + ", ".join(what))
     if parts:
         add("updates", WARNING, "; ".join(parts), total + reboots)
-    elif unread := [n for n in sorted(nodes) if n not in s.updates]:
-        add("updates", OK, f"{'up to date' if read else 'kernel current'}; package list not read: {', '.join(unread)}",
-            0).unknown = True
+    elif unread := [f"{what} not read: {', '.join(ns)}" for what, got in (("package list", s.updates),
+                                                                         ("kernel", s.kernels))
+                    if (ns := [n for n in sorted(nodes) if n not in got])]:
+        add("updates", OK, f"{'up to date' if read else 'kernel current'}; " + "; ".join(unread), 0).unknown = True
     elif not read:
         add("updates", OK, "kernel current; package list not readable (needs Sys.Modify on /nodes)", 0)
     else:
