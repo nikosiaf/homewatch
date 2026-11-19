@@ -86,8 +86,8 @@ ENTITY_ID = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 LEGACY = ("record", "watch_all", "skipped", "chosen", "rules")  # settings before the Entities table (0.35)
 KNOWN_KEY = "ha.known_entities"  # entity ids at the last save of the Entities box: newer ones get a "new" badge
 
-# states that mean on (1) or off (0) when an entity's values are stored
-ON = {"on", "open", "home", "true", "heating", "cooling", "heat", "cool", "heat_cool", "auto", "dry", "fan_only", "playing", "armed_home", "armed_away", "armed_night",
+# states that mean on (1) or off (0) when an entity's values are stored; "dry" is on only for climate (its drying mode)
+ON = {"on", "open", "home", "true", "heating", "cooling", "heat", "cool", "heat_cool", "auto", "fan_only", "playing", "armed_home", "armed_away", "armed_night",
       "armed_vacation", "armed_custom_bypass", "triggered", "unlocked", "detected", "wet", "problem"}
 OFF = {"off", "closed", "not_home", "false", "idle", "paused", "standby", "disarmed", "locked", "clear", "dry", "ok"}
 CLIMATE_ATTRS = {"current_temperature": "current_temperature", "temperature": "target_temperature",
@@ -197,11 +197,11 @@ def entity_values(e: dict) -> dict[str, float]:
     """What an entity's state means as numbers: its value, or 1/0 for on/off-like states, plus a few attributes."""
     st, a, out = str(e.get("state", "")), e.get("attributes") or {}, {}
     v = num(st)
+    dom = _domain(e["entity_id"])
     if v is None and st.lower() in ON | OFF:
-        v = float(st.lower() in ON)
+        v = float(st.lower() in ON or (dom == "climate" and st.lower() == "dry"))
     if v is not None and st not in ("nan", "inf", "-inf"):
         out["value"] = v
-    dom = _domain(e["entity_id"])
     if dom == "climate":
         out |= {f: num(a.get(k)) for k, f in CLIMATE_ATTRS.items() if num(a.get(k)) is not None}
         if a.get("hvac_action"):

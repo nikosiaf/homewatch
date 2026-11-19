@@ -14,10 +14,13 @@ Alerting works like this:
   own devices. History lists incidents with their timeline.
 - **Events, not warnings:** a single DSL resync or device reboot is an event and a Grafana marker; a
   WARNING comes when it repeats (3 resyncs or 2 reboots in 24 h by default).
-- **To do instead of problems:** updates and firmware (Home Assistant, PBS, DSM, UniFi, RouterOS and
-  RouterBOOT, OPNsense) are listed under To do on the Status page and in the weekly report. They become a
-  WARNING only after waiting 14 days (7 for OPNsense and RouterOS); the limit is editable per check.
-- **Reminders:** open problems are repeated every 12 h (not for acknowledged ones).
+- **To do instead of problems:** updates and firmware (Home Assistant, Proxmox VE, PBS, DSM, UniFi,
+  RouterOS and RouterBOOT, OPNsense, Docker hosts) are listed under To do on the Status page and in the
+  weekly report. They become a WARNING only after waiting 14 days (7 for OPNsense and RouterOS); the limit
+  is editable per check. A to-do is done when its source reports it up to date; while the source can't be
+  read, it stays open and keeps its waiting time.
+- **Reminders:** each open problem is repeated 12 h after it started, then every 12 h (not for
+  acknowledged ones).
 - **Snooze and maintenance windows:** they hold notifications without losing the history.
 - **Quiet hours** per channel: warnings wait until they end, errors are always sent.
 - **Offline queue:** messages that can't be sent while the line is down go out when it's back, with the outage times.

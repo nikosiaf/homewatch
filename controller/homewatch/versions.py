@@ -271,7 +271,7 @@ def clean_import(snap: dict) -> str:
     """Hold an imported snapshot to the rules of the module and channel forms and put the normalized values
     in it, so that what is checked is what gets stored. Returns what is wrong."""
     from .modules.registry import MODULES
-    from .notify import imported as channel_imported
+    from .notify import imported as channel_imported, quiet_error
 
     for m in MODULES.values():
         settings = snap["settings"].get(f"module.{m.id}")
@@ -306,6 +306,8 @@ def clean_import(snap: dict) -> str:
             levels = None
         if not isinstance(levels, list) or not all(lv in (1, 2) for lv in levels):
             return f"channel {c['name']}: levels are not valid"
+        if err := quiet_error(c["quiet_start"], c["quiet_end"]):
+            return f"channel {c['name']}: {err}"
         config, err = channel_imported(str(c["kind"]), config)
         if err:
             return f"channel {c['name']}: {err}"

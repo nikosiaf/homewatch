@@ -149,6 +149,7 @@ def evaluate(settings: dict, thresholds: dict[str, Thresholds], r: Readings) -> 
         d = CHECK_BY_ID[check_id]
         out[check_id] = CheckResult(_key(check_id), d.name, status, detail, value, d.unit,
                                     _key(suppressed_by) if suppressed_by else None, since=since)
+        return out[check_id]
 
     # 1. freshness of the Telegraf probes
     root = None
@@ -249,6 +250,7 @@ def add_speed(s: dict, ths: dict[str, Thresholds], speeds: list[Speed], add, now
     good = [x for x in speeds if x.ok][:2]
     if not good:
         add("speed", OK, "No speed test yet")
+        add("speed_age", OK, "no successful speed test yet").unknown = True
         return
     last = good[0]
     age = (now - last.ts) / 3600

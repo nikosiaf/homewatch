@@ -69,6 +69,7 @@ def evaluate(settings: dict, th: dict[str, Thresholds], st: State) -> list[Check
         d = CHECK_BY_ID[cid]
         out[cid] = CheckResult(f"{MODULE}.{cid}", d.name, status, detail, value, d.unit,
                                f"{MODULE}.{suppressed_by}" if suppressed_by else None)
+        return out[cid]
 
     def done():
         return [out[c.id] for c in CHECKS if c.id in out and th[c.id].enabled]
@@ -187,8 +188,9 @@ def _updates(s: Snapshot, nodes: list[str], add) -> None:
     read = {n: s.updates[n] for n in nodes if s.updates.get(n) is not None}
     kernels = {n: s.kernels[n] for n in nodes if s.kernels.get(n)}
     if not read and not kernels:
+        # nothing read: not "up to date", so an open to-do stays open
         add("updates", OK, "not readable (the token needs Sys.Modify on /nodes; see the module's setup)"
-            if any(n in s.updates for n in nodes) else "No reading yet")
+            if any(n in s.updates for n in nodes) else "No reading yet").unknown = True
         return
     parts, total, reboots = [], 0, 0
     for node in sorted(set(read) | set(kernels)):

@@ -15,6 +15,11 @@
 
 Make a broker user for homeWatch. States are retained; when homeWatch stops, the entities show unavailable.
 
+With **TLS** ticked, homeWatch checks the broker before sending its user and password: with "Check the
+broker's certificate" ticked, against the system's certificate authorities and the broker's name; unticked,
+it pins the certificate it sees first and connects only to that one (its fingerprint is shown under the
+settings; a changed one is refused until you trust it there).
+
 ## API
 
 A read-only JSON API for scripts and other tools. Make a token under **System → API tokens** (it is

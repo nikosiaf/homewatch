@@ -325,10 +325,11 @@ class OPNsenseModule(ApiModule):
         certs = [c for c in snap.get("certs") or [] if str(c.get("in_use") or "") not in ("", "0", "False")]
         if snap.get("certs") is None:
             add("certs", OK, "not readable (add the privilege System: Trust: Certificates)")
-        elif not certs:
-            add("certs", OK, "No certificate in use")
+        elif not (soonest := min((((float(c["valid_to"]) - now) / 86400, c) for c in certs if c.get("valid_to")),
+                                 key=lambda x: x[0], default=None)):
+            add("certs", OK, "No certificate in use" if not certs else "No expiry date on the certificates in use")
         else:
-            days, c = min(((float(c["valid_to"]) - now) / 86400, c) for c in certs if c.get("valid_to"))
+            days, c = soonest
             name = c.get("descr") or c.get("commonname")
             if days <= 0:
                 add("certs", ERROR, f"{name} expired {-days:.0f} days ago", days)

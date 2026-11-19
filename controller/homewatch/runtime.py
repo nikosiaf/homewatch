@@ -37,9 +37,10 @@ CHECK_NOW_CONFIRM = 3  # s: a change that "Check now" saw is read again this muc
 EXPLAIN_AFTER = 30  # s: after an incident ends, the run that looks for its cause (on fresh readings) comes this soon
 QUICK_AFTER = 30  # s: when a check starts to recover, the run that confirms it (on fresh readings) comes this soon
 QUICK_GAP = 60  # s: at most one such quick run this often
-HISTORY_TABLES = ("issues", "incidents", "events", "device_state", "speedtests", "check_state", "outbox", "snoozes", "coverage")
+HISTORY_TABLES = ("issues", "incidents", "events", "device_state", "speedtests", "check_state", "outbox", "snoozes", "coverage",
+                  "todos", "flaps", "entity_seen", "action_tokens")
 CONFIG_TABLES = ("settings", "checks", "secrets", "maintenance", "channels", "sessions", "users", "audit",
-                 "config_versions")
+                 "config_versions", "api_tokens", "device_configs", "topology_edges", "known_devices")
 RELEASES = "https://api.github.com/repos/nikosiaf/homewatch/releases/latest"
 
 

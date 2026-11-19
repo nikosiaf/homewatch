@@ -135,6 +135,7 @@ class DockerModule(ApiModule):
         super().__init__()
         self.restart_hist: dict[str, list[tuple[float, int]]] = {}  # per container: (time, restart count), last hour
         self.seen: dict[str, str] = {}  # watched containers seen since start: key -> label
+        self.kept: dict[str, dict] = {}  # host -> its last good read, for while it can't be read
 
     def validate(self, form, old):
         out, err = super().validate(form, old)
@@ -278,15 +279,22 @@ class DockerModule(ApiModule):
             add("each", OK, f"all {len(snap['hosts'])} read")
 
         watched = self._watched(s, snap)
-        multi = len(snap["hosts"]) > 1
+        # a host that can't be read now keeps its containers' last known state: not "running" just because unseen
+        read = {h["host"] for h in snap["hosts"]}
+        self.kept = {h["host"]: h for h in snap["hosts"]} | {k: h for k, h in self.kept.items()
+                                                            if k in snap["errors"] and k not in read}
+        unread = [h for k, h in self.kept.items() if k not in read]
+        held = self._watched(s, {"hosts": unread})
+        multi = len(snap["hosts"]) + len(unread) > 1
 
         def label(h, c):
             return f"{h['name']}/{c['name']}" if multi else c["name"]
 
-        down = [f"{label(h, c)} ({c['state']}" + (f", exit {c['exit']}" if c["state"] == "exited" else "") + ")"
-                for h, c in watched if c["state"] not in ("running", "restarting")]
-        add("stopped", ERROR if down else OK,
-            "not running: " + ", ".join(down) if down else f"{len(watched)} watched containers running", len(down))
+        down = [f"{label(h, c)} ({c['state']}" + (f", exit {c['exit']}" if c["state"] == "exited" else "")
+                + (", host not read now" if h["host"] not in read else "") + ")"
+                for h, c in watched + held if c["state"] not in ("running", "restarting")]
+        add("stopped", ERROR if down else OK, "not running: " + ", ".join(down) if down
+            else f"{len(watched) + len(held)} watched containers running", len(down))
 
         total, worst, worst_n = 0, "", 0
         for h, c in watched:
@@ -326,10 +334,14 @@ class DockerModule(ApiModule):
             add("updates", OK, "not checked (no node_exporter hosts set)")
         elif todo:
             add("updates", WARNING, "; ".join(todo), sum(e["updates"] for e in exps))
-        elif exps:
-            add("updates", OK, f"{len(exps)} host{'s' if len(exps) != 1 else ''} up to date")
-        else:
+        elif not exps:
             add("updates", OK, "not readable")
+            out[-1].unknown = True  # not "up to date": an open to-do stays open
+        elif missed := [k.removesuffix(" (node_exporter)") for k in snap["errors"] if k.endswith(" (node_exporter)")]:
+            add("updates", OK, f"{len(exps)} up to date; not readable: " + ", ".join(missed))
+            out[-1].unknown = True
+        else:
+            add("updates", OK, f"{len(exps)} host{'s' if len(exps) != 1 else ''} up to date")
         return out
 
     def save(self, rt, form, user):

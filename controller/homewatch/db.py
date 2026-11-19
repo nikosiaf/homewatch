@@ -167,6 +167,10 @@ MIGRATIONS: list[str] = [
         name TEXT NOT NULL DEFAULT '', ip TEXT NOT NULL DEFAULT '', place TEXT NOT NULL DEFAULT '', acked REAL,
         PRIMARY KEY (site, node));
     """,
+    # 15: each open issue's own reminder timer (one shared timer made a later issue wait up to twice as long)
+    """
+    ALTER TABLE issues ADD COLUMN reminded REAL;
+    """,
 ]
 
 

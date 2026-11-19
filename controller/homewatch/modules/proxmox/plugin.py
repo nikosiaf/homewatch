@@ -70,6 +70,9 @@ class ProxmoxModule(PinnedTLS, Module):
         self.snap_ts = 0.0
         self.error = ""
         self.disks_ts = 0.0
+        # the slow part of the last disk read (disks, updates, kernels) and the address it came from: kept apart from
+        # snap, so a failed read, a settings save or a restore doesn't drop it until the next disk read
+        self.slow: tuple | None = None
         self.stale = False  # read again at the next run, whatever the time
 
     def every_s(self, s) -> float:
@@ -100,17 +103,22 @@ class ProxmoxModule(PinnedTLS, Module):
 
     async def read(self, rt, s, now: float) -> None:
         try:
-            with_disks = now - self.disks_ts >= DISK_EVERY
+            with_disks = self._slow(s) is None or now - self.disks_ts >= DISK_EVERY
             snap = await (await self._client(rt, s)).snapshot(with_disks=with_disks, now=now)
             if with_disks:
                 self.disks_ts = now
-            elif self.snap:
-                snap.disks, snap.updates, snap.kernels = self.snap.disks, self.snap.updates, self.snap.kernels
+                self.slow = (s["url"], snap.disks, snap.updates, snap.kernels)
+            else:
+                snap.disks, snap.updates, snap.kernels = self._slow(s)
             self.snap, self.snap_ts, self.error = snap, now, ""
             await self._guest_macs(rt, s, now)
         except ApiError as e:
             self.snap, self.error = None, str(e)
             await self.note_changes(rt, s, str(e))
+
+    def _slow(self, s) -> tuple | None:
+        """The kept disks, updates and kernels, if they were read from this address."""
+        return self.slow[1:] if self.slow and self.slow[0] == s.get("url") else None
 
     async def _guest_macs(self, rt, s, now: float) -> None:
         """Each guest's network MACs from its config (net0: virtio=02:8F:…,bridge=vmbr0), for the map: the host sits
@@ -248,6 +256,9 @@ class ProxmoxModule(PinnedTLS, Module):
             if err:
                 await self.note_changes(rt, {"url": url}, err)
                 return f"Nothing saved: {err}"
+            slow = self._slow({"url": url})
+            if slow:  # the test reads no disks: keep the last ones, not none
+                snap.disks, snap.updates, snap.kernels = slow
             self.snap, self.snap_ts, self.error = snap, time.time(), ""
         return ""
 
@@ -277,7 +288,7 @@ class ProxmoxModule(PinnedTLS, Module):
             rt.db.run("DELETE FROM settings WHERE key=?", (KEY,))
             self.forget_pins(rt)
             rt.secrets.delete(SECRET)
-            self.client = self.snap = None
+            self.client = self.snap = self.slow = None
             audit(rt.db, user.username, "proxmox", "host removed")
             rt.wake.set()
             return ""

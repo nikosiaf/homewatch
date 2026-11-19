@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -171,10 +172,22 @@ def _cause(e: Event, zone: ZoneInfo) -> list[str]:
     return out
 
 
+QUIET_RE = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
+
+
+def quiet_error(qs, qe) -> str:
+    """Why quiet hours (start, end; both empty = none) can't be used, or ''."""
+    if bool(qs) != bool(qe):
+        return "Quiet hours need both a start and an end"
+    if qs and not all(isinstance(v, str) and QUIET_RE.fullmatch(v) for v in (qs, qe)):
+        return "Quiet hours are times like 22:00 and 07:00"
+    return ""
+
+
 def in_quiet(channel, now: float, zone: ZoneInfo) -> float | None:
     """When the channel is in quiet hours, return the timestamp they end."""
     qs, qe = channel["quiet_start"], channel["quiet_end"]
-    if not qs or not qe:
+    if not qs or not qe or quiet_error(qs, qe):  # none, or not usable (stored before they were checked): send now
         return None
     local = datetime.fromtimestamp(now, zone)
     sh, sm = map(int, qs.split(":"))
@@ -219,36 +232,40 @@ class Notifier:
         if not events:
             return 0
         now = now or time.time()
-        zone = tz(self.db)
-        home = self.db.get("home.name") or "Home"
-        link = self.db.get("home.url") or ""
-        from .. import actions, runbooks
+        from .. import runbooks
 
-        site = self.site
-        books = runbooks.all_for(self.db, site)
-        buttons: dict[str, list] = {}  # one set of one-time links per problem, shared by the channels
+        ctx = (tz(self.db), self.db.get("home.name") or "Home", self.db.get("home.url") or "",
+               runbooks.all_for(self.db, self.site), {})  # {}: one set of one-time links per problem, for every channel
         queued = 0
         for ch in self.channels():
-            levels = set(json.loads(ch["levels"]))
-            mine = [e for e in events if e.route_level in levels]
-            if not mine:
-                continue
-            msg = render(mine, home, open_counts, link, zone, books)
-            first = next((e for e in sorted(mine, key=lambda e: -e.level) if e.kind in ("open", "worse", "remind")
-                          and "." in e.key and not e.key.startswith(("incident.", "homewatch.", "network."))), None)
-            if first and getattr(KINDS.get(ch["kind"]), "ACTIONS", False):
-                if first.key not in buttons:
-                    buttons[first.key] = actions.links(self.db, site, link, first.key, now)
-                msg.actions = buttons[first.key] + ([{"label": "Open homeWatch", "url": link, "view": True}]
-                                                    if buttons[first.key] else [])
-            next_try = now
-            if msg.level < ERROR:
-                quiet_end = in_quiet(ch, now, zone)
-                if quiet_end:
-                    next_try = quiet_end
-            self.queue(ch["id"], msg, now, next_try)
-            queued += 1
+            try:
+                queued += self._dispatch_one(ch, events, open_counts, now, *ctx)
+            except Exception:  # noqa: BLE001 - one broken channel must not cost the others their messages
+                log.exception("channel %s: message not queued", ch["name"])
         return queued
+
+    def _dispatch_one(self, ch, events, open_counts, now, zone, home, link, books, buttons) -> int:
+        from .. import actions
+
+        levels = set(json.loads(ch["levels"]))
+        mine = [e for e in events if e.route_level in levels]
+        if not mine:
+            return 0
+        msg = render(mine, home, open_counts, link, zone, books)
+        first = next((e for e in sorted(mine, key=lambda e: -e.level) if e.kind in ("open", "worse", "remind")
+                      and "." in e.key and not e.key.startswith(("incident.", "homewatch.", "network."))), None)
+        if first and getattr(KINDS.get(ch["kind"]), "ACTIONS", False):
+            if first.key not in buttons:
+                buttons[first.key] = actions.links(self.db, self.site, link, first.key, now)
+            msg.actions = buttons[first.key] + ([{"label": "Open homeWatch", "url": link, "view": True}]
+                                                if buttons[first.key] else [])
+        next_try = now
+        if msg.level < ERROR:
+            quiet_end = in_quiet(ch, now, zone)
+            if quiet_end:
+                next_try = quiet_end
+        self.queue(ch["id"], msg, now, next_try)
+        return 1
 
     def queue(self, channel_id: int, msg: Message, now: float, next_try: float | None = None) -> None:
         self.db.run("INSERT INTO outbox(channel_id,created,level,title,body,next_try,actions) VALUES(?,?,?,?,?,?,?)",

@@ -155,6 +155,7 @@ class MikroTikModule(ApiModule):
     def __init__(self):
         super().__init__()
         self.err_hist: dict[str, list[tuple[float, int]]] = {}  # per port: (time, error counter), last hour
+        self.kept: dict[str, dict] = {}  # device host -> its last good read, for while it can't be read
         self.latest: dict[str, tuple[str, float]] = {}  # update channel -> (newest RouterOS, when it was read)
         self.latest_tried: dict[str, float] = {}  # update channel -> last lookup attempt
         self.latest_error: dict[str, str] = {}  # update channel -> why the last lookup failed
@@ -425,10 +426,16 @@ class MikroTikModule(ApiModule):
         worst("temp", "temp", "°C")
 
         chosen = set(s.get("chosen", []))
+        # a device that can't be read now keeps its ports' last known state: not "up" just because unseen
+        read = {d["host"] for d in devs}
+        self.kept = {d["host"]: d for d in devs} | {h: d for h, d in self.kept.items()
+                                                   if h in snap["errors"] and h not in read}
+        known = devs + [d for h, d in self.kept.items() if h not in read]
         down = [f"{d['name']} {p['name']}" + (f" ({p['comment']})" if p["comment"] else "")
-                for d in devs for p in d["ports"] if self._key(d, p) in chosen and not p["running"]]
+                + (" (device not read now)" if d["host"] not in read else "")
+                for d in known for p in d["ports"] if self._key(d, p) in chosen and not p["running"]]
         add("ports", ERROR if down else OK, f"Down: {', '.join(down)}" if down else f"{len(chosen)} chosen ports up")
-        out[-1].extra["nodes"] = [f"port:{d['name']}/{p['name']}" for d in devs for p in d["ports"]
+        out[-1].extra["nodes"] = [f"port:{d['name']}/{p['name']}" for d in known for p in d["ports"]
                                   if self._key(d, p) in chosen and not p["running"]]
 
         new_errors, worst_port, worst_n = 0, "", 0
@@ -456,6 +463,7 @@ class MikroTikModule(ApiModule):
         add("firmware", WARNING if old else OK,
             "RouterBOOT older than RouterOS: " + ", ".join(old) + " - System → RouterBOARD → Upgrade, then reboot"
             if old else "RouterBOOT matches RouterOS")
+        out[-1].unknown = not old and bool(snap["errors"])  # a device not read isn't known to match: to-do stays open
 
         if s.get("config_backup"):
             st = snap.get("backup") or {}
@@ -505,6 +513,7 @@ class MikroTikModule(ApiModule):
             else:
                 add("routeros", OK, "all devices on the newest RouterOS of their channel ("
                     + ", ".join(f"{c} {v}" for c, v in sorted(latest.items())) + ")")
+                out[-1].unknown = bool(snap["errors"])  # a device not read: an open to-do stays open
         return out
 
     def tables(self, snap, s):
