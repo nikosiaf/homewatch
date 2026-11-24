@@ -42,7 +42,8 @@ CHECKS = [
              help="Receive/transmit errors on all ports together in the last hour."),
     CheckDef("reboots", "Reboots (24 h)", "api", warn=2, editable=("warn",),
              help="Reboots in the last 24 hours, all devices together. Each one is also an event and a Grafana marker; "
-                  "WARNING at this many."),
+                  "WARNING at this many. A reboot after which the device runs a different RouterOS or RouterBOOT than "
+                  "before it (a firmware update) is planned: it is named but not counted."),
     CheckDef("firmware", "RouterBOOT", "api", unit="days", warn=14, editable=("warn",), todo=True,
              help="The RouterBOOT firmware is older than the installed RouterOS. Listed under To do; WARNING once it has waited this many days."),
     CheckDef("backup", "Configuration copies", "api",
@@ -316,7 +317,8 @@ class MikroTikModule(ApiModule):
             return out
         for d in self.snap["devices"]:
             booted(prev, f"{d['host']}:boot", self.snap_ts - d["uptime"] if d.get("uptime") else None,
-                   d["name"], d["name"], out)
+                   d["name"], d["name"], out,
+                   {"RouterOS": str(d.get("version") or "").split(" ")[0], "RouterBOOT": d.get("boot")})
             for p in d["ports"]:
                 key, down, up = f"{d['host']}:{p['name']}:down", p.get("last_down"), p.get("last_up")
                 old = prev.get(key)

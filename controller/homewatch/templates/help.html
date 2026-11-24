@@ -87,7 +87,9 @@ less install.sh          # please read it first; it's short (q to quit)
       saw it. When a check starts to recover, every device is read again and the recovery is confirmed in a quick
       extra run about 30 seconds later; problems keep the normal pace, so short blips still stay quiet.</li>
     <li><b>Events, not warnings:</b> one DSL resync or one switch or access point reboot is an event and a Grafana marker.
-      A WARNING comes only when it repeats: 3 resyncs or 2 reboots in 24 hours by default.</li>
+      A WARNING comes only when it repeats: 3 resyncs or 2 reboots in 24 hours by default. A reboot after which the
+      device runs a different version (a MikroTik, UniFi or OPNsense firmware update) is planned: it is not counted,
+      and problems around it are put down to the planned update.</li>
     <li><b>To do:</b> updates and firmware (Home Assistant, PBS, DSM, UniFi, RouterOS and RouterBOOT, OPNsense) are
       things to do, not problems. They are listed under To do on the Status page and in the weekly report, and become a
       WARNING only when they have waited too long: 14 days, 7 for OPNsense and RouterOS (change it under the module's

@@ -21,6 +21,8 @@ import json
 import re
 import time
 
+from .modules import planned_update
+
 RECENT = 15 * 60  # s: a parent's restart or link loss this recent explains a problem behind it
 EVENT_KINDS = ("reboot", "port_down", "restart")
 MAX_DEPTH = 8
@@ -490,6 +492,8 @@ def behind(db, site: str, nodes_of_issue: list[str], now: float) -> tuple[str, b
         en = event_node(nodes, e["module"], e["device"])
         if en and en in above:
             mins = max(0, int((now - e["ts"]) // 60))
+            if fw := planned_update(e["detail"]):
+                return f"behind {nodes[en]['name']}: caused by planned {fw} {mins} min ago", False
             return f"behind {nodes[en]['name']}: {e['detail'].lower()} {mins} min ago", False
     return None
 

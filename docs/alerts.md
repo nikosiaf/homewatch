@@ -13,7 +13,10 @@ Alerting works like this:
   likely cause: a power cut in the area or at home, a modem restart, a line or ISP problem, one of your
   own devices. History lists incidents with their timeline.
 - **Events, not warnings:** a single DSL resync or device reboot is an event and a Grafana marker; a
-  WARNING comes when it repeats (3 resyncs or 2 reboots in 24 h by default).
+  WARNING comes when it repeats (3 resyncs or 2 reboots in 24 h by default). A reboot after which the
+  device runs a different version than before it (a MikroTik, UniFi or OPNsense firmware update) is
+  planned: it isn't counted, and problems around it are put down to the planned update. When the version
+  before or after the reboot isn't known, it counts as an ordinary reboot.
 - **To do instead of problems:** updates and firmware (Home Assistant, Proxmox VE, PBS, DSM, UniFi,
   RouterOS and RouterBOOT, OPNsense, Docker hosts) are listed under To do on the Status page and in the
   weekly report. They become a WARNING only after waiting 14 days (7 for OPNsense and RouterOS); the limit
