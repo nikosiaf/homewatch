@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 OK, WARNING, ERROR = 0, 1, 2
@@ -100,15 +101,36 @@ class DevEvent:
 REBOOT_SLACK = 300  # s: a boot time that moved less than this is the same boot (rounded uptimes, clock drift)
 
 
-def booted(prev: dict, key: str, boot: float | None, device: str, what: str, events: list) -> None:
-    """Remember a device's boot time in prev[key]; a later one is a reboot (the first reading only remembers)."""
+_PLANNED = re.compile(r": (firmware update .+) \(planned\)$")
+
+
+def planned_update(detail: str | None) -> str:
+    """'firmware update RouterOS 7.25.1 -> 7.25.2' when a reboot event's detail says it came with a firmware
+    update (see booted), else ''."""
+    m = _PLANNED.search(detail or "")
+    return m[1] if m else ""
+
+
+def booted(prev: dict, key: str, boot: float | None, device: str, what: str, events: list,
+           versions: dict | None = None) -> None:
+    """Remember a device's boot time in prev[key]; a later one is a reboot (the first reading only remembers).
+    versions: what the device runs now ({"RouterOS": "7.25.2", ...}), remembered in prev[key + ":versions"]; a
+    reboot after which one of them differs from before it was a planned firmware update and says so. A version
+    not read now, or never seen before the reboot, tells nothing: that reboot stays an ordinary one."""
     if not boot:
         return
+    vkey = f"{key}:versions"
+    before = prev.get(vkey) or {}
+    now = {k: str(v).strip() for k, v in (versions or {}).items() if v is not None and str(v).strip()}
     old = prev.get(key)
     if old is not None and boot - old > REBOOT_SLACK:
-        events.append(DevEvent(boot, "reboot", device, f"{what} restarted"))
+        changed = [f"{k} {before[k]} -> {v}" for k, v in now.items() if before.get(k) and before[k] != v]
+        events.append(DevEvent(boot, "reboot", device, f"{what} restarted"
+                               + (f": firmware update {', '.join(changed)} (planned)" if changed else "")))
     if old is None or abs(boot - old) > REBOOT_SLACK:
         prev[key] = boot
+    if now:
+        prev[vkey] = before | now
 
 
 def ago(seconds: float) -> str:
@@ -117,12 +139,19 @@ def ago(seconds: float) -> str:
 
 def reboots(events, uptimes: list[tuple[float, str]], t: Thresholds, now: float, word: str = "reboot"):
     """The "Reboots (24 h)" check from the module's device events: (status, detail, value).
-    uptimes: (seconds, device name) now, for the "shortest uptime" note when nothing rebooted."""
-    seen = sorted((e["ts"], e["device"]) for e in events if e["kind"] == "reboot" and now - e["ts"] <= 86400)
+    uptimes: (seconds, device name) now, for the "shortest uptime" note when nothing rebooted.
+    A reboot for a planned firmware update (see booted) is named but not counted."""
+    recent = [e for e in events if e["kind"] == "reboot" and now - e["ts"] <= 86400]
+    seen = sorted((e["ts"], e["device"]) for e in recent if not planned_update(e.get("detail")))
+    planned = sorted((e["ts"], e["device"]) for e in recent if planned_update(e.get("detail")))
+    note = ("; planned: firmware update on " + ", ".join(f"{dev} {ago(now - ts)}" for ts, dev in planned[-4:])
+            + (" …" if len(planned) > 4 else "")) if planned else ""
     n = len(seen)
     if n:
         what = ", ".join(f"{dev} {ago(now - ts)}" for ts, dev in seen[-4:]) + (" …" if n > 4 else "")
-        return level(n, t), f"{n} {word}{'s' if n != 1 else ''} in 24 h: {what}", n
+        return level(n, t), f"{n} {word}{'s' if n != 1 else ''} in 24 h: {what}{note}", n
+    if planned:
+        return OK, f"no unplanned {word}s in 24 h{note}", 0
     if uptimes:
         up, name = min(uptimes)
         return OK, f"no {word}s in 24 h; shortest uptime {name} {up / 86400:.1f} days", 0
@@ -179,7 +208,7 @@ class Module:
     transport_keys = ("https", "verify")  # settings that protect them on the way, on or off
     icon = "server"  # the Status page tile's line icon (static/icons in _icons.html)
     headline: tuple[str, str] = ("", "")  # (check id, label): the number the Status tile shows big, with its 24 h line
-    events_24h: tuple = ()  # this module's device events of the last 24 h (ts, device, kind), set before each evaluate
+    events_24h: tuple = ()  # this module's device events of the last 24 h (ts, device, kind, detail), set each run
 
     def series(self, site: str) -> list[str]:
         """The latest reading as detailed metrics (Influx line protocol, one line per device/port/guest...),

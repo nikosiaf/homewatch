@@ -12,6 +12,8 @@ import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from .modules import planned_update
+
 BEFORE = 10 * 60  # s: device events this long before the incident's first sign still count
 AFTER = 20 * 60  # s: and this long after its end (a line re-syncs a while after the power is back)
 INTERNET = ("internet.", "speedport.", "opnsense.gateways")
@@ -100,7 +102,7 @@ def classify(db, site: str, start: float, end: float | None, keys: list[str], zo
         cause, side = f"The modem restarted at {t(modem)} (no power cut at home)", HOME
     elif firewall or host:
         e = min((x for x in (firewall, host) if x), key=lambda x: x["ts"])
-        cause, side = f"{e['detail']} at {t(e)}: a local cause, your own equipment", HOME
+        cause, side = _planned(e, e["device"], t) or f"{e['detail']} at {t(e)}: a local cause, your own equipment", HOME
     elif internet and line:
         cause = f"The DSL line dropped and re-synced at {t(line)} with no power cut at home: a line or ISP-side problem"
         side = ISP
@@ -108,14 +110,21 @@ def classify(db, site: str, start: float, end: float | None, keys: list[str], zo
         cause, side = "The internet stopped answering while the DSL line stayed up: a problem in the ISP's network", ISP
     elif (parent := _parent_event(db, site, evs, nodes)):
         e, name, n = parent
-        cause = (f"{name}: {e['detail'].lower()} at {t(e)}, and {n} device{'s' if n != 1 else ''} behind it "
-                 "went with it")
+        went = f"{n} device{'s' if n != 1 else ''} behind it went with it"
+        cause = (f"{_planned(e, name, t)}, and {went}" if planned_update(e["detail"])
+                 else f"{name}: {e['detail'].lower()} at {t(e)}, and {went}")
         side = HOME
     elif (other := first("reboot")):
-        cause, side = f"{other['detail']} at {t(other)}", HOME
+        cause, side = _planned(other, other["device"], t) or f"{other['detail']} at {t(other)}", HOME
     else:
         cause, side = "", UNKNOWN
     return cause, side, evidence
+
+
+def _planned(e, name: str, t) -> str:
+    """The cause for a reboot that came with a planned firmware update (see modules.booted); '' for any other."""
+    fw = planned_update(e["detail"])
+    return f"Caused by planned {fw} on {name} at {t(e)}" if fw else ""
 
 
 def _line_watched(db, site: str, start: float, end: float | None) -> bool:

@@ -221,7 +221,7 @@ user on every device). The device's `www` service must allow the homeWatch host.
 | CPU / memory / temperature | ≥ 85 % / 90 % / 60 °C | ≥ 95 % / 95 % / 70 °C |
 | Ports up (the ones you choose) | | a chosen port down |
 | Port errors in the last hour | ≥ 10 | ≥ 1000 |
-| Reboots in 24 h (each one is a Grafana marker) | ≥ 2 | |
+| Reboots in 24 h (each one is a Grafana marker; one with a new RouterOS or RouterBOOT is planned and not counted) | ≥ 2 | |
 | RouterBOOT (to do) | older than the installed RouterOS for 14 days | |
 | RouterOS updates (option, to do) | a newer RouterOS for the device's channel, waiting 7 days | |
 | Configuration copies (option) | no good copy for 2 days | |
@@ -254,7 +254,7 @@ Reads the devices of a UniFi Network application (UniFi OS Server or a UniFi con
 | Devices online (the ones you choose) | upgrading or provisioning | disconnected, heartbeat missed |
 | CPU (busiest watched device) | ≥ 90 % | |
 | Wi-Fi | WLAN subsystem not OK | |
-| Restarts in 24 h (each one is a Grafana marker) | ≥ 2 | |
+| Restarts in 24 h (each one is a Grafana marker; one with a new firmware is planned and not counted) | ≥ 2 | |
 | Firmware (to do) | update available for 14 days | |
 | Watched devices online (the ones under **Must be online**) | not seen by UniFi for more than 30 min | not seen for more than the ERROR limit (off until you set one) |
 

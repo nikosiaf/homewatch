@@ -19,7 +19,8 @@ CHECKS = [
     CheckDef("wifi", "Wi-Fi", "api", help="WARNING when UniFi reports the WLAN subsystem as not OK."),
     CheckDef("reboots", "Restarts (24 h)", "api", warn=2, editable=("warn",),
              help="Device restarts in the last 24 hours, all watched devices together. Each one is also an event and "
-                  "a Grafana marker; WARNING at this many."),
+                  "a Grafana marker; WARNING at this many. A restart after which the device runs a different firmware "
+                  "than before it (a firmware update) is planned: it is named but not counted."),
     CheckDef("firmware", "Firmware", "api", unit="days", warn=14, editable=("warn",), todo=True,
              help="A device has a firmware update. Listed under To do; WARNING once it has waited this many days."),
     CheckDef("watched", "Watched devices online", "api", unit="min", warn=30, editable=("error",),
@@ -187,7 +188,8 @@ class UniFiModule(ApiModule):
             return out
         for d in self.snap["devices"]:
             if d.get("state") == 1 and d.get("uptime"):
-                booted(prev, d.get("mac") or d["name"], self.snap_ts - float(d["uptime"]), d["name"], d["name"], out)
+                booted(prev, d.get("mac") or d["name"], self.snap_ts - float(d["uptime"]), d["name"], d["name"], out,
+                       {"UniFi": d.get("version")})
         return out
 
     def series(self, site: str) -> list[str]:

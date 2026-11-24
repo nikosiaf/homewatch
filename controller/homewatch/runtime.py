@@ -265,7 +265,7 @@ class Runtime:
             try:
                 got = await asyncio.wait_for(m.readings(self, s, now), MODULE_LIMIT)
                 m.events_24h = tuple(dict(e) for e in self.db.all(
-                    "SELECT ts, device, kind FROM events WHERE site=? AND module=? AND ts>?",
+                    "SELECT ts, device, kind, detail FROM events WHERE site=? AND module=? AND ts>?",
                     (self.cfg.site, m.id, now - 86400)))
                 mine = todo.apply(self.db, self.cfg.site, m, th, m.evaluate(s, th, got), now)
             except MetricsError as e:  # our own store, not this module's device: keep what the module last showed

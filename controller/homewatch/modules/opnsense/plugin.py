@@ -187,7 +187,10 @@ class OPNsenseModule(ApiModule):
             return out
         name = (self.snap.get("info") or {}).get("name") or "OPNsense"
         up = uptime_s((self.snap.get("time") or {}).get("uptime"))
-        booted(prev, "boot", self.snap_ts - up if up else None, name, f"Firewall {name}", out)
+        versions = (self.snap.get("info") or {}).get("versions") or []
+        version = next((v for v in versions if str(v).startswith("OPNsense ")), "")
+        booted(prev, "boot", self.snap_ts - up if up else None, name, f"Firewall {name}", out,
+               {"OPNsense": version.removeprefix("OPNsense ")})
         logs = self.snap.get("logs") or {}
         out += log_events(logs, self.snap.get("tz_offset"), name, prev, self.snap_ts)
         gws = prev.setdefault("gateways", {})
