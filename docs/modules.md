@@ -254,7 +254,7 @@ Reads the devices of a UniFi Network application (UniFi OS Server or a UniFi con
 | Devices online (the ones you choose) | upgrading or provisioning | disconnected, heartbeat missed |
 | CPU (busiest watched device) | ≥ 90 % | |
 | Wi-Fi | WLAN subsystem not OK | |
-| Restarts in 24 h (each one is a Grafana marker) | ≥ 2 | |
+| Restarts in 24 h (each one is a Grafana marker; one with a new firmware is planned and not counted) | ≥ 2 | |
 | Firmware (to do) | update available for 14 days | |
 | Watched devices online (the ones under **Must be online**) | not seen by UniFi for more than 30 min | not seen for more than the ERROR limit (off until you set one) |
 
